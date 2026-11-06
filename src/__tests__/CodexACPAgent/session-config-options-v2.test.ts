@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import * as acp from '@agentclientprotocol/sdk';
-import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
+import * as acp from '@agentclientprotocol/sdk/unstable';
+import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {createAcpAgentRouter} from '../../AcpAgentRouter';
 import {ACPSessionConnection, AcpV2Connection} from '../../ACPSessionConnection';
 import {AgentMode, MODE_CONFIG_ID} from '../../AgentMode';
@@ -91,7 +91,7 @@ describe('Session config options over ACP v2', () => {
         closeClient = () => connection.close();
 
         // @ts-expect-error - private method, called directly to test the response shape in isolation
-        const response = agent.createSessionConfigOptionsResponseV2(sessionState);
+        const response = agent.createSessionSetupResponseV2(sessionState);
 
         await expect(dump(response)).toMatchFileSnapshot('data/session-config-options-v2-list.json');
     });
@@ -153,21 +153,43 @@ describe('Session config options over ACP v2', () => {
             .toMatchFileSnapshot('data/session-config-options-v2-set.json');
     });
 
-    it('rejects a set_config_option value that does not match its type', async () => {
+    it('lists and selects allowed custom permission profiles over v2', async () => {
+        const {connection, sessionState} = await connectV2Client();
+        closeClient = () => connection.close();
+        sessionState.availableAgentModes = AgentMode.all([
+            {id: ":workspace", description: "Built-in workspace", allowed: true},
+            {id: "blocked", description: "Blocked by requirements", allowed: false},
+            {id: "team-default", description: "Team default permissions", allowed: true},
+        ], "never", "user");
+
+        const response = await connection.agent.request(acpV2.methods.agent.session.setConfigOption, {
+            sessionId: sessionState.sessionId,
+            configId: MODE_CONFIG_ID,
+            type: "id",
+            value: "permission-profile:team-default",
+        });
+
+        expect(sessionState.agentMode).toMatchObject({
+            permissionProfileId: "team-default",
+            approvalPolicy: "never",
+            approvalsReviewer: "user",
+        });
+        await expect(dump(response.configOptions.find(option => option.configId === MODE_CONFIG_ID)))
+            .toMatchFileSnapshot('data/session-config-options-v2-permission-profile.json');
+    });
+
+    it.each([
+        {configId: MODE_CONFIG_ID, type: "boolean", value: true},
+        {configId: FAST_MODE_CONFIG_ID, type: "_custom", value: true},
+        {configId: FAST_MODE_CONFIG_ID, type: "id", value: "on"},
+        {configId: "missing", type: "id", value: "anything"},
+    ] as const)('rejects a value type that does not match the advertised option: $configId/$type', async params => {
         const {connection, sessionState} = await connectV2Client();
         closeClient = () => connection.close();
 
         await expect(connection.agent.request(acpV2.methods.agent.session.setConfigOption, {
             sessionId: sessionState.sessionId,
-            configId: MODE_CONFIG_ID,
-            type: "boolean",
-            value: true,
-        })).rejects.toMatchObject({code: -32602});
-        await expect(connection.agent.request(acpV2.methods.agent.session.setConfigOption, {
-            sessionId: sessionState.sessionId,
-            configId: FAST_MODE_CONFIG_ID,
-            type: "_custom",
-            value: true,
+            ...params,
         })).rejects.toMatchObject({code: -32602});
         expect(sessionState.agentMode).toBe(AgentMode.DEFAULT_AGENT_MODE);
         expect(sessionState.fastModeEnabled).toBe(false);

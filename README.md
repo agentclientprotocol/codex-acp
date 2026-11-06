@@ -9,13 +9,15 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 ## Features
 
 - ChatGPT, API key, and client-provided custom gateway authentication.
-- Model, reasoning effort, fast mode, approval, and sandbox mode configuration.
+- Model, reasoning effort, fast mode, approval, sandbox mode, and configured [Codex permission profile](docs/permission-profiles.md) selection.
 - Concrete recommended model and reasoning-effort values through the opt-in [AIR recommended config values](docs/air-extensions.md#recommended-config-values) capability.
 - Text prompts, embedded context, images, resource links, and additional workspace directories.
 - Shell command, file change, [permission request](docs/air-extensions.md#permission-presentation), MCP tool call, terminal output, reasoning, plan, web search, image generation, image view, token usage, and review events.
 - Compact file changes through the negotiated [AIR diff patch extension](docs/air-extensions.md#diff-patch).
 - For AIR, one tool call shape with each fact in one field, as the [tool call contract](docs/air-extensions.md#tool-call-contract) defines. Other clients keep the earlier fields.
 - [Native ACP subagent sessions](docs/subagent-sessions.md) (after capability negotiation) with separate child histories and root-routed permissions; a legacy tool-call fallback otherwise.
+- Mid-turn input through the [_session/steering extension](docs/steering.md), with an opt-in host-owned fallback when no turn can accept it.
+- [Async Codex questions](docs/async-questions.md) as non-blocking form elicitations, with answers steered into the turn that asked them.
 - [Background terminal tasks](docs/air-extensions.md#async-tasks) in AIR, with task status and targeted stop support after capability negotiation.
 - Session-scoped long-running goals in AIR through the [goal extension](docs/air-extensions.md#goal).
 - In-place message editing in AIR through the [session rewind extension](docs/air-extensions.md#session-rewind), without a provider fork.
@@ -72,7 +74,7 @@ The adapter advertises ACP auth methods during initialization. Clients can authe
 - `CODEX_CONFIG` - JSON object merged into the Codex session config.
 - `MODEL_PROVIDER` - model provider to pass to Codex for new sessions.
 - `DEFAULT_AUTH_REQUEST` - ACP auth request JSON used when Codex requires authentication.
-- `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `workspace-write`, `agent`, or `agent-full-access`.
+- `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `workspace-write`, `agent`, `agent-full-access`, or `permission-profile:<profile-id>`.
 - `NO_BROWSER` - hide browser-based ChatGPT auth when set.
 - `APP_SERVER_LOGS` - directory for adapter logs.
 

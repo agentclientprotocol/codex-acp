@@ -1,5 +1,5 @@
-import type {SessionConfigOption} from "@agentclientprotocol/sdk";
-import type * as acp from "@agentclientprotocol/sdk";
+import type {SessionConfigOption} from "@agentclientprotocol/sdk/unstable";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import type {ServiceTier} from "./app-server/ServiceTier";
 import type {Model} from "./app-server/v2";
 

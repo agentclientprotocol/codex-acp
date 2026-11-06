@@ -30,10 +30,29 @@
     "codexResponse": "turn/start"
   },
   {
+    "sessionUpdate": {
+      "state": "running",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
     "codexNotification": "turn/started"
   },
   {
     "codexNotification": "turn/completed"
+  },
+  {
+    "sessionUpdate": {
+      "stopReason": "end_turn",
+      "_meta": {
+        "quota": {
+          "token_count": null,
+          "model_usage": []
+        }
+      },
+      "state": "idle",
+      "sessionUpdate": "state_update"
+    }
   },
   {
     "promptError": {

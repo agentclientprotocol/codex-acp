@@ -1,6 +1,6 @@
 // The model asks to run a shell command; the test user allows or rejects it.
 // Read-only mode + `require_escalated` make Codex ask for permission before running it.
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import fs from "node:fs";
 import path from "node:path";
 import {afterEach, beforeEach, expect, it} from "vitest";

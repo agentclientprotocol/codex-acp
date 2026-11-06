@@ -1,6 +1,6 @@
 import {describe, expect, it, vi} from 'vitest';
-import type * as acp from '@agentclientprotocol/sdk';
-import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
+import type * as acp from '@agentclientprotocol/sdk/unstable';
+import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {createCodexMockTestFixture, createTestModel} from '../acp-test-utils';
 import type {AcpMcpServer} from '../../McpServerConfig';
 
@@ -8,13 +8,15 @@ import type {AcpMcpServer} from '../../McpServerConfig';
  * Starts a session with the given MCP servers and returns the `mcp_servers` config
  * sent to Codex `thread/start`.
  */
-async function startSessionWithMcpServers(mcpServers: Array<AcpMcpServer> | undefined) {
+async function startSessionWithMcpServers(mcpServers: Array<AcpMcpServer> | undefined, configuredNames: string[] = []) {
     const mockFixture = createCodexMockTestFixture();
     const codexAcpClient = mockFixture.getCodexAcpClient();
     const codexAppServerClient = mockFixture.getCodexAppServerClient();
 
     vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
-    vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({config: {}, origins: {}, layers: []} as any);
+    vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({
+        config: {mcp_servers: Object.fromEntries(configuredNames.map(name => [name, {}]))}, origins: {}, layers: [],
+    } as any);
     const threadStartSpy = vi.spyOn(codexAppServerClient, "threadStart").mockResolvedValue({
         thread: {id: "thread-id"} as any,
         model: "gpt-5",
@@ -92,5 +94,28 @@ describe('MCP server config from ACP v1 and v2 session requests', () => {
 
         await expect(JSON.stringify(rejections, null, 2))
             .toMatchFileSnapshot("data/mcp-config-unsupported-transports.json");
+    });
+
+    it('rejects an unsupported transport even when its name is already configured', async () => {
+        await expect(startSessionWithMcpServers([
+            {type: "sse", name: "existing", url: "https://example.com/sse", headers: []},
+        ], ["existing"])).rejects.toMatchObject({code: -32602});
+    });
+
+    it.each([
+        ["v1", undefined, "files"],
+        ["v2", "stdio", "files"],
+        ["sanitized collision", "stdio", "file server"],
+    ])('rejects duplicate names before configured-server filtering: %s', async (_label, type, name) => {
+        const server = {name, command: "mcp-fs", args: [], env: [], ...(type ? {type} : {})} as AcpMcpServer;
+        const duplicate = {...server, name: name.replace(/ /g, "_")} as AcpMcpServer;
+        await expect(startSessionWithMcpServers([server, duplicate], [duplicate.name as string]))
+            .rejects.toMatchObject({code: -32602, data: {name: duplicate.name}});
+    });
+
+    it('uses the last stdio environment entry with a repeated name', async () => {
+        const config = await startSessionWithMcpServers([{type: "stdio", name: "files", command: "mcp-fs",
+            env: [{name: "EXAMPLE", value: "first"}, {name: "EXAMPLE", value: "last"}]}]);
+        expect(config).toMatchObject({files: {env: {EXAMPLE: "last"}}});
     });
 });

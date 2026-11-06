@@ -1,8 +1,12 @@
 import path from "node:path";
 
+/** ACP paths are native POSIX or fully qualified Windows paths, never file URIs. */
+export function isAbsoluteProtocolPath(value: string): boolean {
+    return !value.includes("\0") && (path.posix.isAbsolute(value) || isWindowsAbsolutePath(value));
+}
+
 export function isAbsolutePathLike(value: string): boolean {
-    const trimmed = value.trim();
-    return path.isAbsolute(trimmed) || isWindowsAbsolutePath(trimmed);
+    return isAbsoluteProtocolPath(value.trim());
 }
 
 export function arePathsEqual(left: string, right: string): boolean {

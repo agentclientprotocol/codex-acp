@@ -1,5 +1,5 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
+import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import type {ServerNotification} from '../../app-server';
 import type {ThreadItem} from '../../app-server/v2';
 import {
@@ -102,6 +102,54 @@ describe('tool calls and messages over ACP v2', () => {
         expect(["item-reasoning", "item-agent"]).not.toContain(mintedId);
         await expect(dump(chunks).replaceAll(mintedId, "<minted-messageId>"))
             .toMatchFileSnapshot('data/tool-calls-and-messages-v2-message-ids.json');
+    });
+
+    it('renders Codex file citations split across deltas as Markdown file links', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+        await startTurn(client);
+
+        const emitDelta = (delta: string) => client.emit({
+            method: "item/agentMessage/delta",
+            params: {threadId: sessionId, turnId, itemId: "item-agent", delta},
+        });
+        emitDelta("See :codex-file-cita");
+        emitDelta("tion{path=\"src/a.ts\" purpose=\"source\"}. Unfinished: :codex-fi");
+        client.emit(itemCompleted({
+            type: "agentMessage",
+            id: "item-agent",
+            text: "",
+            phase: null,
+            memoryCitation: null,
+            delivery: null,
+            questions: null,
+        }));
+        await finishTurn(client);
+
+        await expect(dump(updatesTagged(client, "agent_message_chunk")))
+            .toMatchFileSnapshot('data/tool-calls-and-messages-v2-file-citations.json');
+    });
+
+    it('sends an agent message that arrives whole, without deltas', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+        await startTurn(client);
+
+        const item: ThreadItem = {
+            type: "agentMessage",
+            id: "call-question",
+            text: "Which environment?\n- Staging\n- Production",
+            phase: "final_answer",
+            memoryCitation: null,
+            delivery: "async",
+            questions: [{title: "Which environment?", options: ["Staging", "Production"]}],
+        };
+        client.emit(itemStarted(item));
+        client.emit(itemCompleted(item));
+        await finishTurn(client);
+
+        await expect(dump(updatesTagged(client, "agent_message_chunk")))
+            .toMatchFileSnapshot('data/tool-calls-and-messages-v2-without-deltas.json');
     });
 
     it('sends a tool call create as a tool_call_update upsert and passes later updates through', async () => {

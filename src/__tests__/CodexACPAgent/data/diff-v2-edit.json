@@ -14,7 +14,7 @@
         ],
         "patch": {
           "format": "git_patch",
-          "text": "diff --git a/workspace/edit.ts b/workspace/edit.ts\n--- a/workspace/edit.ts\n+++ b/workspace/edit.ts\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n"
+          "text": "diff --git /workspace/edit.ts /workspace/edit.ts\n--- /workspace/edit.ts\n+++ /workspace/edit.ts\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n"
         },
         "_meta": {
           "kind": "update"

@@ -10,7 +10,7 @@ import type {CodexAcpServer} from "../../CodexAcpServer";
 import type {CodexAcpClient, SessionMetadata} from "../../CodexAcpClient";
 import type {McpStartupResult} from "../../mcp/McpStartupTracker";
 import type {TurnStartResponse} from "../../app-server/v2";
-import type {McpServer} from "@agentclientprotocol/sdk";
+import type {McpServer} from "@agentclientprotocol/sdk/unstable";
 
 const sessionId = "session-id";
 
@@ -101,7 +101,7 @@ describe("ACP session close", () => {
 
         const requestMethods = fixture.getCodexConnectionEvents([])
             .flatMap(event => event.eventType === "request" ? [event.method] : []);
-        expect(requestMethods).toEqual(["thread/unsubscribe"]);
+        expect(requestMethods).toEqual(["thread/backgroundTerminals/list", "thread/unsubscribe"]);
         expect(() => codexAcpAgent.getSessionState(sessionId)).toThrow(`Session ${sessionId} not found`);
 
         fixture.clearCodexConnectionDump();
@@ -281,7 +281,7 @@ describe("ACP session close", () => {
         await codexAcpAgent.closeSession({sessionId});
         await waitForMicrotasks();
 
-        expect(fixture.getAcpConnectionEvents([]).map(event => event.method)).toEqual(["createElicitation", "completeElicitation"]);
+        expect(fixture.getAcpConnectionEvents([]).map(event => event.method)).toEqual(["createElicitation"]);
     });
 
     it("rejects an in-flight resume that completes after close", async () => {
@@ -564,6 +564,7 @@ function createTurnStartResponse(turnId: string): TurnStartResponse {
         turn: {
             id: turnId,
             items: [],
+            rootTurnId: null,
             itemsView: "notLoaded",
             status: "inProgress",
             error: null,
@@ -578,6 +579,7 @@ function createCompletedTurn(turnId: string): TurnStartResponse["turn"] {
     return {
         id: turnId,
         items: [],
+        rootTurnId: null,
         itemsView: "notLoaded",
         status: "completed",
         error: null,

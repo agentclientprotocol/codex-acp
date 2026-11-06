@@ -1,4 +1,4 @@
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {describe, expect} from "vitest";
 import {AgentMode} from "../../AgentMode";
 import {ModelId} from "../../ModelId";
@@ -31,7 +31,7 @@ export async function spawnAgent(mode: AgentMode = AgentMode.ReadOnly): Promise<
 
 /** ACP `initialize` + `authenticate` over the agent's stdin/stdout; `gateway` points Codex's model calls at the mock. */
 export async function connectAndLogin(agent: SpawnedAgentFixture, mockBaseUrl: string): Promise<void> {
-    await agent.connection.initialize({
+    await agent.connection.request(acp.methods.agent.initialize, {
         protocolVersion: acp.PROTOCOL_VERSION,
         clientCapabilities: {
             fs: {readTextFile: true, writeTextFile: true},
@@ -40,7 +40,7 @@ export async function connectAndLogin(agent: SpawnedAgentFixture, mockBaseUrl: s
         },
         clientInfo: {name: "vitest", version: "1.0.0"},
     });
-    await agent.connection.authenticate({
+    await agent.connection.request(acp.methods.agent.authenticate, {
         methodId: "gateway",
         _meta: {gateway: {baseUrl: mockBaseUrl, headers: {}}},
     });
@@ -71,7 +71,7 @@ export function answerPermissions(agent: SpawnedAgentFixture, kind: acp.ToolKind
 
 /** ACP `session/prompt`; resolves when the turn ends. */
 export async function sendPrompt(agent: SpawnedAgentFixture, sessionId: string, text: string): Promise<acp.PromptResponse> {
-    return await agent.connection.prompt({sessionId, prompt: [{type: "text", text}]});
+    return await agent.connection.request(acp.methods.agent.session.prompt, {sessionId, prompt: [{type: "text", text}]});
 }
 
 // ---- What the client received ----

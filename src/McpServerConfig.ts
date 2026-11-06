@@ -1,7 +1,8 @@
-import type * as acp from "@agentclientprotocol/sdk";
-import {RequestError} from "@agentclientprotocol/sdk";
-import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
+import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import type {JsonObject} from "./CodexAcpClient";
+import {sanitizeMcpServerName} from "./McpServerName";
 
 /**
  * An MCP server entry from an ACP v1 or v2 session request.
@@ -33,6 +34,18 @@ export function getMcpServerName(server: AcpMcpServer): string {
     return typeof server.name === "string" ? server.name : "";
 }
 
+/** Validate the whole request before filtering out servers configured independently of ACP. */
+export function normalizeMcpServers(servers: AcpMcpServer[]): NormalizedMcpServer[] {
+    const names = new Set<string>();
+    return servers.map(server => {
+        const name = sanitizeMcpServerName(getMcpServerName(server));
+        // Codex keys servers by the sanitized name, so collisions must not silently overwrite one.
+        if (names.has(name)) throw RequestError.invalidParams({name: getMcpServerName(server)}, "MCP server names must be unique");
+        names.add(name);
+        return {...normalizeMcpServer(server), name};
+    });
+}
+
 /**
  * Converts a v1 or v2 MCP server entry into one shape, rejecting transports Codex can't run.
  */
@@ -57,12 +70,12 @@ export function normalizeMcpServer(server: AcpMcpServer): NormalizedMcpServer {
             return {type: "http", name: http.name, url: http.url, headers: http.headers ?? []};
         }
         case "acp":
-            throw RequestError.invalidRequest("Codex doesn't support MCP ACP transport protocol");
+            throw RequestError.invalidParams(undefined, "Codex doesn't support MCP ACP transport protocol");
         case "sse":
-            throw RequestError.invalidRequest("Codex doesn't support MCP SSE transport protocol");
+            throw RequestError.invalidParams(undefined, "Codex doesn't support MCP SSE transport protocol");
         default:
             // v2 allows custom and future transport types.
-            throw RequestError.invalidRequest(`Codex doesn't support MCP '${server.type}' transport protocol`);
+            throw RequestError.invalidParams(undefined, `Codex doesn't support MCP '${server.type}' transport protocol`);
     }
 }
 

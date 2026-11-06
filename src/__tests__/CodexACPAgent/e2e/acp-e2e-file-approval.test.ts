@@ -1,4 +1,4 @@
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import fs from "node:fs";
 import path from "node:path";
 import {afterEach, beforeEach, expect, it, onTestFinished, vi} from "vitest";
@@ -78,7 +78,7 @@ describeE2E("E2E switching to read-only mode file permission tests", () => {
     it("does not apply a rejected workspace edit after setSessionMode succeeds", async () => {
         const session = await fixture.createSession();
         expect(session.modes?.currentModeId).toBe(AgentMode.WorkspaceWrite.id);
-        await fixture.connection.setSessionMode({
+        await fixture.connection.request(acp.methods.agent.session.setMode, {
             sessionId: session.sessionId,
             modeId: AgentMode.ReadOnly.id,
         });
@@ -142,7 +142,7 @@ async function askAgentToEditFile(
     existingSessionId?: string,
 ): Promise<EditFileTurn> {
     const sessionId = existingSessionId ?? (await fixture.createSession()).sessionId;
-    const response = await fixture.connection.prompt({
+    const response = await fixture.connection.request(acp.methods.agent.session.prompt, {
         sessionId,
         prompt: [{
             type: "text",

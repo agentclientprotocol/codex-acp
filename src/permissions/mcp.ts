@@ -1,4 +1,4 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import type {JsonValue} from "../app-server/serde_json/JsonValue";
 import type {
     McpServerElicitationRequestParams,

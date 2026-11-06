@@ -15,7 +15,7 @@
         ],
         "patch": {
           "format": "git_patch",
-          "text": "diff --git a/workspace/old-name.ts b/workspace/new-name.ts\nrename from workspace/old-name.ts\nrename to workspace/new-name.ts\n--- a/workspace/old-name.ts\n+++ b/workspace/new-name.ts\n@@ -1 +1 @@\n-old code line\n+new code line\n"
+          "text": "diff --git /workspace/old-name.ts /workspace/new-name.ts\nrename from /workspace/old-name.ts\nrename to /workspace/new-name.ts\n--- /workspace/old-name.ts\n+++ /workspace/new-name.ts\n@@ -1 +1 @@\n-old code line\n+new code line\n"
         },
         "_meta": {
           "kind": "update"

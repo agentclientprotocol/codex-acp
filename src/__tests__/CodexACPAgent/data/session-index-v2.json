@@ -8,6 +8,7 @@
     "recommendedValue",
     "sessionRewind",
     "sessionIndex",
+    "sessionBatchGet",
     "sessionArchive",
     "sessionRename",
     "sessionListSubscribe",

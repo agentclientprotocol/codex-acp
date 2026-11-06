@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import * as acp from '@agentclientprotocol/sdk';
-import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
+import * as acp from '@agentclientprotocol/sdk/unstable';
+import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {createAcpAgentRouter} from '../../AcpAgentRouter';
 import {CodexAcpServer} from '../../CodexAcpServer';
 import {CodexAcpClient, OPENAI_PROVIDER_ID} from '../../CodexAcpClient';

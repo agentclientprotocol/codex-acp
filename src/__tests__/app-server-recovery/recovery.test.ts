@@ -1,4 +1,4 @@
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {describe, expect, it, vi} from "vitest";
 import {ConnectionError, ConnectionErrors, ResponseError} from "vscode-jsonrpc/node";
 import {createRecoveryFixture, defaultAnswer, initialize, MODEL, type RecoveryFixture, requestsOf} from "./recovery-fixture";
@@ -517,6 +517,85 @@ describe("app-server recovery", () => {
         await expect(prompt).resolves.toMatchObject({stopReason: "end_turn"});
     });
 
+    it("keeps a session without messages when providers/set repeats the applied routing", async () => {
+        const fixture = createRecoveryFixture();
+        await initialize(fixture);
+        const provider = {providerId: "openai", apiType: "openai" as const, baseUrl: "https://gateway.example/v1", headers: {"X-Key": "k"}};
+        await fixture.agent.setProvider(provider);
+        const {sessionId} = await fixture.agent.newSession({cwd: "/work", mcpServers: []});
+
+        await fixture.agent.setProvider({...provider, headers: {...provider.headers}});
+
+        // The first providers/set started the app-server with the gateway; the repeat started none.
+        expect(fixture.servers).toHaveLength(2);
+        const {prompt} = await startTurn(fixture, sessionId);
+        completeTurn(fixture, sessionId);
+        await expect(prompt).resolves.toMatchObject({stopReason: "end_turn"});
+        await fixture.agent.setProvider({...provider, headers: {"X-Key": "rotated"}});
+        expect(fixture.servers).toHaveLength(3);
+        expect(fixture.launches.at(-1)!.env).toEqual({CODEX_ACP_PROVIDER_HEADER_0: "codex", CODEX_ACP_PROVIDER_HEADER_1: "rotated"});
+    });
+
+    it("starts the app-server with the provider of the gateway routing, also without sessions", async () => {
+        const fixture = createRecoveryFixture();
+        await initialize(fixture);
+        const provider = {providerId: "openai", apiType: "openai" as const, baseUrl: "https://gateway.example/v1", headers: {"X-Key": "secret"}};
+
+        await fixture.agent.setProvider(provider);
+        await fixture.agent.newSession({cwd: "/work", mcpServers: []});
+        await fixture.agent.disableProvider({providerId: "openai"});
+        await fixture.agent.disableProvider({providerId: "openai"});
+
+        // The thread starts on the app-server that runs with its provider.
+        expect(requestsOf(fixture.servers[1]!, "thread/start")).toEqual([expect.objectContaining({modelProvider: "custom-gateway"})]);
+        expect(fixture.launches.some(launch => launch.args.some(arg => arg.includes("secret")))).toBe(false);
+        await expect(`${JSON.stringify(fixture.launches, null, 2)}\n`)
+            .toMatchFileSnapshot("data/provider-launches.json");
+    });
+
+    it("restarts the app-server once with the provider of the gateway auth method", async () => {
+        const fixture = createRecoveryFixture();
+        await initialize(fixture);
+        const gateway = {
+            methodId: "gateway",
+            _meta: {gateway: {baseUrl: "https://gateway.internal/openai", headers: {Authorization: "Bearer k"}, providerName: "Corp"}},
+        } as acp.AuthenticateRequest;
+
+        await fixture.agent.authenticate(gateway);
+        await fixture.agent.authenticate(gateway);
+        expect(fixture.launches).toHaveLength(1);
+        expect(fixture.launches[0]!.args).toContain('model_provider="custom-gateway"');
+        await fixture.agent.newSession({cwd: "/work", mcpServers: []});
+        expect(requestsOf(fixture.current(), "thread/start")).toEqual([expect.objectContaining({modelProvider: "custom-gateway"})]);
+
+        fixture.answers.set("account/login/start", (_params, server) => {
+            setImmediate(() => server.rpc.notify({method: "account/login/completed", params: {loginId: null, success: true, error: null}}));
+            return {type: "apiKey"};
+        });
+        await fixture.agent.authenticate({methodId: "api-key", _meta: {"api-key": {apiKey: "sk-test"}}} as acp.AuthenticateRequest);
+        expect(fixture.launches.at(-1)).toEqual({args: ["app-server"], env: {}});
+    });
+
+    it("answers a repeated providers/set only after the provider update in flight for it", async () => {
+        const fixture = createRecoveryFixture();
+        const sessionId = await openSession(fixture);
+        fixture.answers.set("thread/resume", () => undefined);
+        const provider = {providerId: "openai", apiType: "openai" as const, baseUrl: "https://gateway.example/v1"};
+        const first = fixture.agent.setProvider(provider);
+        await vi.waitFor(() => expect(fixture.servers.length === 2 && fixture.current().rpc.hasPending("thread/resume")).toBe(true));
+
+        let repeatedDone = false;
+        const repeated = fixture.agent.setProvider(provider).then(() => {
+            repeatedDone = true;
+        });
+        await new Promise(resolve => setTimeout(resolve, 10));
+        expect(repeatedDone).toBe(false);
+
+        fixture.current().rpc.resolve("thread/resume", resumed(sessionId));
+        await Promise.all([first, repeated]);
+        expect(fixture.servers).toHaveLength(2);
+    });
+
     it("keeps the provider routing of the agent across a crash restart", async () => {
         const fixture = createRecoveryFixture();
         await initialize(fixture);
@@ -527,6 +606,8 @@ describe("app-server recovery", () => {
 
         expect(fixture.agent.listProviders({}).providers[0]!.current).toEqual({apiType: "openai", baseUrl: "https://gateway.example/v1"});
         expect(requestsOf(fixture.current(), "thread/start")).toEqual([expect.objectContaining({modelProvider: "custom-gateway"})]);
+        expect(fixture.launches.at(-1)).toEqual(fixture.launches.at(-2));
+        expect(fixture.launches.at(-1)!.args).toContain('model_provider="custom-gateway"');
     });
 
     it("joins the resume in flight when a second use comes after the restart", async () => {

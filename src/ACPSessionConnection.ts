@@ -1,13 +1,17 @@
-import * as acp from "@agentclientprotocol/sdk";
-import * as acpV2 from "@agentclientprotocol/sdk/experimental/v2";
+import * as acp from "@agentclientprotocol/sdk/unstable";
+import * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import {
+    type AcpSessionNotification,
     type AcpSessionUpdate,
     asSdkSessionNotification,
 } from "./AcpSessionExtensions";
 import {toV2SessionUpdates} from "./AcpV2SessionUpdate";
+import {toV2ReplayUpdates} from "./AcpV2Replay";
 import {toV1RequestPermissionResponse, toV2RequestPermissionRequest} from "./AcpV2Permissions";
 import {elicitationSessionId, toV1CreateElicitationResponse, toV2CreateElicitationRequest} from "./AcpV2Elicitation";
-import {logger} from "./Logger";
+import {AcpV2ForegroundState} from "./AcpV2ForegroundState";
+import {AcpV2SessionInfo, type SessionInfoFields, type SessionMetadataPatch} from "./AcpV2SessionInfo";
+import {type AcpClientDelivery, clientNotificationSessionId, clientRequestSessionId} from "./AcpClientDelivery";
 
 export type AcpClientConnection = Pick<acp.AgentContext, "notify" | "request">;
 
@@ -19,118 +23,213 @@ export type AcpV2ClientConnection = Pick<acpV2.AgentContext, "notify" | "request
 export class AcpV2Connection {
     readonly client: AcpV2ClientConnection;
     private isTurnRunning: (sessionId: string) => boolean = () => true;
+    private readonly foreground = new Map<string, AcpV2ForegroundState>();
+    private readonly sessionInfo = new Map<string, AcpV2SessionInfo>();
+    private sessionDelivery: AcpClientDelivery | null = null;
+    private sendElicitationCompletion: (params: unknown) => Promise<void>;
 
-    constructor(client: AcpV2ClientConnection) {
-        this.client = client;
+    constructor(private readonly transportClient: AcpV2ClientConnection) {
+        const client = transportClient;
+        this.sendElicitationCompletion = params => client.notify(acpV2.methods.client.elicitation.complete, params as acpV2.CompleteElicitationNotification);
+        this.client = {
+            notify: (method: string, params?: unknown) => {
+                if (method === acpV2.methods.client.elicitation.complete) return this.sendElicitationCompletion(params);
+                const sessionId = clientNotificationSessionId(method, params);
+                if (sessionId !== null && this.sessionDelivery && !this.sessionDelivery.canPublishSession(sessionId)) return Promise.resolve();
+                if (sessionId !== null) {
+                    const {update, _meta} = params as acpV2.UpdateSessionNotification;
+                    if (acpV2.SessionUpdate.isSessionInfoUpdate(update)) return this.sessionInfoFor(sessionId).update(update, _meta);
+                }
+                return client.notify(method as `_${string}`, params);
+            },
+            request: (method: string, params?: unknown, options?: acpV2.SendRequestOptions) => {
+                const sessionId = clientRequestSessionId(method, params);
+                if (sessionId !== null && this.sessionDelivery && !this.sessionDelivery.canRequestSession(sessionId)) {
+                    return Promise.reject(acp.RequestError.requestCancelled(undefined, `Session ${sessionId} is closing or closed`));
+                }
+                const send = () => {
+                    const request = () => client.request(method as `_${string}`, params, options);
+                    return this.sessionDelivery?.withElicitationRequest(method, params, request) ?? request();
+                };
+                const setup = sessionId === null ? null : this.sessionDelivery?.waitForSessionSetup(sessionId, options?.cancellationSignal);
+                return setup ? setup.then(send) : send();
+            },
+        } as AcpV2ClientConnection;
     }
 
-    /**
-     * Lets the owning server report whether a turn is still running for a session, so the
-     * `requires_action`/`running` bracket below is only applied around requests that actually
-     * interrupt foreground work: a request sent while idle must not send `requires_action` (there
-     * is no foreground work to block), and a request that outlives its turn must not resurrect
-     * `running` after the turn already went `idle` on its own.
-     * Defaults to always running, so callers that never wire this up keep the old behavior.
-     */
+    setClientDelivery(delivery: AcpClientDelivery): void {
+        this.sessionDelivery = delivery;
+        delivery.setElicitationCompletionTransport(params => this.transportClient.notify(
+            acpV2.methods.client.elicitation.complete, params as acpV2.CompleteElicitationNotification,
+        ));
+        this.sendElicitationCompletion = params => delivery.notify(acp.methods.client.elicitation.complete, params);
+    }
+
+    /** Identifies foreground interactions; background requests do not affect session state. */
     setTurnRunningCheck(check: (sessionId: string) => boolean): void {
         this.isTurnRunning = check;
     }
 
-    /**
-     * Runs `sendRequest`, bracketed with `requires_action`/`running` `state_update`s only if a
-     * turn is running for `sessionId` at the moment the request is about to be sent. If idle,
-     * `sendRequest` runs unbracketed: sending `requires_action` while there is no foreground work
-     * to block would contradict the state's definition, and the client is already correctly idle.
-     * If busy, `requires_action` is sent first, and `running` follows in `finally` only if a turn
-     * is still running by then -- a turn that went `idle` on its own while the request was pending
-     * must not have that `idle` undone.
-     */
-    private async withStateBracket<T>(sessionId: string, sendRequest: () => Promise<T>): Promise<T> {
+    private async withUserAction<T>(
+        sessionId: string,
+        itemId: string | undefined,
+        sendRequest: () => Promise<T>,
+        signal?: AbortSignal,
+    ): Promise<T> {
         if (!this.isTurnRunning(sessionId)) {
             return sendRequest();
         }
-        await this.sendState(sessionId, {state: "requires_action"});
-        try {
-            return await sendRequest();
-        } finally {
-            if (this.isTurnRunning(sessionId)) {
-                await this.sendState(sessionId, {state: "running"});
-            }
-        }
+        return this.foregroundFor(sessionId).withUserAction(itemId, sendRequest, signal);
     }
 
     /**
      * Sends a session update, rendered in the v2 wire shape, through the v2 `session/update`
      * binding. One update can render to several v2 updates (or none), sent in order.
      */
-    async updateSession(sessionId: string, update: AcpSessionUpdate): Promise<void> {
+    async updateSession(sessionId: string, update: AcpSessionUpdate, metadata?: acpV2.UpdateSessionNotification["_meta"]): Promise<void> {
         for (const v2Update of toV2SessionUpdates(update)) {
-            await this.client.notify(acpV2.methods.client.session.update, {sessionId, update: v2Update});
+            await this.client.notify(acpV2.methods.client.session.update,
+                {sessionId, update: v2Update, ...(metadata !== undefined ? {_meta: metadata} : {})});
         }
     }
 
     /** Sends a `state_update`, which only exists on v2 and so needs no rendering. */
     async updateState(sessionId: string, state: acpV2.StateUpdate): Promise<void> {
-        await this.client.notify(acpV2.methods.client.session.update, {
-            sessionId,
-            update: {sessionUpdate: "state_update", ...state},
-        });
+        await this.foregroundFor(sessionId).update(state);
     }
 
-    /**
-     * Sends the whole-message update (`content: []`) that must precede the first replayed chunk
-     * for a given id, clearing any content a reconnecting client already holds for it. Only
-     * `user_message`, `agent_message` and `agent_thought` exist as whole-message updates; there
-     * is no v1 shape for them, so this bypasses `toV2SessionUpdates` entirely.
-     */
-    async startReplayMessage(sessionId: string, kind: ReplayMessageKind, messageId: string): Promise<void> {
-        await this.client.notify(acpV2.methods.client.session.update, {
-            sessionId,
-            update: {sessionUpdate: kind, messageId, content: []},
-        });
+    startForegroundWork(sessionId: string): Promise<void> {
+        return this.foregroundFor(sessionId).start();
     }
 
-    /** `updateState`, with send failures caught and logged instead of propagated. */
-    private async sendState(sessionId: string, state: acpV2.StateUpdate): Promise<void> {
-        try {
-            await this.updateState(sessionId, state);
-        } catch (error) {
-            logger.error(`Failed to send the '${state.state}' state for session ${sessionId}`, error);
+    snapshotForegroundState(sessionId: string): Promise<void> {
+        return this.foregroundFor(sessionId).snapshot();
+    }
+
+    resetSessionInfo(sessionId: string, metadata: Record<string, unknown> | null): void {
+        this.sessionInfo.get(sessionId)?.dispose();
+        this.sessionInfo.delete(sessionId);
+        this.sessionInfoFor(sessionId, metadata);
+    }
+
+    refreshSessionInfo(sessionId: string, metadata: Record<string, unknown> | null): Promise<void> {
+        return metadata ? this.sessionInfoFor(sessionId).seedMetadata(metadata) : Promise.resolve();
+    }
+
+    snapshotSessionInfo(sessionId: string, title: string | null): Promise<void> {
+        return this.sessionInfoFor(sessionId).snapshot(title);
+    }
+
+    patchSessionMetadata(sessionId: string, change: SessionMetadataPatch, fields: SessionInfoFields = {}): Promise<void> {
+        return this.sessionInfoFor(sessionId).patchMetadata(change, fields);
+    }
+
+    startForegroundItem(sessionId: string, itemId: string): Promise<void> {
+        return this.foregroundFor(sessionId).startItem(itemId);
+    }
+
+    completeForegroundItem(sessionId: string, itemId: string): Promise<void> {
+        return this.foregroundFor(sessionId).completeItem(itemId);
+    }
+
+    restoreForegroundState(sessionId: string, running: boolean): void {
+        this.foregroundFor(sessionId, running);
+    }
+
+    forgetSession(sessionId: string): void {
+        this.forgetForegroundState(sessionId);
+        this.sessionInfo.get(sessionId)?.dispose();
+        this.sessionInfo.delete(sessionId);
+    }
+
+    forgetForegroundState(sessionId: string): void {
+        this.foreground.get(sessionId)?.dispose();
+        this.foreground.delete(sessionId);
+    }
+
+    private sessionInfoFor(sessionId: string, metadata: Record<string, unknown> | null = null): AcpV2SessionInfo {
+        if (this.sessionDelivery && !this.sessionDelivery.canPublishSession(sessionId)) {
+            const closed = new AcpV2SessionInfo(async () => {});
+            closed.dispose();
+            return closed;
         }
+        let info = this.sessionInfo.get(sessionId);
+        if (!info) {
+            info = new AcpV2SessionInfo((update, notificationMetadata) => {
+                if (this.sessionDelivery && !this.sessionDelivery.canPublishSession(sessionId)) return Promise.resolve();
+                return this.transportClient.notify(acpV2.methods.client.session.update,
+                    {sessionId, update, ...(notificationMetadata !== undefined ? {_meta: notificationMetadata} : {})});
+            }, metadata);
+            this.sessionInfo.set(sessionId, info);
+        }
+        return info;
     }
 
-    /**
-     * Sends `session/request_permission`, rendered in the v2 wire shape by
-     * `toV2RequestPermissionRequest`. Per the spec, brackets the request with `requires_action`/
-     * `running` `state_update`s -- but only while a turn is actually running (see
-     * `withStateBracket`); a permission request while idle (e.g. an out-of-turn MCP elicitation's
-     * fallback) is sent with no state update at all.
-     */
+    private foregroundFor(sessionId: string, running = false): AcpV2ForegroundState {
+        if (this.sessionDelivery && !this.sessionDelivery.canPublishSession(sessionId)) {
+            const closed = new AcpV2ForegroundState(async () => {});
+            closed.dispose();
+            return closed;
+        }
+        let foreground = this.foreground.get(sessionId);
+        if (!foreground) {
+            foreground = new AcpV2ForegroundState(
+                state => this.client.notify(acpV2.methods.client.session.update, {
+                    sessionId,
+                    update: {sessionUpdate: "state_update", ...state},
+                }),
+                running,
+            );
+            this.foreground.set(sessionId, foreground);
+        }
+        return foreground;
+    }
+
+    async replaySessionUpdate(sessionId: string, update: AcpSessionUpdate, initialized: Set<string>): Promise<void> {
+        const send = async (params: {sessionId: string; update: AcpSessionUpdate}) => {
+            for (const rendered of toV2SessionUpdates(params.update)) {
+                for (const replayed of toV2ReplayUpdates(rendered, initialized)) {
+                    await this.client.notify(acpV2.methods.client.session.update, {sessionId: params.sessionId, update: replayed});
+                }
+            }
+        };
+        const params = {sessionId, update};
+        if (this.sessionDelivery) await this.sessionDelivery.withSessionUpdate(params, send);
+        else await send(params);
+    }
+
+    /** Sends permission requests without mistaking one pending request for a blocked session. */
     async requestPermission(
         request: acp.RequestPermissionRequest,
         options?: acp.SendRequestOptions,
     ): Promise<acp.RequestPermissionResponse> {
-        return this.withStateBracket(request.sessionId, async () => {
+        return this.withUserAction(request.sessionId, request.toolCall.toolCallId, async () => {
             const response = await this.client.request(
                 acpV2.methods.client.session.requestPermission,
                 toV2RequestPermissionRequest(request),
-                options,
+                {...options, stopWaitingOnCancel: true},
             );
             return toV1RequestPermissionResponse(response);
-        });
+        }, options?.cancellationSignal);
     }
 
     /**
-     * Sends `elicitation/create` (wire-identical request/response between versions, per
-     * `AcpV2Elicitation`). Brackets it with `requires_action`/`running` `state_update`s like
-     * `requestPermission()` (see `withStateBracket`), but only when the elicitation is
-     * session-scoped: a request-scoped elicitation (e.g. device-code login, sent before any
-     * session exists) has no session to attach a state update to, so it is sent unbracketed.
+     * Sends `elicitation/create`. Request-scoped login elicitations and idle background elicitations never change
+     * the session state.
+     *
+     * @param request The elicitation to show.
+     * @param options Request options, such as the signal that cancels the request.
+     * @param interaction.userAction Whether the agent waits for the answer, `true` by default. While such an
+     *     elicitation is open in a running turn, the session reports `requires_action` whenever none of its items
+     *     is in progress. Pass `false` for a question the agent keeps working through, so the session state is left
+     *     as it is.
      */
     async createElicitation(
         request: acp.CreateElicitationRequest,
         options?: acp.SendRequestOptions,
+        interaction: {userAction?: boolean} = {},
     ): Promise<acp.CreateElicitationResponse> {
+        const userAction = interaction.userAction ?? true;
         const sendRequest = async () => {
             const response = await this.client.request(
                 acpV2.methods.client.elicitation.create,
@@ -140,10 +239,11 @@ export class AcpV2Connection {
             return toV1CreateElicitationResponse(response);
         };
         const sessionId = elicitationSessionId(request);
-        if (sessionId === undefined) {
+        if (sessionId === undefined || !userAction) {
             return sendRequest();
         }
-        return this.withStateBracket(sessionId, sendRequest);
+        const toolCallId = "toolCallId" in request && typeof request.toolCallId === "string" ? request.toolCallId : undefined;
+        return this.withUserAction(sessionId, toolCallId, sendRequest, options?.cancellationSignal);
     }
 
     /** Sends `elicitation/complete`, wire-identical between versions. */
@@ -164,8 +264,8 @@ export class AcpV2Connection {
                     return this.client.notify(method as `_${string}`, params);
                 }
                 if (method === acp.methods.client.session.update) {
-                    const notification = params as acp.SessionNotification;
-                    return this.updateSession(notification.sessionId, notification.update);
+                    const notification = params as AcpSessionNotification;
+                    return this.updateSession(notification.sessionId, notification.update, notification._meta);
                 }
                 if (method === acp.methods.client.elicitation.complete) {
                     return this.completeElicitation(params as acp.CompleteElicitationNotification);
@@ -235,12 +335,27 @@ export class ACPSessionConnection {
         await this.v2Connection.updateState(this.sessionId, state);
     }
 
-    /** `startReplayMessage`, which only exists on v2 and so needs no v1 shape. */
-    async startReplayMessage(kind: ReplayMessageKind, messageId: string): Promise<void> {
-        if (!this.v2Connection) {
-            throw acp.RequestError.internalError(undefined, `'${kind}' does not exist in ACP v1`);
+    async updateSubagentState(childSessionId: string, parentSessionId: string, state: acpV2.StateUpdate): Promise<void> {
+        if (this.v2Connection) {
+            await this.v2Connection.client.notify(acpV2.methods.client.session.update, {
+                sessionId: childSessionId, update: {sessionUpdate: "state_update", ...state},
+            });
         }
-        await this.v2Connection.startReplayMessage(this.sessionId, kind, messageId);
+        await this.update({sessionUpdate: "subagent_update", sessionId: childSessionId, state}, parentSessionId);
+    }
+
+    forSession(sessionId: string): ACPSessionConnection { return new ACPSessionConnection(this.connection, sessionId); }
+
+    /** Domain writers can rebuild an owned metadata value without changing v2's shallow patch semantics. */
+    patchSessionMetadata(change: SessionMetadataPatch, fields: SessionInfoFields = {}): Promise<void> {
+        return this.v2Connection?.patchSessionMetadata(this.sessionId, change, fields) ?? Promise.resolve();
+    }
+
+    /** Replay shares live report filtering, with v2 entity initialization after conversion. */
+    replayUpdate(update: UpdateSessionEvent, initialized: Set<string>): Promise<void> {
+        return this.v2Connection
+            ? this.v2Connection.replaySessionUpdate(this.sessionId, update, initialized)
+            : this.update(update);
     }
 
     /** On v2, the view renders the update in the v2 shape (`extensionOnlyV1View`). */
@@ -253,6 +368,3 @@ export class ACPSessionConnection {
 }
 
 export type UpdateSessionEvent = AcpSessionUpdate;
-
-/** The v2 whole-message update kinds that a replayed chunk stream can restart. */
-export type ReplayMessageKind = "user_message" | "agent_message" | "agent_thought";

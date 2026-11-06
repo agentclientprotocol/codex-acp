@@ -1,0 +1,1 @@
+Codex can't reach chatgpt.com to look up your ChatGPT workspace. Check your network connection and any proxy, VPN, or firewall that blocks chatgpt.com, then try again. (workspace routing discovery timed out)

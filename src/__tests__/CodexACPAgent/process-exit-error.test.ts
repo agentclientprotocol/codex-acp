@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { once } from 'node:events';
-import * as acp from '@agentclientprotocol/sdk';
+import * as acp from '@agentclientprotocol/sdk/unstable';
 import { startCodexConnection } from '../../CodexJsonRpcConnection';
 import { CodexAppServerClient } from '../../CodexAppServerClient';
 import { CodexAcpClient } from '../../CodexAcpClient';

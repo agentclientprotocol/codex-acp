@@ -1,5 +1,5 @@
 import {beforeEach, describe, expect, it, vi} from "vitest";
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {
     createCodexMockTestFixture,
     createTestSessionState,
@@ -20,6 +20,7 @@ function createTurn(id: string, status: Turn["status"]): Turn {
     return {
         id,
         items: [],
+        rootTurnId: null,
         itemsView: "notLoaded",
         status,
         error: null,
@@ -105,6 +106,8 @@ function spawnChild(rootSessionId: string): ServerNotification[] {
                 startedAtMs: 0,
                 item: {
                     type: "subAgentActivity",
+                    model: null,
+                    reasoningEffort: null,
                     id: "activity-child",
                     kind: "started",
                     agentThreadId: CHILD_THREAD_ID,
@@ -164,6 +167,7 @@ async function setupNativeSubagentPrompt(): Promise<{
         true,
         new ACPSessionConnection(fixture.getAcpConnection(), sessionState.sessionId),
         () => {},
+        () => ({currentModel: null, availableModels: []}),
     );
     vi.spyOn(fixture.getCodexAcpAgent(), "getSessionState").mockReturnValue(sessionState);
     vi.spyOn(fixture.getCodexAppServerClient(), "turnStart")

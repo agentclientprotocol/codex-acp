@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import * as acp from '@agentclientprotocol/sdk';
-import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
+import * as acp from '@agentclientprotocol/sdk/unstable';
+import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {createAcpAgentRouter} from '../../AcpAgentRouter';
 import {CodexAcpServer} from '../../CodexAcpServer';
 import {CodexAcpClient} from '../../CodexAcpClient';
@@ -58,6 +58,7 @@ function createThread(id: string, overrides?: Partial<Thread>): Thread {
 const rootTurns: Thread["turns"] = [
     {
         id: "root-turn-1",
+        rootTurnId: null,
         itemsView: "full",
         status: "completed",
         error: null,
@@ -65,8 +66,8 @@ const rootTurns: Thread["turns"] = [
         completedAt: null,
         durationMs: null,
         items: [
-            {type: "subAgentActivity", id: "activity-started", kind: "started", agentThreadId: childId, agentPath: `/${rootId}/researcher`},
-            {type: "subAgentActivity", id: "activity-completed", kind: "completed", agentThreadId: childId, agentPath: `/${rootId}/researcher`},
+            {type: "subAgentActivity", model: null, reasoningEffort: null, id: "activity-started", kind: "started", agentThreadId: childId, agentPath: `/${rootId}/researcher`},
+            {type: "subAgentActivity", model: null, reasoningEffort: null, id: "activity-completed", kind: "completed", agentThreadId: childId, agentPath: `/${rootId}/researcher`},
         ],
     },
 ];
@@ -75,6 +76,7 @@ const rootTurns: Thread["turns"] = [
 const childTurns: Thread["turns"] = [
     {
         id: "child-turn-1",
+        rootTurnId: null,
         itemsView: "full",
         status: "completed",
         error: null,
@@ -236,9 +238,55 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
         expect(agentMessages).toContain("Investigating the flaky test.");
     });
 
+    it.each([
+        {activityModel: "gpt-5", expected: [{sessionId: childId, value: "gpt-5", name: "5"}]},
+        // The spawn request names a model, but a role config can override it, so replay sends no model.
+        {activityModel: null, expected: []},
+    ])('replays the model of a child only when its activity names it ($activityModel)', async ({activityModel, expected}) => {
+        const root: Thread["turns"] = [{
+            ...rootTurns[0]!,
+            items: [
+                {
+                    type: "collabAgentToolCall",
+                    id: "spawn-1",
+                    tool: "spawnAgent",
+                    status: "completed",
+                    senderThreadId: rootId,
+                    receiverThreadIds: [childId],
+                    prompt: "Research",
+                    model: "gpt-5",
+                    reasoningEffort: null,
+                    agentsStates: {},
+                },
+                {...rootTurns[0]!.items[0]!, model: activityModel} as Thread["turns"][number]["items"][number],
+                ...rootTurns[0]!.items.slice(1),
+            ],
+        }];
+        const {connection, updates} = await connectV2Client({
+            _meta: {jetbrains: {air: {version: 1, capabilities: [AIR_NATIVE_SUBAGENT_SESSIONS_KEY]}}},
+        }, {root, child: childTurns});
+        closeClient = () => connection.close();
+
+        await connection.agent.request(acpV2.methods.agent.session.resume, {
+            sessionId: rootId,
+            cwd,
+            replayFrom: {type: "start"},
+        });
+
+        const childModels = updates
+            .filter(({sessionId, update}) => sessionId === childId && update.sessionUpdate === "config_option_update")
+            .map(({sessionId, update}) => {
+                const option = (update as {configOptions: Array<{currentValue: string; options: Array<{name: string}>}>})
+                    .configOptions[0]!;
+                return {sessionId, value: option.currentValue, name: option.options[0]!.name};
+            });
+        expect(childModels).toEqual(expected);
+    });
+
     it('replays a follow-up turn of a finished child as a new generation', async () => {
         const turn = (id: string, items: Thread["turns"][number]["items"]): Thread["turns"][number] => ({
             id,
+            rootTurnId: null,
             itemsView: "full",
             status: "completed",
             error: null,
@@ -249,6 +297,8 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
         });
         const activity = (id: string, kind: "started" | "interacted" | "completed") => ({
             type: "subAgentActivity" as const,
+            model: null,
+            reasoningEffort: null,
             id,
             kind,
             agentThreadId: childId,

@@ -180,6 +180,11 @@ export function fromAccount(account: Account | null): AuthStatus {
                 kind: "external",
                 label: "AWS Bedrock",
             };
+        case "gcp":
+            return {
+                kind: "external",
+                label: "Google Cloud",
+            };
     }
 }
 
@@ -259,6 +264,7 @@ export function accountFromUpdated(notification: AccountUpdatedNotification, pre
                 type: "chatgpt",
                 email: previousChatGpt?.email ?? null,
                 planType: notification.planType ?? previousChatGpt?.planType ?? "unknown",
+                workspaceName: previousChatGpt?.workspaceName ?? null,
             };
         }
         case "apikey":

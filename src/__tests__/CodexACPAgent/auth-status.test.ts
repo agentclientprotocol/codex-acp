@@ -16,7 +16,7 @@ import {
     type AuthStatus,
 } from "../../AuthStatusMeta";
 import {ModelId} from "../../ModelId";
-import {PROTOCOL_VERSION} from "@agentclientprotocol/sdk";
+import {PROTOCOL_VERSION} from "@agentclientprotocol/sdk/unstable";
 import type {AcpClientConnection} from "../../ACPSessionConnection";
 import type {Account, AccountUpdatedNotification, Config, ConfigReadResponse} from "../../app-server/v2";
 
@@ -123,7 +123,7 @@ describe("authStatus extension", () => {
             const fixture = createCodexMockTestFixture();
             const configRead = vi.spyOn(fixture.getCodexAppServerClient(), "configRead")
                 .mockResolvedValue(providerConfig(provider!, name!, baseUrl));
-            const accountRead = mockAccount(fixture, {type: "chatgpt", email: "unused@example.com", planType: "plus"});
+            const accountRead = mockAccount(fixture, {type: "chatgpt", email: "unused@example.com", planType: "plus", workspaceName: null});
             expect(await initializeAndAwaitFirstPush(fixture)).toEqual(centralStatus);
             expect(configRead).toHaveBeenCalledWith({includeLayers: false});
             expect(accountRead).not.toHaveBeenCalled();
@@ -140,7 +140,7 @@ describe("authStatus extension", () => {
             const fixture = createCodexMockTestFixture();
             const configRead = vi.spyOn(fixture.getCodexAppServerClient(), "configRead").mockResolvedValue(providerConfig("wire"));
             vi.spyOn(fixture.getCodexAcpClient(), "getModelProvider").mockReturnValue("openai");
-            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus"});
+            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus", workspaceName: null});
             expect(await initializeAndAwaitFirstPush(fixture)).toEqual(CHAT_GPT_PLUS);
             expect(configRead).not.toHaveBeenCalled();
         });
@@ -191,7 +191,7 @@ describe("authStatus extension", () => {
     describe("first push after initialize", () => {
         it("follows the initialize response and reports the account", async () => {
             const fixture = createCodexMockTestFixture();
-            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus"});
+            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus", workspaceName: null});
 
             await fixture.getCodexAcpAgent().initialize({protocolVersion: PROTOCOL_VERSION});
 
@@ -217,6 +217,18 @@ describe("authStatus extension", () => {
                 .toEqual({kind: "external", label: "AWS Bedrock"});
         });
 
+        it.each([1, 2])("reports Google Cloud as external auth in ACP v%i", async (protocolVersion) => {
+            const fixture = createCodexMockTestFixture();
+            mockAccount(fixture, {type: "gcp"});
+
+            await fixture.getCodexAcpAgent().initialize({protocolVersion});
+
+            expect(await awaitAuthStatusUpdates(fixture, 1))
+                .toEqual([{kind: "external", label: "Google Cloud"}]);
+            expect(await fixture.getCodexAcpAgent().extMethod("authentication/status", {}))
+                .toEqual({type: "gateway", name: "gcp"});
+        });
+
         it("reports a logged-out agent as kind none", async () => {
             const fixture = createCodexMockTestFixture();
             mockAccount(fixture, null);
@@ -228,7 +240,7 @@ describe("authStatus extension", () => {
 
         it("reports gateway for a provider configured in Codex's own config", async () => {
             const fixture = createCodexMockTestFixture();
-            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus"});
+            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus", workspaceName: null});
             vi.spyOn(fixture.getCodexAcpClient(), "getAgentConfiguredModelProvider")
                 .mockResolvedValue("custom-provider");
 
@@ -239,7 +251,7 @@ describe("authStatus extension", () => {
         it("ignores routing the client configured through the providers API", async () => {
             const fixture = createCodexMockTestFixture();
             const agent = fixture.getCodexAcpAgent();
-            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus"});
+            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus", workspaceName: null});
 
             await agent.setProvider({
                 providerId: "openai",
@@ -252,7 +264,7 @@ describe("authStatus extension", () => {
 
         it("capitalizes unknown plan values and omits the unknown plan marker", async () => {
             const rawPlanFixture = createCodexMockTestFixture();
-            mockAccount(rawPlanFixture, {type: "chatgpt", email: null, planType: "prolite"});
+            mockAccount(rawPlanFixture, {type: "chatgpt", email: null, planType: "prolite", workspaceName: null});
             expect(await initializeAndAwaitFirstPush(rawPlanFixture)).toEqual({
                 kind: "account",
                 label: "ChatGPT Prolite",
@@ -260,7 +272,7 @@ describe("authStatus extension", () => {
             });
 
             const unknownPlanFixture = createCodexMockTestFixture();
-            mockAccount(unknownPlanFixture, {type: "chatgpt", email: null, planType: "unknown"});
+            mockAccount(unknownPlanFixture, {type: "chatgpt", email: null, planType: "unknown", workspaceName: null});
             expect(await initializeAndAwaitFirstPush(unknownPlanFixture)).toEqual({
                 kind: "account",
                 label: "ChatGPT",
@@ -270,7 +282,7 @@ describe("authStatus extension", () => {
 
         it("keeps the plan the legacy authentication/status method drops", async () => {
             const fixture = createCodexMockTestFixture();
-            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "business"});
+            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "business", workspaceName: null});
 
             const legacy = await fixture.getCodexAcpAgent().extMethod("authentication/status", {});
             expect(legacy).toEqual({type: "chat-gpt", email: "user@example.com"});
@@ -298,7 +310,7 @@ describe("authStatus extension", () => {
         it("is sent after a successful authenticate", async () => {
             const fixture = createCodexMockTestFixture();
             vi.spyOn(fixture.getCodexAcpClient(), "authenticate").mockResolvedValue(true);
-            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "pro"});
+            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "pro", workspaceName: null});
 
             await fixture.getCodexAcpAgent().authenticate({methodId: "chat-gpt"});
 
@@ -313,7 +325,7 @@ describe("authStatus extension", () => {
             const fixture = createCodexMockTestFixture();
             const agent = fixture.getCodexAcpAgent();
             vi.spyOn(fixture.getCodexAcpClient(), "authenticate").mockResolvedValue(true);
-            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus"});
+            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus", workspaceName: null});
 
             await agent.setProvider({
                 providerId: "openai",
@@ -330,7 +342,7 @@ describe("authStatus extension", () => {
             const agent = fixture.getCodexAcpAgent();
             vi.spyOn(fixture.getCodexAcpClient(), "authenticate").mockResolvedValue(true);
             vi.spyOn(fixture.getCodexAcpClient(), "logout").mockResolvedValue();
-            const accountSpy = mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "pro"});
+            const accountSpy = mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "pro", workspaceName: null});
 
             await agent.authenticate({methodId: "chat-gpt"});
             accountSpy.mockResolvedValue({account: null, requiresOpenaiAuth: true});
@@ -349,7 +361,7 @@ describe("authStatus extension", () => {
         it("is sent when the app-server pushes account/updated", async () => {
             const fixture = createCodexMockTestFixture();
             vi.spyOn(fixture.getCodexAcpClient(), "authenticate").mockResolvedValue(true);
-            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus"});
+            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus", workspaceName: null});
             const agent = fixture.getCodexAcpAgent();
 
             await agent.authenticate({methodId: "chat-gpt"});
@@ -369,7 +381,7 @@ describe("authStatus extension", () => {
         it("drops the last known email when the account kind changes", async () => {
             const fixture = createCodexMockTestFixture();
             vi.spyOn(fixture.getCodexAcpClient(), "authenticate").mockResolvedValue(true);
-            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus"});
+            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus", workspaceName: null});
             const agent = fixture.getCodexAcpAgent();
 
             await agent.authenticate({methodId: "chat-gpt"});
@@ -384,7 +396,7 @@ describe("authStatus extension", () => {
         it("maps the bedrockAccessKeys auth mode to external Bedrock", async () => {
             const fixture = createCodexMockTestFixture();
             vi.spyOn(fixture.getCodexAcpClient(), "authenticate").mockResolvedValue(true);
-            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus"});
+            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus", workspaceName: null});
             const agent = fixture.getCodexAcpAgent();
 
             await agent.authenticate({methodId: "chat-gpt"});
@@ -399,7 +411,7 @@ describe("authStatus extension", () => {
         it("is not sent again while the identity is unchanged", async () => {
             const fixture = createCodexMockTestFixture();
             vi.spyOn(fixture.getCodexAcpClient(), "authenticate").mockResolvedValue(true);
-            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus"});
+            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus", workspaceName: null});
             const agent = fixture.getCodexAcpAgent();
 
             // Four reads of the same login: two authenticates, the `initialize` read,
@@ -418,13 +430,13 @@ describe("authStatus extension", () => {
             vi.spyOn(fixture.getCodexAcpClient(), "authenticate").mockResolvedValue(true);
             const accountSpy = mockAccount(
                 fixture,
-                {type: "chatgpt", email: "user@example.com", planType: "plus"},
+                {type: "chatgpt", email: "user@example.com", planType: "plus", workspaceName: null},
             );
             const agent = fixture.getCodexAcpAgent();
 
             await agent.authenticate({methodId: "chat-gpt"});
             accountSpy.mockResolvedValue({
-                account: {type: "chatgpt", email: "user@example.com", planType: "pro"},
+                account: {type: "chatgpt", email: "user@example.com", planType: "pro", workspaceName: null},
                 requiresOpenaiAuth: false,
             });
             await agent.authenticate({methodId: "chat-gpt"});
@@ -441,7 +453,7 @@ describe("authStatus extension", () => {
 
         it("keeps the gateway status when an account event arrives", async () => {
             const fixture = createCodexMockTestFixture();
-            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus"});
+            mockAccount(fixture, {type: "chatgpt", email: "user@example.com", planType: "plus", workspaceName: null});
             const agent = fixture.getCodexAcpAgent();
 
             await agent.authenticate(gatewayAuthRequest("ACME Gateway"));
@@ -460,7 +472,7 @@ describe("authStatus extension", () => {
             const fixture = createCodexMockTestFixture();
             const accountSpy = mockAccount(
                 fixture,
-                {type: "chatgpt", email: "user@example.com", planType: "plus"},
+                {type: "chatgpt", email: "user@example.com", planType: "plus", workspaceName: null},
             );
             const sessionId = await createPromptableSession(fixture);
             accountSpy.mockClear();
@@ -515,7 +527,7 @@ describe("authStatus extension", () => {
 });
 
 describe("accountFromUpdated", () => {
-    const chatGpt: Account = {type: "chatgpt", email: "user@example.com", planType: "plus"};
+    const chatGpt: Account = {type: "chatgpt", email: "user@example.com", planType: "plus", workspaceName: null};
 
     it("clears the account on a logout", () => {
         expect(accountFromUpdated({authMode: null, planType: null}, chatGpt)).toBeNull();
@@ -523,9 +535,9 @@ describe("accountFromUpdated", () => {
 
     it("keeps the email of a ChatGPT account and takes the new plan", () => {
         expect(accountFromUpdated({authMode: "chatgpt", planType: "pro"}, chatGpt))
-            .toEqual({type: "chatgpt", email: "user@example.com", planType: "pro"});
+            .toEqual({type: "chatgpt", email: "user@example.com", planType: "pro", workspaceName: null});
         expect(accountFromUpdated({authMode: "chatgpt", planType: null}, {type: "apiKey"}))
-            .toEqual({type: "chatgpt", email: null, planType: "unknown"});
+            .toEqual({type: "chatgpt", email: null, planType: "unknown", workspaceName: null});
     });
 
     it("maps an API key and keeps the account for a mode with no account shape", () => {

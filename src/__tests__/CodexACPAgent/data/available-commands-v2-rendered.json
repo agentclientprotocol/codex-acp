@@ -10,16 +10,19 @@
       },
       "_meta": {
         "kind": "hint"
-      }
+      },
+      "type": "command"
     },
     {
       "name": "status",
       "description": "Show status",
-      "input": null
+      "input": null,
+      "type": "command"
     },
     {
       "name": "compact",
-      "description": "Compact the thread"
+      "description": "Compact the thread",
+      "type": "command"
     }
   ]
 }

@@ -1,4 +1,4 @@
-import {RequestError} from "@agentclientprotocol/sdk";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 
 /** The JSON-RPC error code of every request that failed because the Codex app-server is gone. */
 export const CODEX_PROCESS_EXITED_ERROR_CODE = 1001;

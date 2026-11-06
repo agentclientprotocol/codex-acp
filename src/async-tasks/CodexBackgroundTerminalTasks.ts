@@ -397,23 +397,10 @@ export class CodexBackgroundTerminalTasks {
         const appServer = this.appServer;
         const generation = this.appServerGeneration;
         const terminals: ThreadBackgroundTerminal[] = [];
-        const seenCursors = new Set<string>();
-        let cursor: string | null = null;
-        do {
-            const response = await appServer.threadBackgroundTerminalsList({
-                threadId,
-                cursor,
-            });
+        for await (const page of appServer.backgroundTerminalPages(threadId)) {
             if (!this.queryIsCurrent(generation)) return null;
-            terminals.push(...response.data);
-            cursor = response.nextCursor;
-            if (cursor !== null) {
-                if (seenCursors.has(cursor)) {
-                    throw new Error("Codex returned a repeated background terminal cursor");
-                }
-                seenCursors.add(cursor);
-            }
-        } while (cursor !== null);
+            terminals.push(...page);
+        }
         return {generation, terminals};
     }
 

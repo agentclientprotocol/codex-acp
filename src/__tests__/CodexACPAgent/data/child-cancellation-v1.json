@@ -1,0 +1,20 @@
+{
+  "interrupts": [
+    {
+      "threadId": "worker",
+      "turnId": "worker-turn"
+    }
+  ],
+  "capabilities": [
+    {},
+    {
+      "cancel": {}
+    },
+    {
+      "cancel": null
+    },
+    {
+      "cancel": {}
+    }
+  ]
+}

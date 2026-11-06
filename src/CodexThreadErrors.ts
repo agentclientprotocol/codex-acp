@@ -7,7 +7,7 @@
  * predicate keeps the match anchored on the stable part of the phrasing.
  */
 
-import {RequestError} from "@agentclientprotocol/sdk";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 
 function errorText(err: unknown): string {
     if (err instanceof Error) return err.message;
@@ -26,6 +26,11 @@ function errorText(err: unknown): string {
  */
 export function isMissingRolloutError(err: unknown): boolean {
     return errorText(err).includes("no rollout found for thread id");
+}
+
+/** History paging rejects a live thread whose rollout has not been written yet. */
+export function isThreadNotMaterializedError(err: unknown): boolean {
+    return errorText(err).includes("not materialized");
 }
 
 /**
@@ -190,7 +195,15 @@ function internalErrorText(err: unknown): string | null {
  */
 export function isAccountReadUnavailableError(err: unknown): boolean {
     const text = internalErrorText(err);
-    return text !== null && ACCOUNT_READ_UNAVAILABLE_MESSAGES.has(text);
+    return text !== null && isWorkspaceRoutingUnavailableMessage(text);
+}
+
+/**
+ * True for the whole text of a routing discovery that got no answer from the ChatGPT backend. A turn of a ChatGPT
+ * login runs the same discovery before each model request, and fails with this text as its error.
+ */
+export function isWorkspaceRoutingUnavailableMessage(text: string): boolean {
+    return ACCOUNT_READ_UNAVAILABLE_MESSAGES.has(text);
 }
 
 /**

@@ -1,0 +1,10 @@
+[
+  {
+    "sessionUpdate": "agent_message_chunk",
+    "messageId": "cited-reply",
+    "content": {
+      "type": "text",
+      "text": "The limit is 12.\n\n[policy.txt](/workspace/policy.txt)"
+    }
+  }
+]

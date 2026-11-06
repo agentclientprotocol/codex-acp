@@ -1,6 +1,6 @@
 import {createHash} from "node:crypto";
-import type * as acp from "@agentclientprotocol/sdk";
-import {RequestError} from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import type {SessionConfig} from "./CodexAcpClient";
 import type {CodexAppServerClient} from "./CodexAppServerClient";
 import type {ModeKind} from "./app-server/ModeKind";
@@ -8,6 +8,7 @@ import type {ServiceTier} from "./app-server/ServiceTier";
 import type {Model} from "./app-server/v2";
 import type {SessionMetadata} from "./SessionMetadata";
 import type {AcpMcpServer, WithAcpMcpServers} from "./McpServerConfig";
+import type {SessionInstructions} from "./ClientSystemPrompt";
 
 export type SessionForkDependencies = {
     codexClient: CodexAppServerClient;
@@ -31,21 +32,23 @@ export async function forkSession(
     request: WithAcpMcpServers<acp.ForkSessionRequest>,
     additionalDirectories: string[],
     dependencies: SessionForkDependencies,
+    instructions?: SessionInstructions,
 ): Promise<SessionMetadata> {
     await dependencies.refreshSkills(request.cwd, additionalDirectories);
     const lastTurnId = await resolveForkTurnId(request, dependencies.codexClient);
-    const sessionConfig = await dependencies.createSessionConfig(
+    const {config, skippedMcpServers, defaultPermissionProfileId: _defaultPermissionProfileId, ...permissionProfileMetadata} = await dependencies.createSessionConfig(
         request.cwd,
         additionalDirectories,
         request.mcpServers ?? [],
     );
     const response = await dependencies.codexClient.threadFork({
         excludeTurns: true,
-        config: sessionConfig.config,
+        config,
         cwd: request.cwd,
         ...(lastTurnId !== undefined && {lastTurnId}),
         modelProvider: await dependencies.getResumeModelProvider(),
         threadId: request.sessionId,
+        ...(instructions?.text !== undefined ? {developerInstructions: instructions.developerInstructions} : {}),
     });
     dependencies.forkCreated(response.thread.id);
     // `thread/fork` subscribes this connection to the new thread, and only to it: the source thread keeps the
@@ -67,7 +70,10 @@ export async function forkSession(
         modelProvider: response.modelProvider,
         currentServiceTier: response.serviceTier as ServiceTier ?? null,
         additionalDirectories,
-        skippedMcpServers: sessionConfig.skippedMcpServers,
+        skippedMcpServers,
+        activePermissionProfileId: response.activePermissionProfile?.id ?? null,
+        ...permissionProfileMetadata,
+        ...(instructions ? {instructions} : {}),
     };
 }
 

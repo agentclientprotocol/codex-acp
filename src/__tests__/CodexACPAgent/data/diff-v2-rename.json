@@ -15,7 +15,7 @@
         ],
         "patch": {
           "format": "git_patch",
-          "text": "diff --git a/workspace/renamed-old.ts b/workspace/renamed-new.ts\nsimilarity index 100%\nrename from workspace/renamed-old.ts\nrename to workspace/renamed-new.ts\n"
+          "text": "diff --git /workspace/renamed-old.ts /workspace/renamed-new.ts\nsimilarity index 100%\nrename from /workspace/renamed-old.ts\nrename to /workspace/renamed-new.ts\n"
         },
         "_meta": {
           "kind": "update"

@@ -8,16 +8,20 @@
  * See `docs/air-extensions.md`.
  */
 
-import type * as acp from "@agentclientprotocol/sdk";
-import {RequestError} from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import {z} from "zod";
 import type {ServerNotification} from "./app-server";
 import type {Thread, ThreadListParams, ThreadListResponse, ThreadStatus, Turn} from "./app-server/v2";
 import {AIR_META_KEY, JETBRAINS_META_KEY, withAirMeta} from "./AirExtension";
 import {listedSessionTitle} from "./SessionTitle";
+import {isArchivedRolloutPath} from "./SessionIndexMutations";
 import {logger} from "./Logger";
 
 export const AIR_SESSION_INDEX_KEY = "sessionIndex";
+/** Agent capability: metadata for known IDs, including sessions outside the recent page. */
+export const AIR_SESSION_BATCH_GET_KEY = "sessionBatchGet";
+export const SESSION_BATCH_GET_METHOD = "_session/batch_get";
 /** Agent capability: `_session/archive` and `_session/unarchive`. Advertised exactly with `sessionIndex`. */
 export const AIR_SESSION_ARCHIVE_KEY = "sessionArchive";
 /** Agent capability: `_session/rename`. Advertised exactly with `sessionIndex`. */
@@ -85,6 +89,28 @@ export interface SessionIndexThread {
     archived: boolean;
 }
 
+/** The sources that `thread/list` lists without `sourceKinds`: the CLI and the IDE extensions, as AIR. */
+export function isInteractiveSource(thread: Thread): boolean {
+    return thread.source === "cli" || thread.source === "vscode";
+}
+
+/**
+ * Whether `thread/list` lists a thread that `thread/read` returned: one that is not ephemeral, from an
+ * interactive source, with a first user message, which is its `preview`.
+ */
+export function isListedThread(thread: Thread): boolean {
+    return !thread.ephemeral && isInteractiveSource(thread) && thread.preview !== "" && thread.path !== null;
+}
+
+/**
+ * The entry of a `thread/read` result, or null when `session/list` would not show the thread. Codex reports the
+ * archive state only through the rollout path.
+ */
+export function listedThreadEntry(thread: Thread, codexHome: string | null): SessionIndexThread | null {
+    if (!isListedThread(thread)) return null;
+    return {thread, archived: thread.path !== null && isArchivedRolloutPath(thread.path, codexHome)};
+}
+
 export type SessionActivityState = "running" | "idle" | "requires_action" | "reviewing" | "error";
 
 export interface SessionActivity {
@@ -94,6 +120,15 @@ export interface SessionActivity {
 
 export type SessionRenameRequest = { sessionId: string; title: string };
 export type SessionArchiveRequest = { sessionId: string };
+export type SessionBatchGetRequest = {sessionIds: string[]};
+export type SessionBatchGetResponse = {
+    sessions: acp.SessionInfo[];
+};
+
+export const sessionBatchGetParamsParser = z.strictObject({
+    sessionIds: z.array(z.string().refine(id => id.trim().length > 0, "sessionIds must not be blank"))
+        .refine(ids => new Set(ids).size === ids.length, "sessionIds must be distinct"),
+});
 
 export const sessionRenameParamsParser = z.object({
     sessionId: z.string(),

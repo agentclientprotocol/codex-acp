@@ -1,4 +1,4 @@
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {existsSync, readFileSync} from "node:fs";
 import {mkdtemp, rm, writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
@@ -18,7 +18,7 @@ describe.skipIf(process.env["RUN_E2E_TESTS"] !== "true")("ACP hook review", () =
     it("fails initialize with the Codex error when hook config is invalid", async () => {
         let failure: unknown;
         const fixture = await createSpawnedAgentFixture(async connection => {
-            failure = await connection.initialize({
+            failure = await connection.request(acp.methods.agent.initialize, {
                 protocolVersion: acp.PROTOCOL_VERSION,
                 clientCapabilities: {_meta: {jetbrains: {air: {version: 1, capabilities: []}}}},
                 clientInfo: {name: "hook-config-test", version: "1"},
@@ -63,14 +63,14 @@ describe.skipIf(process.env["RUN_E2E_TESTS"] !== "true")("ACP hook review", () =
 
     it.skipIf(!hasLiveApiKey)("does not run an untrusted hook, runs it after consent, and restores startup hooks after restart", async () => {
         let fixture = await createSpawnedAgentFixture(async connection => {
-            const initialized = await connection.initialize({
+            const initialized = await connection.request(acp.methods.agent.initialize, {
                 protocolVersion: acp.PROTOCOL_VERSION,
                 clientCapabilities: {_meta: {jetbrains: {air: {version: 1, capabilities: []}}}},
                 clientInfo: {name: "hook-test", version: "1"},
             });
             const jetbrains = initialized._meta?.["jetbrains"] as {air?: {capabilities?: string[]}} | undefined;
             expect(jetbrains?.air?.capabilities).toContain("codexHooks");
-            await connection.authenticate({
+            await connection.request(acp.methods.agent.authenticate, {
                 methodId: "api-key",
                 _meta: {"api-key": {apiKey: requireLiveApiKey()}},
             });
@@ -87,7 +87,7 @@ describe.skipIf(process.env["RUN_E2E_TESTS"] !== "true")("ACP hook review", () =
         });
         try {
             const marker = join(fixture.workspaceDir, "hook.log");
-            const firstList = await fixture.connection.extMethod(CODEX_HOOKS_LIST_METHOD, {cwd: fixture.workspaceDir});
+            const firstList = await fixture.connection.request<{hooks: HookMetadata[]}>(CODEX_HOOKS_LIST_METHOD, {cwd: fixture.workspaceDir});
             const hooks = firstList["hooks"] as HookMetadata[];
             expect(hooks).toHaveLength(1);
             expect(hooks[0]).toMatchObject({source: "sessionFlags", trustStatus: "untrusted"});
@@ -99,14 +99,14 @@ describe.skipIf(process.env["RUN_E2E_TESTS"] !== "true")("ACP hook review", () =
             // A session without messages is never persisted by Codex, so the provider restart below cannot resume it.
             const empty = await fixture.createSession();
 
-            const trust = await fixture.connection.extMethod(CODEX_HOOKS_TRUST_METHOD, {
+            const trust = await fixture.connection.request(CODEX_HOOKS_TRUST_METHOD, {
                 cwd: fixture.workspaceDir,
                 hooks: [{key: hooks[0]!.key, currentHash: hooks[0]!.currentHash}],
             });
             expect(trust).toEqual({trusted: true});
 
-            await fixture.connection.unstable_disableProvider({providerId: "openai"});
-            const restartedList = await fixture.connection.extMethod(CODEX_HOOKS_LIST_METHOD, {cwd: fixture.workspaceDir});
+            await fixture.connection.request(acp.methods.agent.providers.disable, {providerId: "openai"});
+            const restartedList = await fixture.connection.request<{hooks: HookMetadata[]}>(CODEX_HOOKS_LIST_METHOD, {cwd: fixture.workspaceDir});
             const hooksAfterRestart = restartedList["hooks"] as HookMetadata[];
             expect(hooksAfterRestart).toHaveLength(1);
             expect(hooksAfterRestart[0]).toMatchObject({key: hooks[0]!.key, trustStatus: "trusted"});
@@ -125,5 +125,5 @@ describe.skipIf(process.env["RUN_E2E_TESTS"] !== "true")("ACP hook review", () =
 });
 
 function prompt(fixture: SpawnedAgentFixture, sessionId: string): Promise<acp.PromptResponse> {
-    return fixture.connection.prompt({sessionId, prompt: [{type: "text", text: "Reply with the single word OK."}]});
+    return fixture.connection.request(acp.methods.agent.session.prompt, {sessionId, prompt: [{type: "text", text: "Reply with the single word OK."}]});
 }

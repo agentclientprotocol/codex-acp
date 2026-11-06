@@ -1,5 +1,5 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {
     createCodexMockTestFixture,
     createTestModel,
@@ -103,8 +103,11 @@ describe("Gateway model discovery (providers/set)", () => {
         await expect(JSON.stringify(models, null, 2)).toMatchFileSnapshot("data/gateway-model-discovery-narrowed.json");
     });
 
-    it("reports the narrowed models in a new session", async () => {
-        fetchMock.mockResolvedValue(listing(["gpt-5.4", "gpt-5.4-mini"]));
+    it.each([
+        ["plain ids", ["gpt-5.4", "gpt-5.4-mini"]],
+        ["vendor-prefixed ids (OpenRouter)", ["openai/gpt-5.4", "openai/gpt-5.3-codex:batch", "openai/gpt-5.4-mini", "google/gemini-4-argon"]],
+    ])("reports the narrowed models in a new session for a listing with %s", async (_name, ids) => {
+        fetchMock.mockResolvedValue(listing(ids));
         const fixture = createFixture();
         await fixture.getCodexAcpAgent().setProvider(GATEWAY);
 

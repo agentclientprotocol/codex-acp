@@ -91,6 +91,7 @@ function turnCompleted(threadId: string): ServerNotification {
             turn: {
                 id: `turn-${threadId}`,
                 items: [],
+                rootTurnId: null,
                 itemsView: "full",
                 status: "completed",
                 error: null,
@@ -114,6 +115,7 @@ describe("PermissionLifecycleContext", () => {
                 turn: {
                     id: "turn-1",
                     items: [],
+                    rootTurnId: null,
                     itemsView: "full",
                     status: "completed",
                     error: null,

@@ -1,4 +1,4 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import type {DynamicToolCallOutputContentItem, ThreadItem} from "../../app-server/v2";
 import {functionToolName} from "../../ToolCallName";
 import type {ToolFacts} from "../ToolFacts";

@@ -1,6 +1,7 @@
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import type {UserInput} from "./app-server/v2";
 import {attachmentFileUri, desktopAttachmentHistory} from "./DesktopAttachmentHistory";
+import {renderAsyncQuestionReply} from "./CodexAsyncQuestions";
 
 /**
  * The content blocks of one persisted user input.
@@ -12,9 +13,12 @@ import {attachmentFileUri, desktopAttachmentHistory} from "./DesktopAttachmentHi
  */
 export function userInputToContentBlocks(input: UserInput): acp.ContentBlock[] {
     switch (input.type) {
-        case "text":
+        case "text": {
+            const asyncQuestionReply = renderAsyncQuestionReply(input.text);
+            if (asyncQuestionReply !== null) return [{type: "text", text: asyncQuestionReply}];
             return desktopAttachmentHistory(input.text)
                 ?? (input.text.length > 0 ? [{type: "text", text: input.text}] : []);
+        }
         case "image":
             return [{
                 type: "text",

@@ -33,6 +33,12 @@
         "codexResponse": "turn/start"
       },
       {
+        "sessionUpdate": {
+          "state": "running",
+          "sessionUpdate": "state_update"
+        }
+      },
+      {
         "codexNotification": "turn/started"
       },
       {
@@ -55,15 +61,9 @@
       },
       {
         "sessionUpdate": {
-          "state": "running",
-          "sessionUpdate": "state_update"
-        }
-      },
-      {
-        "sessionUpdate": {
           "messageId": "<agentMessageId>",
           "content": {
-            "text": "Codex process has exited with code 1",
+            "text": "Connection to Codex was lost.",
             "type": "text"
           },
           "sessionUpdate": "agent_message_chunk"
@@ -71,7 +71,11 @@
       },
       {
         "sessionUpdate": {
-          "stopReason": "end_turn",
+          "error": {
+            "code": 1001,
+            "message": "Connection to Codex was lost."
+          },
+          "stopReason": "error",
           "_meta": {
             "quota": {
               "token_count": null,
@@ -118,6 +122,12 @@
         "codexResponse": "turn/start"
       },
       {
+        "sessionUpdate": {
+          "state": "running",
+          "sessionUpdate": "state_update"
+        }
+      },
+      {
         "codexNotification": "turn/started"
       },
       {
@@ -140,13 +150,11 @@
       },
       {
         "sessionUpdate": {
-          "state": "running",
-          "sessionUpdate": "state_update"
-        }
-      },
-      {
-        "sessionUpdate": {
-          "stopReason": "end_turn",
+          "error": {
+            "code": 1001,
+            "message": "Connection to Codex was lost."
+          },
+          "stopReason": "error",
           "_meta": {
             "quota": {
               "token_count": null,

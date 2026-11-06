@@ -1,0 +1,7 @@
+{
+  "args": [
+    "-c",
+    "model_provider=\"corp\""
+  ],
+  "env": {}
+}

@@ -2,7 +2,7 @@ import {describe, expect, it, vi} from "vitest";
 import {EventEmitter} from "node:events";
 import type {ThreadItem} from "../../app-server/v2";
 import {ACPSessionConnection, type UpdateSessionEvent} from "../../ACPSessionConnection";
-import type {CodexAppServerClient} from "../../CodexAppServerClient";
+import {CodexAppServerClient} from "../../CodexAppServerClient";
 import type {CodexConnection} from "../../CodexJsonRpcConnection";
 import {CodexBackgroundTerminalTasks} from "../../async-tasks/CodexBackgroundTerminalTasks";
 import {ASYNC_TASK_STOP_METHOD} from "../../async-tasks/AsyncTaskExtension";
@@ -236,6 +236,7 @@ describe("Codex background terminal tasks", () => {
         await fixture.tasks.sync();
         const replacementTerminate = vi.fn().mockResolvedValue({terminated: true});
         fixture.tasks.setAppServer({
+            backgroundTerminalPages: CodexAppServerClient.prototype.backgroundTerminalPages,
             threadBackgroundTerminalsTerminate: replacementTerminate,
         } as unknown as CodexAppServerClient);
 
@@ -447,6 +448,7 @@ describe("Codex background terminal tasks", () => {
             terminal({itemId: "command-2", processId: "84"}),
         ]));
         const replacement = {
+            backgroundTerminalPages: CodexAppServerClient.prototype.backgroundTerminalPages,
             threadBackgroundTerminalsList: replacementList,
             threadBackgroundTerminalsTerminate: vi.fn(),
         } as unknown as CodexAppServerClient;
@@ -490,7 +492,7 @@ describe("Codex background terminal tasks", () => {
         });
         const sessionState = createTestSessionState({sessionId: "thread-1"});
         const session = new ACPSessionConnection(fixture.getAcpConnection(), sessionState.sessionId);
-        sessionState.subagents = new CodexSubagentEventRouter(sessionState.sessionId, true, session, () => {});
+        sessionState.subagents = new CodexSubagentEventRouter(sessionState.sessionId, true, session, () => {}, () => ({currentModel: null, availableModels: []}));
         sessionState.asyncTasks = new CodexBackgroundTerminalTasks(
             true,
             sessionState.sessionId,
@@ -576,6 +578,7 @@ function createFixture(
     const list = vi.fn<() => Promise<ThreadBackgroundTerminalsListResponse>>();
     const terminate = vi.fn();
     const appServer = {
+        backgroundTerminalPages: CodexAppServerClient.prototype.backgroundTerminalPages,
         threadBackgroundTerminalsList: list,
         threadBackgroundTerminalsTerminate: terminate,
     } as unknown as CodexAppServerClient;
@@ -659,6 +662,7 @@ function turnCompleted(threadId: string) {
             turn: {
                 id: "turn-id",
                 items: [],
+                rootTurnId: null,
                 itemsView: "notLoaded" as const,
                 status: "completed" as const,
                 error: null,
@@ -688,6 +692,8 @@ function childSpawned() {
 function childMaterialized() {
     return started({
         type: "subAgentActivity",
+        model: null,
+        reasoningEffort: null,
         id: "child-activity",
         kind: "started",
         agentThreadId: "child-1",
@@ -698,6 +704,8 @@ function childMaterialized() {
 function childInterrupted() {
     return started({
         type: "subAgentActivity",
+        model: null,
+        reasoningEffort: null,
         id: "child-activity-terminal",
         kind: "interrupted",
         agentThreadId: "child-1",

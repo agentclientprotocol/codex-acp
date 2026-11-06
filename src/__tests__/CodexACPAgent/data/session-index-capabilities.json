@@ -12,6 +12,7 @@
     "codexHooks",
     "sessionRewind",
     "sessionIndex",
+    "sessionBatchGet",
     "sessionArchive",
     "sessionRename",
     "sessionListSubscribe",

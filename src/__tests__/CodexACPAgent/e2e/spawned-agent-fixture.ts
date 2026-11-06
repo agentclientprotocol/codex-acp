@@ -1,4 +1,4 @@
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {type ChildProcessWithoutNullStreams, spawn} from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -19,7 +19,7 @@ export interface TestSkill {
 }
 
 export interface SpawnedAgentFixture {
-    readonly connection: acp.ClientSideConnection;
+    readonly connection: acp.ClientContext;
     readonly workspaceDir: string;
     createSession(mcpServers?: acp.McpServer[]): Promise<LegacyNewSessionResponse>;
     restart(): Promise<SpawnedAgentFixture>;
@@ -43,7 +43,7 @@ export interface SpawnedAgentFixture {
     dispose(): Promise<void>;
 }
 
-type ConnectionInitializer = (connection: acp.ClientSideConnection) => Promise<void>;
+type ConnectionInitializer = (connection: acp.ClientContext) => Promise<void>;
 
 export async function createSpawnedAgentFixture(
     initializeConnection: ConnectionInitializer,
@@ -105,7 +105,7 @@ class RuntimePaths {
     }
 }
 
-class RecordingClient implements acp.Client {
+class RecordingClient {
     private readonly textBySessionId = new Map<string, string>();
     private readonly availableCommandsBySessionId = new Map<string, acp.AvailableCommand[]>();
     private readonly permissionRequestsBySessionId = new Map<string, acp.RequestPermissionRequest[]>();
@@ -184,7 +184,7 @@ class RecordingClient implements acp.Client {
 }
 
 class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
-    readonly connection: acp.ClientSideConnection;
+    readonly connection: acp.ClientContext;
     private disposed = false;
 
     constructor(
@@ -196,10 +196,11 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
         private readonly mcpServers: acp.McpServerStdio[],
     ) {
         const output = Readable.toWeb(agentProcess.stdout) as ReadableStream<Uint8Array>;
-        this.connection = new acp.ClientSideConnection(
-            () => client,
-            acp.ndJsonStream(Writable.toWeb(agentProcess.stdin), output)
-        );
+        this.connection = acp.client()
+            .onRequest(acp.methods.client.session.requestPermission, ctx => client.requestPermission(ctx.params))
+            .onNotification(acp.methods.client.session.update, ctx => client.sessionUpdate(ctx.params))
+            .connect(acp.ndJsonStream(Writable.toWeb(agentProcess.stdin), output))
+            .agent;
     }
 
     get workspaceDir(): string {
@@ -207,7 +208,7 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
     }
 
     async createSession(mcpServers: acp.McpServer[] = []): Promise<LegacyNewSessionResponse> {
-        return await this.connection.newSession({
+        return await this.connection.request(acp.methods.agent.session.new, {
             cwd: this.workspaceDir,
             mcpServers,
         }) as LegacyNewSessionResponse;
@@ -257,7 +258,7 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
         timeoutMs = 30_000,
     ): Promise<void> {
         const previousText = this.client.readText(sessionId);
-        const promptResponse = await this.connection.prompt({
+        const promptResponse = await this.connection.request(acp.methods.agent.session.prompt, {
             sessionId,
             prompt: [{type: "text", text: promptText}],
         });

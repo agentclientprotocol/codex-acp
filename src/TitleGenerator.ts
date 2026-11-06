@@ -2,7 +2,7 @@ import type { CodexAppServerClient } from "./CodexAppServerClient";
 import type { Turn } from "./app-server/v2";
 
 // Use cheap model to generate a title
-const TITLE_MODEL = "gpt-5.6-luna";
+export const TITLE_MODEL = "gpt-5.6-luna";
 
 // thread/name/set acks once Codex accepts the rename, but the thread/name/updated
 // notification that echoes it back to the client can lag behind that ack. Cap how

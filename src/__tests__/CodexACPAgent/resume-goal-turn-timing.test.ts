@@ -71,7 +71,9 @@ describe('baseline tracker installed before thread/resume, so an auto-started go
         client.emit(turnCompletedFor(secondSessionId, secondTurnId));
         await settle();
 
+        // The second running report is the required resume snapshot, not a new work interval.
         expect(stateUpdates(client.transcript)).toEqual([
+            {state: "running"},
             {state: "running"},
             {state: "idle", stopReason: "end_turn"},
         ]);
@@ -91,12 +93,32 @@ describe('baseline tracker installed before thread/resume, so an auto-started go
         client.emit(turnCompletedFor(secondSessionId, secondTurnId));
         await settle();
 
+        // Replay finishes before the current running snapshot is sent.
         expect(stateUpdates(client.transcript)).toEqual([
+            {state: "running"},
             {state: "running"},
             {state: "idle", stopReason: "end_turn"},
         ]);
         expect(agentMessageChunks(client.transcript)).toEqual([
             expect.objectContaining({sessionUpdate: "agent_message_chunk"}),
+        ]);
+    });
+
+    it('synchronizes a resumed thread that was already active without needing another turn-start event', async () => {
+        const client = await connectSession(2);
+        closeClient = () => client.connection.close();
+        client.setCodexResponse("thread/resume", async () => ({
+            ...(codexResponse("thread/resume") as Record<string, unknown>),
+            thread: {...createThread(), id: secondSessionId, status: {type: "active", activeFlags: []}},
+        }));
+
+        await client.request("session/resume", {sessionId: secondSessionId, cwd});
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}]);
+        client.emit(turnCompletedFor(secondSessionId, secondTurnId));
+        await settle();
+        expect(stateUpdates(client.transcript)).toEqual([
+            {state: "running"},
+            {state: "idle", stopReason: "end_turn"},
         ]);
     });
 
@@ -136,6 +158,7 @@ describe('baseline tracker installed before thread/resume, so an auto-started go
         closeClient = () => client.connection.close();
         const replayedTurn: Thread["turns"][number] = {
             id: "replayed-turn",
+            rootTurnId: null,
             itemsView: "full",
             status: "completed",
             error: null,

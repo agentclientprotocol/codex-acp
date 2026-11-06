@@ -10,6 +10,12 @@
     }
   },
   {
+    "sessionUpdate": {
+      "state": "running",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
     "promptResponse": {
       "messageId": "<messageId>"
     }
@@ -25,12 +31,6 @@
   },
   {
     "codexNotification": "turn/completed"
-  },
-  {
-    "sessionUpdate": {
-      "state": "running",
-      "sessionUpdate": "state_update"
-    }
   },
   {
     "sessionUpdate": {

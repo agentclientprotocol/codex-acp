@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import * as acp from '@agentclientprotocol/sdk';
-import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
+import * as acp from '@agentclientprotocol/sdk/unstable';
+import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {createAcpAgentRouter} from '../../AcpAgentRouter';
 import {ACPSessionConnection, AcpV2Connection} from '../../ACPSessionConnection';
 import {toV2SessionUpdate} from '../../AcpV2SessionUpdate';
@@ -27,7 +27,7 @@ const availableCommandsUpdate: acp.SessionUpdate = {
 };
 
 function createTurn(status: Turn["status"]): Turn {
-    return {id: turnId, items: [], itemsView: "full", status, error: null, startedAt: null, completedAt: null, durationMs: null};
+    return {id: turnId, rootTurnId: null, items: [], itemsView: "full", status, error: null, startedAt: null, completedAt: null, durationMs: null};
 }
 
 /**

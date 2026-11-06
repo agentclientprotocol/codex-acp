@@ -1,5 +1,5 @@
-import * as acp from "@agentclientprotocol/sdk";
-import type {CreateElicitationResponse, McpServerStdio, RequestPermissionResponse} from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
+import type {CreateElicitationResponse, McpServerStdio, RequestPermissionResponse} from "@agentclientprotocol/sdk/unstable";
 import {CodexAcpClient} from '../CodexAcpClient';
 import {ToolCallReports} from "../ToolCallReports";
 import {CodexAppServerClient, type CodexConnectionEvent} from '../CodexAppServerClient';
@@ -191,7 +191,14 @@ export function createBaseTestFixture(config: ConnectionConfig): TestFixture {
  * Use for integration tests that need to interact with the actual Codex binary.
  */
 export function createTestFixture(): TestFixture {
-    const pathToCodex = path.resolve(process.cwd(), "node_modules", ".bin", process.platform === 'win32' ? "codex.cmd" : "codex");
+    const bundledCodexPath = path.resolve(
+        process.cwd(),
+        "node_modules",
+        ".bin",
+        process.platform === 'win32' ? "codex.cmd" : "codex",
+    );
+    const pathToCodex = process.env["CODEX_PATH"] ?? bundledCodexPath;
+
     if (!fs.existsSync(pathToCodex)) {
         throw new Error(`Codex binary not found at ${pathToCodex}. Did you run 'npm install'?`);
     }
@@ -295,7 +302,9 @@ export function createCodexMockTestFixture(
     };
 
     const mockCodexConnection = {
-        sendRequest: () => Promise.resolve(undefined),
+        sendRequest: (method: string) => Promise.resolve(
+            method === "thread/backgroundTerminals/list" ? {data: [], nextCursor: null} : undefined,
+        ),
         onUnhandledNotification: (handler: (notification: any) => void) => {
             unhandledNotificationHandler = handler;
         },
@@ -441,6 +450,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         supportedReasoningEfforts: [],
         supportedInputModalities: ["text", "image"],
         agentMode: AgentMode.DEFAULT_AGENT_MODE,
+        availableAgentModes: AgentMode.all(),
         collaborationMode: DEFAULT_COLLABORATION_MODE,
         fastModeEnabled: false,
         currentModelSupportsFast: false,
@@ -456,6 +466,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
             false,
             new ACPSessionConnection({notify: vi.fn(), request: vi.fn()} as AcpClientConnection, sessionId),
             () => {},
+            () => ({currentModel: null, availableModels: []}),
         ),
         asyncTasks: new CodexBackgroundTerminalTasks(
             false,
@@ -523,6 +534,7 @@ export function mockPromptTurn(fixture: CodexMockTestFixture, sessionId: string)
         turn: {
             id: "turn-id",
             items: [],
+            rootTurnId: null,
             itemsView: "notLoaded",
             status: "inProgress",
             error: null,
@@ -536,6 +548,7 @@ export function mockPromptTurn(fixture: CodexMockTestFixture, sessionId: string)
         turn: {
             id: "turn-id",
             items: [],
+            rootTurnId: null,
             itemsView: "notLoaded",
             status: "completed",
             error: null,

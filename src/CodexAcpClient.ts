@@ -1,14 +1,15 @@
 import {
     type ApiKeyAuthRequest,
     CODEX_API_KEY_ENV_VAR,
+    type CodexAuthRequest,
     GatewayAuthMethod,
     type GatewayAuthRequest,
     isCodexAuthRequest,
     OPENAI_API_KEY_ENV_VAR,
 } from "./CodexAuthMethod";
-import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk";
-import * as acp from "@agentclientprotocol/sdk";
-import {RequestError} from "@agentclientprotocol/sdk";
+import type {EmbeddedResourceResource} from "@agentclientprotocol/sdk/unstable";
+import * as acp from "@agentclientprotocol/sdk/unstable";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import type {
     ApprovalHandler,
     CodexAppServerClient,
@@ -27,14 +28,16 @@ import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import {ModelId} from "./ModelId";
 import {AgentMode} from "./AgentMode";
 import path from "node:path";
+import {isDeepStrictEqual} from "node:util";
 import {logger} from "./Logger";
 import {isAccountReadAuthFailureError, isAccountReadUnavailableError} from "./CodexThreadErrors";
-import {sanitizeMcpServerName} from "./McpServerName";
-import {listedSessionTitle} from "./SessionTitle";
-import {type AcpMcpServer, type WithAcpMcpServers, getMcpServerName, normalizeMcpServer, toCodexMcpServerConfig} from "./McpServerConfig";
+import {listedSessionTitle, normalizeSessionTitle} from "./SessionTitle";
+import {type AcpMcpServer, type WithAcpMcpServers, normalizeMcpServers, toCodexMcpServerConfig} from "./McpServerConfig";
 import type {
-    AccountLoginCompletedNotification,
     AccountUpdatedNotification,
+    ApprovalsReviewer,
+    AskForApproval,
+    ConfigReadResponse,
     GetAccountRateLimitsResponse,
     GetAccountResponse,
     ListMcpServerStatusParams,
@@ -43,6 +46,7 @@ import type {
     McpServerOauthLoginParams,
     McpServerOauthLoginResponse,
     Model,
+    PermissionProfileSummary,
     ReviewTarget,
     SkillsListParams,
     SkillsListResponse,
@@ -54,6 +58,7 @@ import type {
     ThreadSourceKind,
     ThreadItem,
     ThreadItemEntry,
+    Turn,
     TurnCompletedNotification,
     TurnSteerResponse,
     UserInput,
@@ -62,18 +67,24 @@ import packageJson from "../package.json";
 import type {AuthenticationStatusResponse} from "./AcpExtensions";
 import {createCodexCollaborationMode} from "./CollaborationModeConfig";
 import type {ModeKind} from "./app-server/ModeKind";
-import {arePathBasenamesEqual, arePathsEqual, isAbsolutePathLike} from "./PathUtils";
+import {arePathBasenamesEqual, arePathsEqual, isAbsolutePathLike, isAbsoluteProtocolPath} from "./PathUtils";
 import {CodexSubagentSubscriptions} from "./subagents/CodexSubagentSubscriptions";
 import {forkSession as runForkSession} from "./SessionFork";
 import {rewindSession as runRewindSession, type SessionRewindRequest} from "./SessionRewind";
 import type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
+import {runAccountLogin} from "./CodexAccountLogin";
+import {throwIfRequestCancelled, withRequestCancellation} from "./RequestCancellation";
 import {
     isMissingRolloutError,
+    isThreadNotMaterializedError,
     isThreadActiveWriterError,
+    isThreadNotFoundError,
+    isThreadNotLoadedError,
     isUnknownThreadError,
     threadActiveWriterRequestError,
 } from "./CodexThreadErrors";
 import {airCustomInstructions} from "./AirExtension";
+import {changesSystemPrompt, clientSystemPromptText, type SessionInstructions} from "./ClientSystemPrompt";
 import {
     GatewayListingError,
     type GatewayModelIds,
@@ -82,7 +93,11 @@ import {
     narrowToListedModels,
 } from "./GatewayModelDiscovery";
 import {findSupportedEffort} from "./ModelConfigOption";
+import {type ProviderStartupConfig, configOverride, NO_PROVIDER_STARTUP_CONFIG} from "./CodexConfigOverride";
+import {disableUnsupportedSkills, withoutUnsupportedSkills} from "./UnsupportedSkills";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
+/** A null turn marks unavailable outcome metadata, not a failed turn. */
+export type RecordedSubagentEntry = {item: ThreadItem; completed: boolean; turnId?: string} | {turn: Turn | null};
 
 /**
  * The slice of `thread/resume` the session layer consumes, plus whether Codex
@@ -94,6 +109,7 @@ type ResumedThread = {
     modelProvider: string;
     reasoningEffort: ReasoningEffort | null;
     serviceTier: string | null;
+    activePermissionProfileId: string | null;
     itemsBackwardsCursor: string | null;
     materialized: boolean;
     /** The mode that the resume response reports. Null when the thread has no rollout yet. */
@@ -156,7 +172,7 @@ export class CodexAcpClient {
      * routing). `authStatus` reports only the agent-owned one.
      */
     private gatewayConfigSource: GatewayConfigSource | null;
-    private pendingLoginCompleted: Promise<AccountLoginCompletedNotification> | null = null;
+    private authenticationTail = Promise.resolve();
     private pendingAccountUpdated: Promise<AccountUpdatedNotification> | null = null;
     private readonly sessionNotificationQueues = new Map<string, Promise<void>>();
     private readonly subagents: CodexSubagentSubscriptions;
@@ -198,6 +214,8 @@ export class CodexAcpClient {
     };
 
     async initialize(request: Pick<acp.InitializeRequest, "clientInfo">): Promise<void> {
+        // ACP can repeat initialize, but a Codex app-server connection handshakes only once.
+        if (this.isInitialized) return;
         const response = await this.codexClient.initialize({
             capabilities: {
                 experimentalApi: true,
@@ -224,51 +242,55 @@ export class CodexAcpClient {
         return this.configPath;
     }
 
-    async authenticate(
+    authenticate(
         authRequest: acp.AuthenticateRequest,
         urlElicitationRequester?: UrlElicitationRequester,
-    ): Promise<Boolean> {
+        signal?: AbortSignal,
+    ): Promise<boolean> {
         if (!isCodexAuthRequest(authRequest)) {
-            throw RequestError.invalidRequest();
+            return Promise.reject(RequestError.invalidParams());
         }
+        const run = this.authenticationTail.then(() => this.authenticateOnce(authRequest, urlElicitationRequester, signal));
+        this.authenticationTail = run.then(() => {}, () => {});
+        return withRequestCancellation(run, signal);
+    }
+
+    private async authenticateOnce(
+        authRequest: CodexAuthRequest,
+        urlElicitationRequester?: UrlElicitationRequester,
+        signal?: AbortSignal,
+    ): Promise<boolean> {
+        throwIfRequestCancelled(signal);
         this.gatewayConfig = null;
         this.gatewayConfigSource = null;
         switch (authRequest.methodId) {
             case "api-key":
-                return await this.authenticateWithApiKey(authRequest);
+                return await this.authenticateWithApiKey(authRequest, signal);
             case "chat-gpt":
-                return await this.authenticateWithChatGpt();
+                return await this.authenticateWithChatGpt(signal);
             case "chat-gpt-device-code":
-                return await this.authenticateWithChatGptDeviceCode(urlElicitationRequester);
+                return await this.authenticateWithChatGptDeviceCode(urlElicitationRequester, signal);
             case "gateway":
                 return this.authenticateWithGateway(authRequest);
         }
     }
 
-    private async authenticateWithApiKey(authRequest: ApiKeyAuthRequest): Promise<Boolean> {
+    private async authenticateWithApiKey(authRequest: ApiKeyAuthRequest, signal?: AbortSignal): Promise<boolean> {
         const apiKey = authRequest._meta?.["api-key"]?.apiKey ?? this.readApiKeyFromEnv();
-        const loginCompletedPromise = this.awaitNextLoginCompleted();
-        loginCompletedPromise.catch(() => {});
-        await this.codexClient.accountLogin({
-            type: "apiKey",
-            apiKey,
-        });
-        const result = await loginCompletedPromise;
-        return result.success;
+        return runAccountLogin(this.codexClient, {type: "apiKey", apiKey}, async () => true, signal);
     }
 
-    private async authenticateWithChatGpt(): Promise<Boolean> {
+    private async authenticateWithChatGpt(signal?: AbortSignal): Promise<boolean> {
         if (await this.hasWorkingChatGptLogin()) {
+            throwIfRequestCancelled(signal);
             return true;
         }
-        const loginCompletedPromise = this.awaitNextLoginCompleted();
-        loginCompletedPromise.catch(() => {});
-        const loginResponse = await this.codexClient.accountLogin({type: "chatgpt"});
-        if (loginResponse.type == "chatgpt") {
-            await open(loginResponse.authUrl);
-        }
-        const result = await loginCompletedPromise;
-        return result.success;
+        return runAccountLogin(this.codexClient, {type: "chatgpt"}, async response => {
+            if (response.type !== "chatgpt") return false;
+            throwIfRequestCancelled(signal);
+            await open(response.authUrl);
+            return true;
+        }, signal);
     }
 
     /**
@@ -296,58 +318,26 @@ export class CodexAcpClient {
         }
     }
 
-    private async authenticateWithChatGptDeviceCode(urlElicitationRequester?: UrlElicitationRequester): Promise<Boolean> {
+    private async authenticateWithChatGptDeviceCode(urlElicitationRequester?: UrlElicitationRequester, signal?: AbortSignal): Promise<boolean> {
         if (await this.hasWorkingChatGptLogin()) {
+            throwIfRequestCancelled(signal);
             return true;
         }
         if (!urlElicitationRequester) {
             throw RequestError.invalidRequest(undefined, "Device code authentication requires URL elicitation support");
         }
-        const loginCompletedPromise = this.awaitNextLoginCompleted();
-        loginCompletedPromise.catch(() => {});
-        const loginResponse = await this.codexClient.accountLogin({type: "chatgptDeviceCode"});
-        if (loginResponse.type !== "chatgptDeviceCode") {
-            return false;
-        }
-        const elicitationResponsePromise = Promise.resolve(urlElicitationRequester.elicitUrl({
-            url: loginResponse.verificationUrl,
-            message: `Sign in to ChatGPT and enter this code: ${loginResponse.userCode}`,
-            elicitationId: loginResponse.loginId,
-        }));
         try {
-            const first = await Promise.race([
-                loginCompletedPromise.then(result => ({
-                    type: "loginCompleted" as const,
-                    result,
-                })),
-                elicitationResponsePromise.then(response => ({
-                    type: "elicitationResponse" as const,
-                    response,
-                })),
-            ]);
-
-            if (first.type === "loginCompleted") {
-                await urlElicitationRequester.completeElicitation();
-                return first.result.success;
-            }
-
-            if (!acp.CreateElicitationResponse.isAccept(first.response)) {
-                await this.codexClient.accountLoginCancel({loginId: loginResponse.loginId});
-                throw RequestError.requestCancelled(
-                    {methodId: "chat-gpt-device-code", action: first.response.action},
-                    "ChatGPT device code sign-in was cancelled",
-                );
-            }
-
-            const result = await loginCompletedPromise;
-            await urlElicitationRequester.completeElicitation();
-            return result.success;
-        } catch (error) {
-            // A lost app-server ends the login: the open URL elicitation must not stay open in the client.
-            if (this.codexClient.connectionLoss.lost) {
-                await Promise.resolve(urlElicitationRequester.completeElicitation()).catch(() => {});
-            }
-            throw error;
+            return await runAccountLogin(this.codexClient, {type: "chatgptDeviceCode"}, async response => {
+                if (response.type !== "chatgptDeviceCode") return false;
+                const answer = await urlElicitationRequester.elicitUrl({
+                    url: response.verificationUrl,
+                    message: `Sign in to ChatGPT and enter this code: ${response.userCode}`,
+                    elicitationId: response.loginId,
+                });
+                return acp.CreateElicitationResponse.isAccept(answer);
+            }, signal);
+        } finally {
+            await urlElicitationRequester.completeElicitation().catch(() => {});
         }
     }
 
@@ -409,6 +399,11 @@ export class CodexAcpClient {
                 return {
                     type: "gateway",
                     name: "amazonBedrock",
+                };
+            case "gcp":
+                return {
+                    type: "gateway",
+                    name: "gcp",
                 };
         }
     }
@@ -484,11 +479,10 @@ export class CodexAcpClient {
         }
         // Reuse needs the very same headers, so a rotated token lists again, and a failed listing then fails that
         // `providers/set`. Deliberate: AIR keeps its proxy key for the IDE's lifetime and does not rotate it.
-        const previous = this.gatewayConfigSource === "acpProviders" ? this.gatewayConfig : null;
+        const previousListing = this.hasProviderRouting(gatewayConfig) ? this.gatewayConfig?.listedModels ?? null : null;
         try {
-            gatewayConfig.listedModels = previous?.listedModels && sameGatewayRouting(previous, gatewayConfig)
-                ? previous.listedModels
-                : await listGatewayModels(gatewayConfig.config.base_url, gatewayConfig.config.http_headers);
+            gatewayConfig.listedModels = previousListing
+                ?? await listGatewayModels(gatewayConfig.config.base_url, gatewayConfig.config.http_headers);
         } catch (error) {
             if (error instanceof GatewayListingError) {
                 throw RequestError.internalError(
@@ -499,6 +493,13 @@ export class CodexAcpClient {
             throw error;
         }
         return gatewayConfig;
+    }
+
+    /** Whether `providers/set` already applied the provider config of `gatewayConfig`. */
+    hasProviderRouting(gatewayConfig: GatewayConfig): boolean {
+        return this.gatewayConfigSource === "acpProviders"
+            && this.gatewayConfig !== null
+            && sameProviderConfig(this.gatewayConfig, gatewayConfig);
     }
 
     /** `providers/set`: replaces the routing with a configuration from {@link prepareProvider}. */
@@ -649,6 +650,7 @@ export class CodexAcpClient {
                 modelProvider: response.modelProvider,
                 reasoningEffort: response.reasoningEffort,
                 serviceTier: response.serviceTier,
+                activePermissionProfileId: response.activePermissionProfile?.id ?? null,
                 itemsBackwardsCursor: response.itemsBackwardsCursor ?? null,
                 materialized: true,
                 collaborationMode: response.collaborationMode?.mode ?? null,
@@ -671,6 +673,8 @@ export class CodexAcpClient {
                 modelProvider: response.thread.modelProvider,
                 reasoningEffort: response.thread.reasoningEffort,
                 serviceTier: null,
+                // thread/read omits permissions; callers restore the config default before the first prompt.
+                activePermissionProfileId: null,
                 // An unmaterialized thread has no persisted history to hydrate:
                 // `thread/turns/list` rejects it outright ("not materialized
                 // yet"), and there is nothing to list either way.
@@ -681,18 +685,25 @@ export class CodexAcpClient {
         }
     }
 
-    async resumeSession(request: WithAcpMcpServers<acp.ResumeSessionRequest>, onSubscribed?: () => void): Promise<SessionMetadata> {
+    async resumeSession(
+        request: WithAcpMcpServers<acp.ResumeSessionRequest>,
+        onSubscribed?: () => void,
+        previousInstructions?: SessionInstructions,
+    ): Promise<SessionMetadata> {
+        const instructions = await this.resolveSessionInstructions(request, previousInstructions);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
-        const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
-        const response = await this.resumeThread({
+        const {config, skippedMcpServers, defaultPermissionProfileId, ...permissionProfileMetadata} =
+            await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
+        const response = await this.resumeThreadWithInstructions({
             excludeTurns: true,
-            config: sessionConfig.config,
+            config,
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
-        });
+            ...(instructions?.text !== undefined ? {developerInstructions: instructions.developerInstructions} : {}),
+        }, request, previousInstructions);
         onSubscribed?.();
         const codexModels = await this.fetchAvailableModels();
         const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
@@ -702,10 +713,15 @@ export class CodexAcpClient {
             models: codexModels,
             // Codex sends no thread/settings/updated on a resume. The response holds the mode.
             collaborationMode: response.collaborationMode ?? this.getCollaborationMode(response.thread.id),
+            threadStatus: response.thread.status,
+            sessionTitle: normalizeSessionTitle(listedSessionTitle(response.thread)),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
-            skippedMcpServers: sessionConfig.skippedMcpServers,
+            skippedMcpServers,
+            ...(instructions ? {instructions} : {}),
+            activePermissionProfileId: response.materialized ? response.activePermissionProfileId : defaultPermissionProfileId ?? null,
+            ...permissionProfileMetadata,
         }
     }
 
@@ -713,7 +729,9 @@ export class CodexAcpClient {
         request: WithAcpMcpServers<acp.ForkSessionRequest>,
         releaseFailedFork: (threadId: string) => Promise<void> = threadId => this.closeSession(threadId),
         forkCreated: (threadId: string) => void = () => {},
+        previousInstructions?: SessionInstructions,
     ): Promise<SessionMetadata> {
+        const instructions = await this.resolveSessionInstructions(request, previousInstructions);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         return await runForkSession(request, additionalDirectories, {
             codexClient: this.codexClient,
@@ -727,7 +745,7 @@ export class CodexAcpClient {
             getCollaborationMode: sessionId => this.getCollaborationMode(sessionId),
             releaseFailedFork,
             forkCreated,
-        });
+        }, instructions);
     }
 
     async rewindSession(request: SessionRewindRequest): Promise<{rewound: boolean}> {
@@ -736,18 +754,25 @@ export class CodexAcpClient {
         return response;
     }
 
-    async loadSession(request: WithAcpMcpServers<acp.LoadSessionRequest>, onSubscribed?: () => void): Promise<SessionMetadataWithThread> {
+    async loadSession(
+        request: WithAcpMcpServers<acp.LoadSessionRequest>,
+        onSubscribed?: () => void,
+        previousInstructions?: SessionInstructions,
+    ): Promise<SessionMetadataWithThread> {
+        const instructions = await this.resolveSessionInstructions(request, previousInstructions);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
-        const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
-        const response = await this.resumeThread({
+        const {config, skippedMcpServers, defaultPermissionProfileId, ...permissionProfileMetadata} =
+            await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
+        const response = await this.resumeThreadWithInstructions({
             excludeTurns: true,
-            config: sessionConfig.config,
+            config,
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
-        });
+            ...(instructions?.text !== undefined ? {developerInstructions: instructions.developerInstructions} : {}),
+        }, request, previousInstructions);
         onSubscribed?.();
         // Resume cursors bound durable history; later turns arrive through live events.
         // A null paginated cursor means there was no durable history at resume time.
@@ -784,7 +809,10 @@ export class CodexAcpClient {
             thread,
             history,
             additionalDirectories,
-            skippedMcpServers: sessionConfig.skippedMcpServers,
+            skippedMcpServers,
+            ...(instructions ? {instructions} : {}),
+            activePermissionProfileId: response.materialized ? response.activePermissionProfileId : defaultPermissionProfileId ?? null,
+            ...permissionProfileMetadata,
         };
     }
 
@@ -814,14 +842,38 @@ export class CodexAcpClient {
         return null;
     }
 
+    /** Lazy history reads let the caller restore verified live delivery before reading snapshots. */
+    async readSubagentHistory(threadId: string): Promise<{thread: Thread; items: AsyncIterable<RecordedSubagentEntry[]>}> {
+        const {thread} = await this.codexClient.threadRead({threadId});
+        if (thread.id !== threadId) throw new Error("Subagent history metadata names a different thread");
+        return {
+            thread,
+            items: thread.historyMode === "legacy"
+                ? legacySubagentItems(this.codexClient, threadId)
+                : paginatedSubagentItems(this.codexClient, threadId),
+        };
+    }
+
+    restoreSubagentSubscription(rootSessionId: string, parentThreadId: string, thread: Thread): Promise<Thread | null> {
+        return this.subagents.restoreChild(rootSessionId, parentThreadId, thread);
+    }
+
+    isSubagentThread(threadId: string): boolean { return this.subagents.isChildThread(threadId); }
+
+    subagentThreadIds(rootSessionId: string): string[] { return this.subagents.childThreadIds(rootSessionId); }
+
+    readSubagentThread(threadId: string): Promise<Thread | null> { return this.subagents.readChildThread(threadId); }
+
     async newSession(request: WithAcpMcpServers<acp.NewSessionRequest>): Promise<SessionMetadata> {
+        const instructions = await this.resolveSessionInstructions(request, undefined, true);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
-        const developerInstructions = airCustomInstructions(request._meta);
+        const developerInstructions = instructions?.developerInstructions;
         await this.refreshSkills(request.cwd, additionalDirectories);
 
-        const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
+        const {config, skippedMcpServers, defaultPermissionProfileId: _defaultPermissionProfileId, ...permissionProfileMetadata} =
+            await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
         const response = await this.codexClient.threadStart({
-            config: sessionConfig.config,
+            config,
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
             ...(developerInstructions !== undefined && {developerInstructions}),
@@ -840,16 +892,130 @@ export class CodexAcpClient {
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier as ServiceTier ?? null,
             additionalDirectories,
-            skippedMcpServers: sessionConfig.skippedMcpServers,
+            skippedMcpServers,
+            ...(instructions ? {instructions} : {}),
+            activePermissionProfileId: response.activePermissionProfile?.id ?? null,
+            ...permissionProfileMetadata,
         };
     }
 
-    async closeSession(sessionId: string): Promise<void> {
+    private async resolveSessionInstructions(
+        request: {cwd: string; systemPrompt?: unknown; _meta?: unknown},
+        previous?: SessionInstructions,
+        creating = false,
+    ): Promise<SessionInstructions | undefined> {
+        const text = clientSystemPromptText(request.systemPrompt);
+        if (text === undefined) {
+            if (!creating) return previous;
+            const airInstructions = airCustomInstructions(request._meta);
+            return airInstructions === undefined ? undefined : {airInstructions, developerInstructions: airInstructions};
+        }
+        if (!changesSystemPrompt(request, previous)) return previous;
+        // AIR already replaces configured developer instructions. Append to that same baseline.
+        const airInstructions = airCustomInstructions(request._meta) ?? previous?.airInstructions;
+        const baseline = airInstructions ?? this.config["developer_instructions"]
+            ?? (await this.codexClient.configRead({cwd: request.cwd, includeLayers: false}))?.config?.developer_instructions
+            ?? "";
+        if (typeof baseline !== "string") {
+            throw acp.RequestError.invalidParams(undefined, "Configured developer instructions must be text");
+        }
+        return {
+            text,
+            ...(airInstructions !== undefined ? {airInstructions} : {}),
+            developerInstructions: [baseline, text].filter(part => part.length > 0).join("\n\n"),
+        };
+    }
+
+    private async resumeThreadWithInstructions(
+        params: ThreadResumeParams,
+        request: {sessionId: string; systemPrompt?: unknown; _meta?: unknown},
+        previous?: SessionInstructions,
+    ): Promise<ResumedThread> {
+        if (!changesSystemPrompt(request, previous)) return this.resumeThread(params);
+        const {thread} = await this.codexClient.threadRead({threadId: request.sessionId});
+        if (thread.status.type === "notLoaded") return this.resumeThread(params);
+        if (thread.status.type !== "idle" || thread.path === null) {
+            throw acp.RequestError.invalidParams(
+                undefined,
+                "Changing systemPrompt requires an idle, persisted session; finish the turn or create a new session",
+            );
+        }
+        const terminals = await this.codexClient.threadBackgroundTerminalsList({threadId: request.sessionId, limit: 1});
+        if (terminals.data.length > 0) {
+            throw RequestError.invalidParams(undefined, "Cannot change systemPrompt while background terminals are running");
+        }
+        // A start response contains a planned rollout path even before the file exists.
         try {
-            await this.codexClient.threadUnsubscribe({threadId: sessionId});
+            await this.codexClient.threadTurnsList({threadId: request.sessionId, limit: 1, itemsView: "notLoaded"});
+        } catch (error) {
+            if (!isMissingRolloutError(error) && !isThreadNotMaterializedError(error)) throw error;
+            throw RequestError.invalidParams(undefined, "Changing systemPrompt requires a persisted session; create a new session instead");
+        }
+        // Subscribed threads ignore resume overrides. Idle, detached threads can be rebuilt.
+        // Retained developer messages are replaced at the next compaction.
+        let unloaded = false;
+        let detached = false;
+        let resumed = false;
+        const release = this.codexClient.onClientTransportEvent(event => {
+            if (event.eventType === "notification" && event.method === "thread/status/changed"
+                && event.params.threadId === request.sessionId && event.params.status.type === "notLoaded") {
+                unloaded = true;
+            }
+        });
+        try {
+            await this.codexClient.threadUnsubscribe({threadId: request.sessionId});
+            detached = true;
+            const response = await this.resumeThread(params);
+            resumed = true;
+            if (!unloaded) {
+                throw RequestError.invalidParams(
+                    undefined,
+                    "Codex kept the existing thread loaded; systemPrompt could not be changed. Retry when idle",
+                );
+            }
+            return response;
+        } catch (error) {
+            if (detached && !resumed) {
+                await this.resumeThread({threadId: request.sessionId, excludeTurns: true}).catch(restoreError => {
+                    logger.error(`Failed to restore session ${request.sessionId} after an instruction update`, restoreError);
+                });
+            }
+            throw error;
         } finally {
-            this.codexClient.clearThreadHandlers(sessionId);
-            this.subagents.clear(sessionId);
+            release();
+        }
+    }
+
+    async closeSession(sessionId: string): Promise<void> {
+        const children = this.subagents.verifiedChildThreadIds(sessionId);
+        // Unsubscribe only detaches. Codex can keep the runtime and its processes alive until a later unload.
+        for (const threadId of [...children, sessionId]) {
+            await this.stopBackgroundTerminals(threadId);
+        }
+        await this.codexClient.threadUnsubscribe({threadId: sessionId});
+        this.codexClient.clearThreadHandlers(sessionId);
+        this.subagents.clear(sessionId);
+    }
+
+    private async stopBackgroundTerminals(threadId: string): Promise<void> {
+        try {
+            // Read all pages before removing processes so cleanup cannot disturb pagination.
+            const terminals = [];
+            for await (const page of this.codexClient.backgroundTerminalPages(threadId)) terminals.push(...page);
+            for (const terminal of terminals) {
+                const result = await this.codexClient.threadBackgroundTerminalsTerminate({threadId, processId: terminal.processId});
+                if (!result.terminated) {
+                    // False can mean either "already gone" or a failed stop. Verify which before closing.
+                    for await (const page of this.codexClient.backgroundTerminalPages(threadId)) {
+                        if (page.some(current => current.processId === terminal.processId)) {
+                            throw new Error(`Codex could not stop background terminal ${terminal.processId}`);
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            // An already-unloaded runtime has no processes left to stop.
+            if (!isThreadNotFoundError(error) && !isThreadNotLoadedError(error)) throw error;
         }
     }
 
@@ -904,9 +1070,8 @@ export class CodexAcpClient {
         sessionId: string,
         onTurnStarted?: (turnId: string) => void,
         onAccepted?: () => void,
-    ): Promise<TurnCompletedNotification | undefined> {
-        const completed = await this.codexClient.runCompact({threadId: sessionId}, onTurnStarted, onAccepted);
-        return completed.method === "turn/completed" ? completed.params : undefined;
+    ): Promise<TurnCompletedNotification> {
+        return await this.codexClient.runCompact({threadId: sessionId}, onTurnStarted, onAccepted);
     }
 
     async getGoal(sessionId: string): Promise<ThreadGoal | null> {
@@ -998,24 +1163,31 @@ export class CodexAcpClient {
             baseUrl: activeProvider.baseUrl,
         });
         const mergedConfig = {
-            ...forceGitRootTurnDiffPaths(mergeGatewayConfig(this.config, this.gatewayConfig)),
+            ...disableUnsupportedSkills(forceGitRootTurnDiffPaths(mergeGatewayConfig(this.config, this.gatewayConfig))),
             projects: Object.fromEntries(sessionRoots.map(root => [root, {
                 trust_level: "trusted",
             }])),
         };
         const configWithWorkspaceRoots = mergeSandboxWorkspaceWriteRoots(mergedConfig, additionalDirectories);
+        const permissionProfiles = await this.fetchPermissionProfiles(projectPath);
+        const effectiveConfig = await this.codexClient.configRead({includeLayers: true, cwd: projectPath});
+        const defaultPermissionProfileId = effectiveConfig?.config?.["default_permissions"];
+        // Thread responses retain per-turn overrides; profile modes use the configured approval defaults.
+        const permissionProfileMetadata = {
+            permissionProfiles,
+            defaultPermissionProfileId: typeof defaultPermissionProfileId === "string" ? defaultPermissionProfileId : null,
+            ...(effectiveConfig?.config?.approval_policy != null && {approvalPolicy: effectiveConfig.config.approval_policy}),
+            ...(effectiveConfig?.config?.approvals_reviewer != null && {approvalsReviewer: effectiveConfig.config.approvals_reviewer}),
+        };
         if (mcpServers.length === 0) {
-            return {config: configWithWorkspaceRoots, skippedMcpServers: []};
+            return {config: configWithWorkspaceRoots, skippedMcpServers: [], ...permissionProfileMetadata};
         }
 
-        const requestedServers = mcpServers.map(mcp => ({
-            name: sanitizeMcpServerName(getMcpServerName(mcp)),
-            server: mcp,
-        }));
+        const requestedServers = normalizeMcpServers(mcpServers).map(server => ({name: server.name, server}));
         let serversToConfigure = requestedServers;
         if (shouldDeduplicateMcpConflicts()) {
             // Prevents Codex from deep-merging incompatible field types, such as url and stdio schemas.
-            const existingNames = await this.getConfigMcpServerNames(projectPath);
+            const existingNames = this.getConfigMcpServerNames(effectiveConfig);
             serversToConfigure = requestedServers.filter(mcp => !existingNames.has(mcp.name));
         }
         const skippedMcpServers = requestedServers
@@ -1028,20 +1200,20 @@ export class CodexAcpClient {
             });
         }
         if (serversToConfigure.length === 0) {
-            return {config: configWithWorkspaceRoots, skippedMcpServers};
+            return {config: configWithWorkspaceRoots, skippedMcpServers, ...permissionProfileMetadata};
         }
 
         return {
             config: {
                 ...configWithWorkspaceRoots,
-                "mcp_servers": Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, toCodexMcpServerConfig(normalizeMcpServer(mcp.server))])),
+                "mcp_servers": Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, toCodexMcpServerConfig(mcp.server)])),
             },
             skippedMcpServers,
+            ...permissionProfileMetadata,
         };
     }
 
-    private async getConfigMcpServerNames(projectPath: string): Promise<Set<string>> {
-        const response = await this.codexClient.configRead({ includeLayers: true, cwd: projectPath });
+    private getConfigMcpServerNames(response: ConfigReadResponse): Set<string> {
         const effectiveMcpServers = response?.config?.["mcp_servers"];
         const configLayers = response?.layers ?? [];
         const layerMcpServers = configLayers.map(layer => {
@@ -1054,8 +1226,24 @@ export class CodexAcpClient {
         return new Set(configuredMcpServers.flatMap(server => Object.keys(server)));
     }
 
+    private async fetchPermissionProfiles(projectPath: string): Promise<PermissionProfileSummary[]> {
+        const profiles: PermissionProfileSummary[] = [];
+        let cursor: string | null = null;
+        do {
+            const response = await this.codexClient.listPermissionProfiles({cwd: projectPath, cursor});
+            profiles.push(...(response?.data ?? []));
+            cursor = response?.nextCursor ?? null;
+        } while (cursor !== null);
+        return profiles;
+    }
+
     getModelProvider(): string | null {
         return this.gatewayConfig?.modelProvider ?? this.modelProvider;
+    }
+
+    /** The provider routing that the app-server of this client must start with, see {@link providerStartupConfig}. */
+    providerStartupConfig(): ProviderStartupConfig {
+        return providerStartupConfig(this.modelProvider, this.config, this.gatewayConfig);
     }
 
     private async getResumeModelProvider(): Promise<string> {
@@ -1135,6 +1323,8 @@ export class CodexAcpClient {
         supportsSubagents: boolean,
         observeInteraction: (result: ServerNotification) => void | Promise<void>,
         waitForChildSession: (childThreadId: string) => Promise<string | null>,
+        withUserAction?: import("./subagents/CodexSubagentSubscriptions").SubagentInteraction,
+        observeWorkEnd?: (event: ServerNotification) => void,
     ) {
         const dispatch = (event: ServerNotification) => {
             this.enqueueSessionNotification(sessionId, () => eventHandler(event));
@@ -1153,6 +1343,23 @@ export class CodexAcpClient {
             elicitationHandler,
             waitForRootNotifications: () => this.waitForSessionNotifications(sessionId),
             waitForChildSession,
+            ...(withUserAction ? {withUserAction} : {}),
+            ...(observeWorkEnd ? {observeWorkEnd} : {}),
+        });
+    }
+
+    redispatchSessionNotifications(sessionId: string, notifications: ServerNotification[], after?: () => Promise<void>): void {
+        this.subagents.redispatch(sessionId, notifications);
+        if (after) this.enqueueSessionNotification(sessionId, after);
+    }
+
+    /** Completion includes async publication, not just invoking its callback. */
+    enqueueSessionTransition(sessionId: string, operation: () => void | Promise<void>): Promise<void> {
+        return new Promise((resolve, reject) => {
+            this.enqueueSessionNotification(sessionId, async () => {
+                try { await operation(); resolve(); }
+                catch (error) { reject(error); }
+            });
         });
     }
 
@@ -1201,12 +1408,18 @@ export class CodexAcpClient {
         if (shouldCancel?.()) {
             return null;
         }
+        const permissionProfileId = agentMode.permissionProfileId;
         return await this.codexClient.runTurn({
             threadId: request.sessionId,
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
             approvalsReviewer: agentMode.approvalsReviewer,
-            sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
+            ...(permissionProfileId
+                ? {
+                    permissions: permissionProfileId,
+                    runtimeWorkspaceRoots: [cwd, ...additionalDirectories],
+                }
+                : {sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy!, additionalDirectories)}),
             summary: disableSummary ? "none" : "auto",
             effort: effort,
             model: modelId.model,
@@ -1235,22 +1448,7 @@ export class CodexAcpClient {
     }
 
     async listSkills(params?: SkillsListParams): Promise<SkillsListResponse> {
-        return this.codexClient.listSkills(params ?? {});
-    }
-
-    private async awaitNextLoginCompleted(): Promise<AccountLoginCompletedNotification> {
-        if (this.pendingLoginCompleted !== null) {
-            return await this.pendingLoginCompleted;
-        }
-        this.pendingLoginCompleted = this.awaitSingleNotification(
-            "account/login/completed",
-            (event: AccountLoginCompletedNotification) => event,
-        );
-        try {
-            return await this.pendingLoginCompleted;
-        } finally {
-            this.pendingLoginCompleted = null;
-        }
+        return withoutUnsupportedSkills(await this.codexClient.listSkills(params ?? {}));
     }
 
     private async awaitNextAccountUpdated(): Promise<AccountUpdatedNotification> {
@@ -1405,6 +1603,10 @@ export type JsonObject = { [key in string]?: JsonValue }
 export type SessionConfig = {
     config: JsonObject,
     skippedMcpServers: string[],
+    defaultPermissionProfileId?: string | null,
+    approvalPolicy?: AskForApproval,
+    approvalsReviewer?: ApprovalsReviewer,
+    permissionProfiles?: PermissionProfileSummary[],
 }
 
 function buildPromptItems(prompt: acp.ContentBlock[]): UserInput[] {
@@ -1480,6 +1682,10 @@ type WireApi = "responses";
 
 type GatewayConfigSource = "authentication" | "acpProviders";
 
+/**
+ * Everything that the gateway routing gives Codex. A setting that `providers/set` changes belongs here: an unchanged
+ * configuration, compared by {@link sameProviderConfig}, does not restart the app-server.
+ */
 export interface GatewayConfig {
     modelProvider: string;
     config: {
@@ -1531,13 +1737,12 @@ function buildGatewayConfig(params: GatewayRoutingParams): GatewayConfig {
     };
 }
 
-function sameGatewayRouting(left: GatewayConfig, right: GatewayConfig): boolean {
-    const leftHeaders = Object.entries(left.config.http_headers);
-    const rightHeaders = right.config.http_headers;
-    return left.config.base_url === right.config.base_url
-        && left.config.wire_api === right.config.wire_api
-        && leftHeaders.length === Object.keys(rightHeaders).length
-        && leftHeaders.every(([name, value]) => rightHeaders[name] === value);
+/**
+ * Whether Codex gets the same provider config from both, compared by value with keys in any order.
+ * The model listing is a result of the config, not a part of it.
+ */
+function sameProviderConfig(left: GatewayConfig, right: GatewayConfig): boolean {
+    return left.modelProvider === right.modelProvider && isDeepStrictEqual(left.config, right.config);
 }
 
 function readMetaAdditionalRoots(meta?: Record<string, unknown> | null): string[] | undefined {
@@ -1567,7 +1772,7 @@ function readAdditionalDirectories(cwd: string, additionalDirectories?: string[]
         if (directory.length === 0) {
             throw RequestError.invalidParams(undefined, "additionalDirectories entries must not be empty");
         }
-        if (!path.isAbsolute(directory)) {
+        if (!isAbsoluteProtocolPath(directory)) {
             throw RequestError.invalidParams(undefined, "additionalDirectories entries must be absolute paths");
         }
         if (!seen.has(directory)) {
@@ -1663,8 +1868,84 @@ function mergeGatewayConfig(config: JsonObject, gatewayConfig: GatewayConfig | n
     }
 }
 
+/**
+ * The provider that threads get (the gateway, the launch option, or `model_provider` of the session config) as
+ * app-server overrides. Codex accepts input only for threads of the provider that its app-server started with, and the
+ * `-c` overrides set it for that process alone, without a write to the user's `config.toml`. Header values go in
+ * environment variables, through `env_http_headers`, so that a gateway key is not in the process arguments.
+ */
+export function providerStartupConfig(
+    modelProvider: string | null,
+    config: JsonObject,
+    gatewayConfig: GatewayConfig | null,
+): ProviderStartupConfig {
+    const configuredProvider = typeof config["model_provider"] === "string" ? config["model_provider"] : null;
+    const effectiveProvider = gatewayConfig?.modelProvider ?? modelProvider ?? configuredProvider;
+    if (effectiveProvider === null) return NO_PROVIDER_STARTUP_CONFIG;
+
+    const args = configOverride("model_provider", effectiveProvider);
+    const providers = mergeGatewayConfig(config, gatewayConfig)["model_providers"];
+    const providerDefinition = isJsonObject(providers) ? providers[effectiveProvider] : undefined;
+    // Without a definition here, the provider is a built-in one or comes from the user's Codex config.
+    if (!isJsonObject(providerDefinition)) return {args, env: {}};
+
+    const {http_headers: headers, ...provider} = providerDefinition;
+    const env: Record<string, string> = {};
+    const envHeaders: JsonObject = isJsonObject(provider["env_http_headers"]) ? {...provider["env_http_headers"]} : {};
+    if (isJsonObject(headers)) {
+        for (const [name, value] of Object.entries(headers)) {
+            if (typeof value !== "string") continue;
+            const variable = `CODEX_ACP_PROVIDER_HEADER_${Object.keys(env).length}`;
+            env[variable] = value;
+            envHeaders[name] = variable;
+        }
+    }
+    if (Object.keys(envHeaders).length > 0) provider["env_http_headers"] = envHeaders;
+
+    return {args: [...args, ...configOverride(`model_providers.${effectiveProvider}`, provider)], env};
+}
+
 async function* noItems<T>(): AsyncGenerator<T[]> {}
 
 async function* oneItemPage<T>(items: T[]): AsyncGenerator<T[]> {
     if (items.length > 0) yield items;
+}
+
+async function* legacySubagentItems(client: CodexAppServerClient, threadId: string): AsyncGenerator<RecordedSubagentEntry[]> {
+    const {thread} = await client.threadRead({threadId, includeTurns: true});
+    if (thread.id !== threadId) throw new Error("Subagent history names a different thread");
+    yield thread.turns.flatMap(turn => turn.items.map(item => ({
+        item, turnId: turn.id, completed: recordedItemCompleted(item, turn.status !== "inProgress"),
+    })));
+    const turn = thread.turns.at(-1);
+    if (turn) yield [{turn}];
+}
+
+async function* paginatedSubagentItems(client: CodexAppServerClient, threadId: string): AsyncGenerator<RecordedSubagentEntry[]> {
+    for await (const page of client.threadItemEntryPages(threadId)) {
+        yield page.map(({item, turnId, completedAtMs}) => ({
+            item, turnId, completed: recordedItemCompleted(item, completedAtMs !== null),
+        }));
+    }
+    try {
+        const {data} = await client.threadTurnsList({threadId, limit: 1, sortDirection: "desc", itemsView: "notLoaded"});
+        if (data[0]) yield [{turn: data[0]}];
+    } catch (error) {
+        logger.error(`Failed to read recorded outcome for subagent ${threadId}`, error);
+        yield [{turn: null}];
+    }
+}
+
+function recordedItemCompleted(item: ThreadItem, completed: boolean): boolean {
+    switch (item.type) {
+        case "commandExecution":
+        case "fileChange":
+        case "mcpToolCall":
+        case "dynamicToolCall":
+        case "collabAgentToolCall":
+            return item.status !== "inProgress";
+        default:
+            // Open-ended provider strings (for example image generation status) are not completion flags.
+            return completed;
+    }
 }

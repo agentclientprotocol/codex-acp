@@ -1,6 +1,6 @@
 import {expect, vi} from 'vitest';
-import * as acp from '@agentclientprotocol/sdk';
-import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
+import * as acp from '@agentclientprotocol/sdk/unstable';
+import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {createAcpAgentRouter} from '../../AcpAgentRouter';
 import {CodexAcpServer} from '../../CodexAcpServer';
 import {CodexAcpClient} from '../../CodexAcpClient';
@@ -54,6 +54,7 @@ export function createTurn(status: TurnStatus, id = turnId): Turn {
     return {
         id,
         items: [],
+        rootTurnId: null,
         itemsView: "notLoaded",
         status,
         error: null,
@@ -84,6 +85,11 @@ export function codexResponse(method: string): unknown {
             return {config: {}, origins: {}, layers: []};
         case "thread/goal/get":
             return {goal: null};
+        case "thread/list":
+        case "thread/backgroundTerminals/list":
+            return {data: [], nextCursor: null};
+        case "thread/read":
+            return {thread: createThread()};
         default:
             return {};
     }
@@ -102,6 +108,8 @@ export type TranscriptEntry =
     | {elicitationComplete: acpV2.CompleteElicitationNotification};
 
 export type PromptSession = {
+    wireMessages: acpV2.AnyMessage[];
+    scopedUpdates: Array<{sessionId: string; update: acpV2.SessionUpdate | acp.SessionUpdate}>;
     connection: {close(): void};
     transcript: TranscriptEntry[];
     /** Updates published while the session was being set up, before `transcript` starts recording. */
@@ -117,7 +125,7 @@ export type PromptSession = {
     /** Sends any other agent-bound request (e.g. `session/set_config_option`) on the same connection. */
     request(method: string, params: unknown, signal?: AbortSignal): Promise<any>;
     /** Sends `session/cancel` (a notification, not a request) for this session. */
-    cancel(): Promise<void>;
+    cancel(targetSessionId?: string): Promise<void>;
     /** Resolves when the n-th internal prompt run (including its background turn) has finished. */
     promptRunFinished(index?: number): Promise<void>;
     /**
@@ -130,6 +138,7 @@ export type PromptSession = {
     turnInterruptCalls(): Array<{threadId: string, turnId: string}>;
     /** The agent instance behind the connection, for spying on private methods (e.g. `restartCodexClient`). */
     agent: CodexAcpServer;
+    waitForNotifications(): Promise<void>;
 };
 
 /** Connects a client (v2 by default) to the agent through the router, over a mocked Codex app-server, and opens a session. */
@@ -138,6 +147,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
     mcpStartup?: McpStartupResult,
     /** Sent on `initialize` (v2 only). */
     clientCapabilities?: acpV2.ClientCapabilities,
+    v1ClientCapabilities?: acp.ClientCapabilities,
     /** The Codex process exit code the agent sees (`null` = still running). */
     exitCode?: () => number | null,
     /** Answers `session/request_permission` (v2 only). Required by tests that trigger one. */
@@ -150,9 +160,15 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
      * (e.g. MCP OAuth re-auth) sends before the caller gets a chance to call `setCodexResponse`.
      */
     codexResponses?: Record<string, (params: unknown) => Promise<unknown>>,
+    beforeInitializeResponseWrite?: () => Promise<void>,
+    beforeSetupResponseWrite?: () => Promise<void>,
+    newSessionMeta?: {mcpStartupAwaitTimeoutMs: number},
+    onAgent?: (agent: CodexAcpServer) => void,
 } = {}): Promise<PromptSession> {
     const mocks = createMockConnections();
     const transcript: TranscriptEntry[] = [];
+    const wireMessages: acpV2.AnyMessage[] = [];
+    const scopedUpdates: PromptSession["scopedUpdates"] = [];
     const turnStartParams: Array<Record<string, unknown>> = [];
     const codexResponseOverrides = new Map<string, (params: unknown) => Promise<unknown>>(
         Object.entries(options.codexResponses ?? {}),
@@ -187,31 +203,56 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
     let agent: CodexAcpServer | null = null;
     const router = createAcpAgentRouter((connection) => {
         agent = new CodexAcpServer(connection, codexAcpClient, undefined, options.exitCode);
+        options.onAgent?.(agent);
         return agent;
     });
     const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
     const agentToClient = new TransformStream<Uint8Array, Uint8Array>();
-    router.connect(acp.ndJsonStream(agentToClient.writable, clientToAgent.readable));
+    const disconnected = new AbortController();
+    const rawServerStream = acp.ndJsonStream(agentToClient.writable, clientToAgent.readable);
+    const serverStream = {
+        ...rawServerStream,
+        readable: rawServerStream.readable.pipeThrough(new TransformStream<acp.AnyMessage, acp.AnyMessage>(), {signal: disconnected.signal}),
+    };
+    router.connect(options.beforeSetupResponseWrite || options.beforeInitializeResponseWrite ? {
+        readable: serverStream.readable,
+        writable: new WritableStream<acpV2.AnyMessage>({
+            async write(message) {
+                if ("result" in message && message.result !== null && typeof message.result === "object"
+                    && "protocolVersion" in message.result) await options.beforeInitializeResponseWrite?.();
+                if ("result" in message && message.result !== null && typeof message.result === "object"
+                    && "sessionId" in message.result) await options.beforeSetupResponseWrite?.();
+                const writer = serverStream.writable.getWriter();
+                try { await writer.write(message); }
+                finally { writer.releaseLock(); }
+            },
+        }),
+    } : serverStream);
 
     let recordUpdates = false;
     const setupUpdates: acpV2.SessionUpdate[] = [];
-    const onUpdate = (update: acpV2.SessionUpdate | acp.SessionUpdate) => {
+    const onUpdate = (update: acpV2.SessionUpdate | acp.SessionUpdate, scope: string) => {
         if (protocolVersion === 2) {
             checkV2SessionUpdate(update as acpV2.SessionUpdate);
         }
         if (recordUpdates) {
+            scopedUpdates.push({sessionId: scope, update});
             transcript.push({sessionUpdate: update as acpV2.SessionUpdate});
         } else {
             setupUpdates.push(update as acpV2.SessionUpdate);
         }
     };
-    const clientStream = acp.ndJsonStream(clientToAgent.writable, agentToClient.readable);
+    const stream = acpV2.ndJsonStream(clientToAgent.writable, agentToClient.readable);
+    const clientStream = {writable: stream.writable,
+        readable: stream.readable.pipeThrough(new TransformStream<acpV2.AnyMessage, acpV2.AnyMessage>({
+            transform(message, controller) { wireMessages.push(message); controller.enqueue(message); },
+        }))};
     let connection: {close(): void};
     let request: (method: string, params: unknown, signal?: AbortSignal) => Promise<any>;
-    let notifyCancel: () => Promise<void>;
+    let notifyCancel: (targetSessionId: string) => Promise<void>;
     if (protocolVersion === 2) {
         const v2Connection = acpV2.client({name: "test-client"})
-            .onNotification(acpV2.methods.client.session.update, (ctx) => onUpdate(ctx.params.update))
+            .onNotification(acpV2.methods.client.session.update, (ctx) => onUpdate(ctx.params.update, ctx.params.sessionId))
             .onRequest(acpV2.methods.client.session.requestPermission, async (ctx) => {
                 transcript.push({permissionRequest: ctx.params});
                 if (!options.onRequestPermission) {
@@ -235,36 +276,62 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
             info: {name: "test-client", version: "1.0.0"},
             ...(options.clientCapabilities ? {capabilities: options.clientCapabilities} : {}),
         });
-        await v2Connection.agent.request(acpV2.methods.agent.session.new, {cwd, ...(options.mcpServers ? {mcpServers: options.mcpServers} : {})});
+        await v2Connection.agent.request(acpV2.methods.agent.session.new, {
+            cwd, ...(options.mcpServers ? {mcpServers: options.mcpServers} : {}),
+            ...(options.newSessionMeta ? {_meta: options.newSessionMeta} : {}),
+        });
         connection = v2Connection;
         request = (method, params, signal) => v2Connection.agent.request(
             method as typeof acpV2.methods.agent.session.prompt,
             params as acpV2.PromptRequest,
             signal ? {cancellationSignal: signal} : undefined,
         );
-        notifyCancel = () => v2Connection.agent.notify(acpV2.methods.agent.session.cancel, {sessionId});
+        notifyCancel = targetSessionId => v2Connection.agent.notify(acpV2.methods.agent.session.cancel, {sessionId: targetSessionId});
     } else {
         const v1Connection = acp.client({name: "test-client"})
-            .onNotification(acp.methods.client.session.update, (ctx) => onUpdate(ctx.params.update))
-            .connect(clientStream);
-        await v1Connection.agent.request(acp.methods.agent.initialize, {protocolVersion: acp.PROTOCOL_VERSION});
-        await v1Connection.agent.request(acp.methods.agent.session.new, {cwd, mcpServers: []});
+            .onNotification(acp.methods.client.session.update, (ctx) => onUpdate(ctx.params.update, ctx.params.sessionId))
+            .onRequest(acp.methods.client.session.requestPermission, async ctx => {
+                const request = ctx.params as unknown as acpV2.RequestPermissionRequest;
+                transcript.push({permissionRequest: request});
+                if (!options.onRequestPermission) throw new Error("No permission handler configured");
+                return await options.onRequestPermission(request, ctx.signal) as acp.RequestPermissionResponse;
+            })
+            .onRequest(acp.methods.client.elicitation.create, async ctx => {
+                const request = ctx.params as unknown as acpV2.CreateElicitationRequest;
+                transcript.push({elicitationRequest: request});
+                if (!options.onElicitation) throw new Error("No elicitation handler configured");
+                return await options.onElicitation(request, ctx.signal) as acp.CreateElicitationResponse;
+            })
+            .onNotification(acp.methods.client.elicitation.complete, ctx => { transcript.push({elicitationComplete: ctx.params}); })
+            .connect({...clientStream, readable: clientStream.readable as ReadableStream<acp.AnyMessage>});
+        await v1Connection.agent.request(acp.methods.agent.initialize, {
+            protocolVersion: acp.PROTOCOL_VERSION,
+            ...(options.v1ClientCapabilities ? {clientCapabilities: options.v1ClientCapabilities} : {}),
+        });
+        await v1Connection.agent.request(acp.methods.agent.session.new, {
+            cwd, mcpServers: options.mcpServers ?? [],
+            ...(options.newSessionMeta ? {_meta: options.newSessionMeta} : {}),
+        });
         connection = v1Connection;
         request = (method, params, signal) => v1Connection.agent.request(
             method as typeof acp.methods.agent.session.prompt,
             params as acp.PromptRequest,
             signal ? {cancellationSignal: signal} : undefined,
         );
-        notifyCancel = () => v1Connection.agent.notify(acp.methods.agent.session.cancel, {sessionId});
+        notifyCancel = targetSessionId => v1Connection.agent.notify(acp.methods.agent.session.cancel, {sessionId: targetSessionId});
     }
     const promptSpy = vi.spyOn(agent!, "prompt");
-    // Session setup publishes updates of its own; wait for them before recording the prompt.
-    await vi.waitFor(() => expect(setupUpdates.map(update => update.sessionUpdate)).toContain("available_commands_update"));
+    // V1 sends initial commands asynchronously; v2 includes them in the setup response.
+    if (protocolVersion === 1) {
+        await vi.waitFor(() => expect(setupUpdates.map(update => update.sessionUpdate)).toContain("available_commands_update"));
+    }
     recordUpdates = true;
 
     const emit = (notification: ServerNotification) => {
         transcript.push({codexNotification: notification.method});
-        mocks.getUnhandledNotificationHandler()!(notification);
+        const handler = mocks.notificationHandlers.get(notification.method);
+        if (handler) handler(notification.params);
+        else mocks.getUnhandledNotificationHandler()!(notification);
     };
 
     const sendPrompt = (prompt: acpV2.ContentBlock[], signal?: AbortSignal) => {
@@ -283,7 +350,9 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
     };
 
     return {
-        connection,
+        connection: {close: () => { connection.close(); disconnected.abort(); }},
+        wireMessages,
+        scopedUpdates,
         transcript,
         setupUpdates,
         turnStartParams,
@@ -297,7 +366,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         emit,
         sendPrompt,
         request,
-        cancel: () => notifyCancel(),
+        cancel: (targetSessionId = sessionId) => notifyCancel(targetSessionId),
         promptRunFinished: async (index = 0) => {
             await vi.waitFor(() => expect(promptSpy.mock.results.length).toBeGreaterThan(index));
             await promptSpy.mock.results[index]!.value.catch(() => {});
@@ -313,6 +382,7 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
             .filter(([method]: [string]) => method === "turn/interrupt")
             .map(([, params]: [string, {threadId: string, turnId: string}]) => params),
         agent: agent!,
+        waitForNotifications: () => codexAcpClient.waitForSessionNotifications(sessionId),
     };
 }
 
@@ -363,7 +433,7 @@ export function userMessageItem(clientId: string | null, text = "Hello"): Thread
 }
 
 /** A long-running command (no single known action, so it uses a terminal) */
-export function commandExecutionItem(id: string, status: "inProgress" | "completed" | "failed" = "inProgress"): ThreadItem {
+export function commandExecutionItem(id: string, status: "inProgress" | "completed" | "failed" = "inProgress"): Extract<ThreadItem, {type: "commandExecution"}> {
     return {
         type: "commandExecution",
         id,

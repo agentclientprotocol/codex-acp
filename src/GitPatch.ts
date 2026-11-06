@@ -15,32 +15,37 @@ const NO_NEWLINE_MARKER = "\\ No newline at end of file";
 const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 const REGULAR_FILE_MODE = "100644";
 
+/** AIR uses Git-relative paths. ACP v2 uses native absolute paths without a/b prefixes. */
+type PatchPathStyle = "relative" | "absolute";
+
 /**
  * Adds Git file headers to the hunks that Codex supplied for an update.
  *
  * The builder drops the file headers that Codex supplied, so that all headers name the same paths.
  * It keeps the hunk bytes, including a carriage return.
  */
-export function createUpdateGitPatch(oldPath: string, newPath: string, diff: string): string | null {
+export function createUpdateGitPatch(oldPath: string, newPath: string, diff: string, style: PatchPathStyle = "relative"): string | null {
     const hunks = hunkText(diff);
     if (hunks === null || isBinary(hunks)) return null;
-    const oldName = gitPath(oldPath);
-    const newName = gitPath(newPath);
-    const headers = [`diff --git ${quotedGitName("a/", oldName)} ${quotedGitName("b/", newName)}`];
+    const oldName = gitPath(oldPath, style);
+    const newName = gitPath(newPath, style);
+    const oldPrefix = style === "absolute" ? "" : "a/";
+    const newPrefix = style === "absolute" ? "" : "b/";
+    const headers = [`diff --git ${quotedGitName(oldPrefix, oldName)} ${quotedGitName(newPrefix, newName)}`];
     if (oldName !== newName) {
         headers.push(`rename from ${quotedGitName("", oldName)}`, `rename to ${quotedGitName("", newName)}`);
     }
-    headers.push(fileHeader("---", "a/", oldName), fileHeader("+++", "b/", newName));
+    headers.push(fileHeader("---", oldPrefix, oldName), fileHeader("+++", newPrefix, newName));
     return limited(`${headers.join("\n")}\n${hunks}`);
 }
 
 /** Builds a patch for a moved file whose text did not change. It has no hunks. */
-export function createRenameGitPatch(oldPath: string, newPath: string): string | null {
-    const oldName = gitPath(oldPath);
-    const newName = gitPath(newPath);
+export function createRenameGitPatch(oldPath: string, newPath: string, style: PatchPathStyle = "relative"): string | null {
+    const oldName = gitPath(oldPath, style);
+    const newName = gitPath(newPath, style);
     if (oldName === newName) return null;
     return limited([
-        `diff --git ${quotedGitName("a/", oldName)} ${quotedGitName("b/", newName)}`,
+        `diff --git ${quotedGitName(style === "absolute" ? "" : "a/", oldName)} ${quotedGitName(style === "absolute" ? "" : "b/", newName)}`,
         "similarity index 100%",
         `rename from ${quotedGitName("", oldName)}`,
         `rename to ${quotedGitName("", newName)}`,
@@ -49,39 +54,41 @@ export function createRenameGitPatch(oldPath: string, newPath: string): string |
 }
 
 /** Builds a whole-file patch for an added file. */
-export function createAddedFileGitPatch(filePath: string, text: string): string | null {
-    return createWholeFilePatch(filePath, text, "added");
+export function createAddedFileGitPatch(filePath: string, text: string, style: PatchPathStyle = "relative"): string | null {
+    return createWholeFilePatch(filePath, text, "added", style);
 }
 
 /** Builds a whole-file patch for a deleted file. */
-export function createDeletedFileGitPatch(filePath: string, text: string): string | null {
-    return createWholeFilePatch(filePath, text, "deleted");
+export function createDeletedFileGitPatch(filePath: string, text: string, style: PatchPathStyle = "relative"): string | null {
+    return createWholeFilePatch(filePath, text, "deleted", style);
 }
 
 /** Builds a patch for an added or a deleted empty file. It has no hunks. */
-export function createEmptyFileGitPatch(filePath: string, change: "added" | "deleted"): string {
-    const name = gitPath(filePath);
+export function createEmptyFileGitPatch(filePath: string, change: "added" | "deleted", style: PatchPathStyle = "relative"): string {
+    const name = gitPath(filePath, style);
     return [
-        `diff --git ${quotedGitName("a/", name)} ${quotedGitName("b/", name)}`,
+        `diff --git ${quotedGitName(style === "absolute" ? "" : "a/", name)} ${quotedGitName(style === "absolute" ? "" : "b/", name)}`,
         `${change === "added" ? "new" : "deleted"} file mode ${REGULAR_FILE_MODE}`,
         "",
     ].join("\n");
 }
 
-function createWholeFilePatch(filePath: string, text: string, change: "added" | "deleted"): string | null {
+function createWholeFilePatch(filePath: string, text: string, change: "added" | "deleted", style: PatchPathStyle): string | null {
     // A hunk cannot express an empty file, and a binary file has no text lines.
     if (text.length === 0 || isBinary(text)) return null;
-    const name = gitPath(filePath);
+    const name = gitPath(filePath, style);
+    const oldPrefix = style === "absolute" ? "" : "a/";
+    const newPrefix = style === "absolute" ? "" : "b/";
     const lines = text.split("\n");
     const endsWithNewline = lines.at(-1) === "";
     if (endsWithNewline) lines.pop();
     const sign = change === "added" ? "+" : "-";
     const range = `1${lines.length === 1 ? "" : `,${lines.length}`}`;
     const patch = [
-        `diff --git ${quotedGitName("a/", name)} ${quotedGitName("b/", name)}`,
+        `diff --git ${quotedGitName(oldPrefix, name)} ${quotedGitName(newPrefix, name)}`,
         `${change === "added" ? "new" : "deleted"} file mode ${REGULAR_FILE_MODE}`,
-        change === "added" ? "--- /dev/null" : fileHeader("---", "a/", name),
-        change === "added" ? fileHeader("+++", "b/", name) : "+++ /dev/null",
+        change === "added" ? "--- /dev/null" : fileHeader("---", oldPrefix, name),
+        change === "added" ? fileHeader("+++", newPrefix, name) : "+++ /dev/null",
         change === "added" ? `@@ -0,0 +${range} @@` : `@@ -${range} +0,0 @@`,
         ...lines.map(line => `${sign}${line}`),
         ...(endsWithNewline ? [] : [NO_NEWLINE_MARKER]),
@@ -181,11 +188,12 @@ function limited(patch: string): string | null {
 }
 
 /**
- * Converts a file path to a Git path without the leading slash.
+ * Keeps native absolute paths for ACP v2, or makes Git-relative paths for AIR.
  * For example, `/workspace/src/App.ts` becomes `workspace/src/App.ts`.
  * A Windows path such as `C:\work\App.ts` becomes `C:/work/App.ts`.
  */
-function gitPath(filePath: string): string {
+function gitPath(filePath: string, style: PatchPathStyle): string {
+    if (style === "absolute") return filePath;
     const slashed = /^[A-Za-z]:\\/.test(filePath) ? filePath.replace(/\\/g, "/") : filePath;
     return slashed.replace(/^\/+/, "");
 }

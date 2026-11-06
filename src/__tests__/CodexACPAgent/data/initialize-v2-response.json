@@ -17,7 +17,9 @@
       },
       "delete": {},
       "additionalDirectories": {},
-      "fork": {}
+      "systemPrompt": {},
+      "fork": {},
+      "title": {}
     },
     "auth": {
       "_meta": {

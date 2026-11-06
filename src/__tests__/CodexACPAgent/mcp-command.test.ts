@@ -1,5 +1,5 @@
 import {afterEach, describe, expect, it, vi} from "vitest";
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {type CodexMockTestFixture, setupPromptTestSession} from "../acp-test-utils";
 import type {
     ListMcpServerStatusParams,
@@ -20,6 +20,7 @@ function server(overrides: Partial<McpServerStatus> & {name: string}): McpServer
         serverCapabilities: null,
         tools: {},
         toolsError: null,
+        toolListMeta: null,
         resources: [],
         resourceTemplates: [],
         authStatus: "unsupported",

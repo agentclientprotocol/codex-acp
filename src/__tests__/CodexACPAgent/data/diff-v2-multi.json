@@ -14,7 +14,7 @@
         ],
         "patch": {
           "format": "git_patch",
-          "text": "diff --git a/workspace/multi-edit.ts b/workspace/multi-edit.ts\n--- a/workspace/multi-edit.ts\n+++ b/workspace/multi-edit.ts\n@@ -1 +1 @@\n-let x = 1;\n+let x = 2;\n"
+          "text": "diff --git /workspace/multi-edit.ts /workspace/multi-edit.ts\n--- /workspace/multi-edit.ts\n+++ /workspace/multi-edit.ts\n@@ -1 +1 @@\n-let x = 1;\n+let x = 2;\n"
         },
         "_meta": {
           "kind": "update"
@@ -30,7 +30,7 @@
         ],
         "patch": {
           "format": "git_patch",
-          "text": "diff --git a/workspace/multi-add.ts b/workspace/multi-add.ts\nnew file mode 100644\n--- /dev/null\n+++ b/workspace/multi-add.ts\n@@ -0,0 +1 @@\n+new\n"
+          "text": "diff --git /workspace/multi-add.ts /workspace/multi-add.ts\nnew file mode 100644\n--- /dev/null\n+++ /workspace/multi-add.ts\n@@ -0,0 +1 @@\n+new\n"
         },
         "_meta": {
           "kind": "add"
@@ -46,7 +46,7 @@
         ],
         "patch": {
           "format": "git_patch",
-          "text": "diff --git a/workspace/multi-delete.ts b/workspace/multi-delete.ts\ndeleted file mode 100644\n--- a/workspace/multi-delete.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-old\n"
+          "text": "diff --git /workspace/multi-delete.ts /workspace/multi-delete.ts\ndeleted file mode 100644\n--- /workspace/multi-delete.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-old\n"
         },
         "_meta": {
           "kind": "delete"

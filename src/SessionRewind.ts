@@ -1,5 +1,5 @@
 import {createHash} from "node:crypto";
-import {RequestError} from "@agentclientprotocol/sdk";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import type {CodexAppServerClient} from "./CodexAppServerClient";
 import {userInputVisibleText} from "./UserInputContent";
 

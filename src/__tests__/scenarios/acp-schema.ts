@@ -11,7 +11,7 @@ import type {RecordedMessage} from "./scenario-harness";
 const SCHEMA_ID = "acp";
 const ajv = new Ajv2020({strict: false, allErrors: true});
 ajv.addSchema(JSON.parse(fs.readFileSync(
-    createRequire(import.meta.url).resolve("@agentclientprotocol/sdk/schema/schema.json"),
+    createRequire(import.meta.url).resolve("@agentclientprotocol/sdk/schema/v1/schema.unstable.json"),
     "utf8",
 )), SCHEMA_ID);
 

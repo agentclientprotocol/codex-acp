@@ -45,11 +45,5 @@
         }
       ]
     }
-  },
-  {
-    "sessionUpdate": {
-      "state": "running",
-      "sessionUpdate": "state_update"
-    }
   }
 ]

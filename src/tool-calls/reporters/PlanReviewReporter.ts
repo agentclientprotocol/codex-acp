@@ -1,4 +1,4 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import type {CompletedPlan} from "../../CodexEventHandler";
 import type {AcpToolCallRenderer} from "../AcpToolCallRenderer";
 import type {ToolFacts} from "../ToolFacts";

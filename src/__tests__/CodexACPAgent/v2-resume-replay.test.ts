@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import * as acp from '@agentclientprotocol/sdk';
-import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2';
+import * as acp from '@agentclientprotocol/sdk/unstable';
+import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {createAcpAgentRouter} from '../../AcpAgentRouter';
 import {CodexAcpServer} from '../../CodexAcpServer';
 import {CodexAcpClient} from '../../CodexAcpClient';
@@ -9,6 +9,7 @@ import {AIR_NATIVE_SUBAGENT_SESSIONS_KEY} from '../../AirExtension';
 import type {Thread} from '../../app-server/v2';
 import {createCodexMockTestFixture, createTestModel} from '../acp-test-utils';
 import {createMockConnections} from './test-utils';
+import {commandExecutionItem, createTurn} from './v2-prompt-harness';
 import {checkV2SessionUpdate, expectConformingV2SessionUpdates} from './v2-session-update-guard';
 
 const sessionId = "thread-1";
@@ -64,6 +65,7 @@ function createThread(overrides?: Partial<Thread>): Thread {
 const reviewReplayTurns: Thread["turns"] = [
     {
         id: T_ID,
+        rootTurnId: null,
         itemsView: "full",
         status: "interrupted",
         error: null,
@@ -82,6 +84,7 @@ const reviewReplayTurns: Thread["turns"] = [
     },
     {
         id: P_ID,
+        rootTurnId: null,
         itemsView: "full",
         status: "completed",
         error: null,
@@ -104,6 +107,7 @@ const reviewReplayTurns: Thread["turns"] = [
     },
     {
         id: T2_ID,
+        rootTurnId: null,
         itemsView: "full",
         status: "completed",
         error: null,
@@ -130,6 +134,7 @@ const reviewReplayTurns: Thread["turns"] = [
     },
     {
         id: P2_ID,
+        rootTurnId: null,
         itemsView: "full",
         status: "completed",
         error: null,
@@ -257,7 +262,7 @@ const wholeMessageKindByChunk: Record<string, acpV2.SessionUpdate["sessionUpdate
 /**
  * Every replayed chunk with an id must be preceded (anywhere earlier in
  * the same session's update stream) by a whole-message update of the matching kind and id with
- * `content: []`, sent exactly once per id.
+ * `content: []` and `_meta: null`, sent exactly once per id.
  */
 function assertPrimerBeforeEveryChunk(updates: acpV2.UpdateSessionNotification[]): void {
     const primed = new Set<string>();
@@ -273,6 +278,7 @@ function assertPrimerBeforeEveryChunk(updates: acpV2.UpdateSessionNotification[]
             && (prior.update as {messageId?: string}).messageId === messageId
             && Array.isArray((prior.update as {content?: unknown[]}).content)
             && (prior.update as {content: unknown[]}).content.length === 0
+            && prior.update._meta === null
         ));
         expect(hasPrimer, `missing '${wholeKind}' primer before the first '${update.sessionUpdate}' for id ${messageId}`)
             .toBe(true);
@@ -315,6 +321,44 @@ describe('ACP v2 resume replay: review-mode ids, reviewer-prompt hiding, primers
         ));
         await expect(dump(messages)).toMatchFileSnapshot('data/v2-resume-replay-review-and-hide.json');
         assertPrimerBeforeEveryChunk(updates);
+    });
+
+    it.each([
+        {native: false, paginated: false},
+        {native: false, paginated: true},
+        {native: true, paginated: false},
+        {native: true, paginated: true},
+    ])('resynchronizes entity metadata on every replay (AIR: $native, paginated: $paginated)', async ({native, paginated}) => {
+        const replayTurns: Thread["turns"] = [{
+            ...createTurn("completed"),
+            itemsView: "full",
+            items: [
+                {...commandExecutionItem("command", "completed"), aggregatedOutput: "Recorded output"},
+                {type: "mcpToolCall", id: "mcp", server: "docs", tool: "lookup", status: "completed",
+                    arguments: {}, appContext: null, mcpAppUi: null, pluginId: null, readOnlyHint: null,
+                    result: null, error: null, durationMs: null},
+                {type: "contextCompaction", id: "compaction"},
+            ],
+        }];
+        const {connection, updates} = await connectV2Client({
+            replayTurns, paginated,
+            capabilities: {
+                ...(native ? {_meta: {jetbrains: {air: {version: 1, capabilities: [AIR_NATIVE_SUBAGENT_SESSIONS_KEY]}}}} : {}),
+            },
+        });
+        closeClient = () => connection.close();
+        for (let replay = 0; replay < 2; replay++) {
+            const start = updates.length;
+            await connection.agent.request(acpV2.methods.agent.session.resume, {sessionId, cwd, replayFrom: {type: "start"}});
+            const current = updates.slice(start).map(({update}) => update);
+            const metadata = (match: (update: acpV2.SessionUpdate) => boolean) =>
+                current.filter(match).map(update => update._meta).filter(meta => meta !== undefined);
+            expect(metadata(update => acpV2.SessionUpdate.isTerminalUpdate(update) && update.terminalId === "command")).toEqual([null]);
+            expect(metadata(update => acpV2.SessionUpdate.isToolCallUpdate(update) && update.toolCallId === "command")).toEqual([null]);
+            expect(metadata(update => acpV2.SessionUpdate.isToolCallUpdate(update) && update.toolCallId === "mcp"))
+                .toEqual([null, {is_mcp_tool_call: true}]);
+            expect(metadata(update => acpV2.SessionUpdate.isCompactionUpdate(update) && update.compactionId === "compaction")).toEqual([null]);
+        }
     });
 
     it('hides the reviewer prompt the same way when the history arrives one item per page', async () => {
@@ -438,5 +482,149 @@ describe('ACP v2 resume replay: native path primers and determinism', () => {
         });
 
         expect(messageIdSequence(secondUpdates)).toEqual(messageIdSequence(firstUpdates));
+    });
+});
+
+describe('resume replay of Codex file citations', () => {
+    const citationTurns: Thread["turns"] = [{
+        id: T2_ID,
+        rootTurnId: null,
+        itemsView: "full",
+        status: "completed",
+        error: null,
+        startedAt: null,
+        completedAt: null,
+        durationMs: null,
+        items: [{
+            type: "agentMessage",
+            id: "cited-reply",
+            text: 'The limit is 12.\n\n:codex-file-citation{path="policy.txt" purpose="source"}',
+            phase: null,
+            memoryCitation: null,
+            delivery: null,
+            questions: null,
+        }],
+    }];
+
+    afterEach(() => {
+        vi.clearAllMocks();
+        expectConformingV2SessionUpdates();
+    });
+
+    it('replays citations as Markdown file links on v2', async () => {
+        const {connection, updates} = await connectV2Client({replayTurns: citationTurns});
+        try {
+            await connection.agent.request(acpV2.methods.agent.session.resume, {
+                sessionId,
+                cwd,
+                replayFrom: {type: "start"},
+            });
+        } finally {
+            connection.close();
+        }
+
+        const chunks = updates.filter(({update}) => update.sessionUpdate === "agent_message_chunk");
+        await expect(dump(chunks)).toMatchFileSnapshot('data/v2-resume-replay-file-citations.json');
+    });
+
+    it('replays citations as Markdown file links on v1', async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+        const appServer = fixture.getCodexAppServerClient();
+        codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
+        codexAcpClient.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        codexAcpClient.listSkills = vi.fn().mockResolvedValue({data: []});
+        const model = createTestModel();
+        appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
+        appServer.threadResume = vi.fn().mockResolvedValue({
+            thread: createThread(),
+            model: model.id,
+            modelProvider: "openai",
+            cwd,
+            approvalPolicy: "never",
+            sandbox: {type: "dangerFullAccess"},
+            reasoningEffort: model.defaultReasoningEffort,
+        });
+        appServer.threadReadWithHistory = vi.fn().mockResolvedValue({thread: createThread({turns: citationTurns})});
+
+        await agent.initialize({protocolVersion: 1});
+        await agent.loadSession({sessionId, cwd, mcpServers: []});
+
+        const chunks = fixture.getAcpConnectionEvents([])
+            .filter((event) => event.method === "sessionUpdate")
+            .map((event) => event.args[0].update)
+            .filter((update: {sessionUpdate: string}) => update.sessionUpdate === "agent_message_chunk");
+        await expect(dump(chunks)).toMatchFileSnapshot('data/v1-load-session-file-citations.json');
+    });
+});
+
+describe('resume replay of async question answers', () => {
+    const reply = '<send_user_message_question_reply>\n[{"answer":"Staging\\n\\nbut only for now","question":"Which environment?","questionItemId":"[\\"request_user_input_async\\",\\"call-question\\",0]"}]\n</send_user_message_question_reply>';
+    const answerTurns: Thread["turns"] = [{
+        id: T2_ID,
+        rootTurnId: null,
+        itemsView: "full",
+        status: "completed",
+        error: null,
+        startedAt: null,
+        completedAt: null,
+        durationMs: null,
+        items: [
+            {type: "userMessage", id: "answer", clientId: null, content: [{type: "text", text: reply, text_elements: []}]},
+            {type: "userMessage", id: "quoted", clientId: null, content: [{type: "text", text: `Quoted: ${reply}`, text_elements: []}]},
+        ],
+    }];
+
+    afterEach(() => {
+        vi.clearAllMocks();
+        expectConformingV2SessionUpdates();
+    });
+
+    it('replays answers as the questions and their answers on v2', async () => {
+        const {connection, updates} = await connectV2Client({replayTurns: answerTurns});
+        try {
+            await connection.agent.request(acpV2.methods.agent.session.resume, {
+                sessionId,
+                cwd,
+                replayFrom: {type: "start"},
+            });
+        } finally {
+            connection.close();
+        }
+
+        const chunks = updates.filter(({update}) => update.sessionUpdate === "user_message_chunk");
+        await expect(dump(chunks)).toMatchFileSnapshot('data/v2-resume-replay-async-question-answers.json');
+    });
+
+    it('replays answers as the questions and their answers on v1', async () => {
+        const fixture = createCodexMockTestFixture();
+        const agent = fixture.getCodexAcpAgent();
+        const codexAcpClient = fixture.getCodexAcpClient();
+        const appServer = fixture.getCodexAppServerClient();
+        codexAcpClient.readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
+        codexAcpClient.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        codexAcpClient.listSkills = vi.fn().mockResolvedValue({data: []});
+        const model = createTestModel();
+        appServer.listModels = vi.fn().mockResolvedValue({data: [model], nextCursor: null});
+        appServer.threadResume = vi.fn().mockResolvedValue({
+            thread: createThread(),
+            model: model.id,
+            modelProvider: "openai",
+            cwd,
+            approvalPolicy: "never",
+            sandbox: {type: "dangerFullAccess"},
+            reasoningEffort: model.defaultReasoningEffort,
+        });
+        appServer.threadReadWithHistory = vi.fn().mockResolvedValue({thread: createThread({turns: answerTurns})});
+
+        await agent.initialize({protocolVersion: 1});
+        await agent.loadSession({sessionId, cwd, mcpServers: []});
+
+        const chunks = fixture.getAcpConnectionEvents([])
+            .filter((event) => event.method === "sessionUpdate")
+            .map((event) => event.args[0].update)
+            .filter((update: {sessionUpdate: string}) => update.sessionUpdate === "user_message_chunk");
+        await expect(dump(chunks)).toMatchFileSnapshot('data/v1-load-session-async-question-answers.json');
     });
 });
