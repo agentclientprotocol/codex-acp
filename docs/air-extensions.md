@@ -27,6 +27,7 @@ It describes only this adapter.
 - [Session index](#session-index)
 - [Context compaction](#context-compaction)
 - [Session fork point](#session-fork-point)
+- [Session rewind](#session-rewind)
 - [Presentation hints](#presentation-hints)
 - [Predicted follow-up prompt](#predicted-follow-up-prompt)
 - [Removed keys](#removed-keys)
@@ -136,7 +137,8 @@ The `initialize` response carries the agent side of the extension only when the 
           "recommendedValue",
           "rawInputRendering",
           "planContentDelta",
-          "codexHooks"
+          "codexHooks",
+          "sessionRewind"
         ]
       }
     }
@@ -179,6 +181,8 @@ Five agent capabilities come with `sessionIndex` and are listed exactly when it 
 
 The goal extension has no client capability.
 The agent advertises the `goal` object, and the client uses the control method when it wants to.
+The session rewind extension has no client capability either.
+The agent lists `sessionRewind`, and the client sends `_session/rewind` when it wants to; see [Session rewind](#session-rewind).
 
 ### Hook trust
 
@@ -1401,6 +1405,58 @@ It adds this object to the `session/fork` request:
 - An invalid field fails the request with `invalidParams`.
 - When no message matches, the request fails with `invalidParams`.
 - The fork keeps the history up to the turn that holds the message.
+
+## Session rewind
+
+Standard ACP forks a session, which gives a second thread with another id.
+AIR edits a message in the session the user is looking at, so it removes a history suffix from the same Codex thread
+instead, through `_session/rewind`.
+
+The adapter advertises `sessionRewind` in the AIR capability list of `initialize`.
+A client sends the method only when the capability is there.
+
+```json
+{
+  "sessionId": "thread-1",
+  "beforeMessage": { "messageId": "item-12", "messageFingerprint": "sha256:<64 hex>", "messageOccurrence": 1 },
+  "resumeAtMessage": { "messageId": "item-11", "messageFingerprint": "sha256:<64 hex>", "messageOccurrence": 1 }
+}
+```
+
+- `beforeMessage` is the first user message to remove, and it is excluded from the retained history.
+- `resumeAtMessage` is the last agent message to retain. It is absent when the client rewinds the first user turn.
+  The turn boundary already fixes the cut, so the adapter does not need it.
+- A history point is the ACP message id, the `sha256:` digest of the message text, and the one-based occurrence of
+  that digest among messages of the same role.
+  The adapter matches the id first, and the fingerprint occurrence when restored Codex history carries other ids.
+  The id is the one that history replay sends: the Codex item id on v1, and the client message id on v2.
+  An id with a `:segment:<n>` suffix also matches the message without the suffix.
+- The text of a user message is its text blocks as history replay sends them, joined without a separator.
+  A file mention of a prompt is a text block such as `[@foo.txt](file:///work/foo.txt)`, so it is part of the text.
+  A `resource_link` block that replay sends for a native attachment is not.
+- The occurrence counts the user messages of the session itself.
+  A Codex subagent runs in its own thread, so its messages are not counted, as in the Claude adapter.
+- The response is `{"rewound": true}` only after Codex accepted the rewind.
+- `{"rewound": false}` means the conversation was left as it was, and the client then keeps its own transcript too.
+  The adapter answers it while a turn is running or a prompt waits to start one: that turn writes the history the
+  rewind would replace.
+- A `session/prompt` sent while a rewind runs starts its turn after the rewind, on the retained history.
+- When no message matches, the request fails with `invalidParams`.
+- A message that is a steer inside an existing turn fails with `invalidParams`:
+  Codex removes whole turns, not a suffix of one.
+- A session created with legacy thread history fails with `invalidRequest` and
+  `data: {sessionId, historyMode: "legacy"}`. Only threads with paginated history can be rewound,
+  and a client that gets this error can offer the fork instead.
+
+Codex mapping:
+
+- The adapter reads the thread metadata, refuses legacy history, then reads the turns and resolves `beforeMessage`
+  to the turn it starts.
+- Paginated history calls `thread/revert` with that turn as the exclusive boundary.
+  Legacy history had only the deprecated `thread/rollback`, which Codex has since removed, so it gets the
+  `invalidRequest` above.
+- The Codex thread id stays the ACP session id. No `thread/fork`, no new thread, no session-list entry.
+- `thread/revert` changes the persisted conversation only. It does not revert file changes.
 
 ## Presentation hints
 

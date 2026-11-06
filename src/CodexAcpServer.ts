@@ -1,7 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk/unstable";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk/unstable";
 import {CodexEventHandler, type CompletedPlan, failureWasShownAsMessage} from "./CodexEventHandler";
-import {attachmentFileUri, desktopAttachmentHistory} from "./DesktopAttachmentHistory";
+import {userMessageContentBlocks} from "./UserInputContent";
 import {CodexApprovalHandler} from "./permissions/CodexApprovalHandler";
 import {isRecord} from "./permissions/json";
 import {PermissionLifecycleContext} from "./permissions/lifecycle";
@@ -132,6 +132,9 @@ import {
     type LegacySetSessionModelRequest,
     type LegacySetSessionModelResponse,
     SESSION_STEERING_METHOD,
+    SESSION_REWIND_METHOD,
+    type SessionRewindRequest,
+    type SessionRewindResponse,
     type SessionSteeringResponse,
     type SessionSteerRequest,
 } from "./AcpExtensions";
@@ -160,7 +163,7 @@ import {
 import packageJson from "../package.json";
 import {isJetBrains2026_1Client} from "./JBUtils";
 import {clientSupportsNotices} from "./SessionNotice";
-import {AsyncQuestionClient, AsyncQuestionElicitations, renderAsyncQuestionReply} from "./CodexAsyncQuestions";
+import {AsyncQuestionClient, AsyncQuestionElicitations} from "./CodexAsyncQuestions";
 import {
     createAgentTextMessageChunk,
     createAgentTextThoughtChunk,
@@ -212,6 +215,7 @@ import {
     AIR_PLAN_CONTENT_DELTA_KEY,
     AIR_RAW_INPUT_RENDERING_KEY,
     AIR_RECOMMENDED_CONFIG_VALUE_KEY,
+    AIR_SESSION_REWIND_KEY,
     AIR_EXTENSION_CAPABILITIES_KEY,
     AIR_EXTENSION_VERSION,
     AIR_GOAL_KEY,
@@ -939,6 +943,7 @@ export class CodexAcpServer {
                 AIR_RAW_INPUT_RENDERING_KEY,
                 AIR_PLAN_CONTENT_DELTA_KEY,
                 AIR_CODEX_HOOKS_KEY,
+                AIR_SESSION_REWIND_KEY,
                 ...this.sessionIndex.agentCapabilities(),
             ]
             : [
@@ -948,6 +953,7 @@ export class CodexAcpServer {
                 AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
                 AIR_ASYNC_TASKS_KEY,
                 AIR_RECOMMENDED_CONFIG_VALUE_KEY,
+                AIR_SESSION_REWIND_KEY,
                 ...this.sessionIndex.agentCapabilities(),
             ];
         return {
@@ -1014,6 +1020,8 @@ export class CodexAcpServer {
                     ),
                 };
             }
+            case SESSION_REWIND_METHOD:
+                return await this.rewindSession(methodRequest.params);
             case GOAL_CONTROL_METHOD:
             case LEGACY_GOAL_CONTROL_METHOD: {
                 const sessionState = this.sessions.get(methodRequest.params.sessionId);
@@ -1131,6 +1139,38 @@ export class CodexAcpServer {
         }
     }
 
+    /** Whether a turn of the session runs, or a turn starter holds or waits for its turn-start slot. */
+    private hasTurnWork(sessionId: string): boolean {
+        return this.isSessionBusy(sessionId) || this.activePrompts.has(sessionId)
+            || this.pendingTurnStarts.has(sessionId) || this.turnStartQueueTail.get(sessionId)?.settled === false;
+    }
+
+    private async rewindSession(params: SessionRewindRequest): Promise<SessionRewindResponse> {
+        const sessionId = params.sessionId;
+        const unknownSession = () => RequestError.invalidParams(undefined, `Unknown session: ${sessionId}`);
+        if (!this.sessions.has(sessionId)) throw unknownSession();
+        // A running turn writes the history the rewind would replace, so the
+        // conversation is left as it is and the client keeps its own transcript.
+        if (this.hasTurnWork(sessionId) || this.sessions.get(sessionId)!.currentTurnId !== null) return {rewound: false};
+        // Taken before the first await: a prompt sent meanwhile waits for the rewind
+        // instead of starting a turn that `thread/revert` would cancel.
+        const reservation = this.acquireTurnStartReservation(sessionId);
+        try {
+            if (this.providerUpdate !== null) await this.waitForProviderUpdate();
+            const appServer = this.ensureAppServer();
+            if (appServer) await appServer;
+            const sessionState = this.sessions.get(sessionId);
+            if (!sessionState) throw unknownSession();
+            // A turn that Codex started itself, such as a goal continuation, also writes the history.
+            if (this.isCodexTurnRunning(sessionId)) return {rewound: false};
+            const sessionReady = this.ensureSessionReady(sessionState);
+            if (sessionReady) await sessionReady;
+            return await this.runWithProcessCheck(() => this.codexAcpClient.rewindSession(params));
+        } finally {
+            reservation.release();
+        }
+    }
+
     private async withSystemPromptUpdate<T>(
         request: {sessionId: string; systemPrompt?: unknown; _meta?: unknown},
         action: () => Promise<T>,
@@ -1138,8 +1178,7 @@ export class CodexAcpServer {
         this.assertInstructionsReady(request.sessionId);
         if (!changesSystemPrompt(request, this.sessions.get(request.sessionId)?.instructions)) return action();
         const sessionId = request.sessionId;
-        if (this.isSessionBusy(sessionId) || this.activePrompts.has(sessionId)
-            || this.pendingTurnStarts.has(sessionId) || this.turnStartQueueTail.get(sessionId)?.settled === false) {
+        if (this.hasTurnWork(sessionId)) {
             throw RequestError.invalidParams(undefined, "Cannot change systemPrompt while session work is in progress; retry when idle");
         }
         this.instructionUpdates.add(sessionId);
@@ -4141,27 +4180,11 @@ export class CodexAcpServer {
     }
 
     private createUserMessageUpdates(item: ThreadItem & { type: "userMessage" }): UpdateSessionEvent[] {
-        const updates: UpdateSessionEvent[] = [];
         // On v2, a message inserted via `session/prompt` is replayed under the id the client
         // provided then (`clientId`), so it round-trips as the same message on reconnect; v1 has
         // no such client-minted id and keeps using Codex's own item id.
         const messageId = this.protocolVersion === 2 ? (item.clientId ?? item.id) : item.id;
-        const contentBlocks = item.content.map(input => this.userInputToContentBlocks(input));
-        const attachmentUris = new Set(contentBlocks.flatMap((blocks, index) =>
-            item.content[index]?.type === "text"
-                ? blocks.flatMap(block => block.type === "resource_link" ? [block.uri] : [])
-                : []));
-        for (const [index, input] of item.content.entries()) {
-            const nativePath = input.type === "localImage" || input.type === "localAudio" || input.type === "mention"
-                ? input.path
-                : (input.type === "image" || input.type === "audio") && "url" in input ? input.url : null;
-            if (nativePath !== null && attachmentUris.has(attachmentFileUri(nativePath) ?? "")) continue;
-            const blocks = contentBlocks[index]!;
-            for (const block of blocks) {
-                updates.push(createUserMessageChunk(block, messageId));
-            }
-        }
-        return updates;
+        return userMessageContentBlocks(item.content).map(block => createUserMessageChunk(block, messageId));
     }
 
     private createReasoningUpdates(item: ThreadItem & { type: "reasoning" }): UpdateSessionEvent[] {
@@ -4204,50 +4227,6 @@ export class CodexAcpServer {
             item.id,
             createMessagePhaseMeta("final_answer", this.capabilities.airClient),
         );
-    }
-
-    private userInputToContentBlocks(input: UserInput): acp.ContentBlock[] {
-        switch (input.type) {
-            case "text": {
-                const asyncQuestionReply = renderAsyncQuestionReply(input.text);
-                if (asyncQuestionReply !== null) return [{type: "text", text: asyncQuestionReply}];
-                return desktopAttachmentHistory(input.text)
-                    ?? (input.text.length > 0 ? [{ type: "text", text: input.text }] : []);
-            }
-            case "image":
-                return [{
-                    type: "text",
-                    text: "url" in input
-                        ? this.formatUriAsLink("image", input.url)
-                        : `image:${input.fileId}`,
-                }];
-            case "localImage":
-            case "localAudio":
-            case "mention": {
-                const uri = attachmentFileUri(input.path);
-                const fileName = input.path.split(/[\\/]/).pop() || input.type;
-                const name = input.type === "mention" && input.name.trim().length > 0 ? input.name : fileName;
-                return uri !== null
-                    ? [{type: "resource_link", name, uri}]
-                    : [{type: "text", text: this.formatUriAsLink(name, input.path)}];
-            }
-            case "skill":
-                return [{ type: "text", text: `skill:${input.name} (${input.path})` }];
-            case "audio":
-                return [{type: "text", text: this.formatUriAsLink("audio", input.url)}];
-        }
-    }
-
-    private formatUriAsLink(name: string | null, uri: string): string {
-        if (name && name.length > 0) {
-            return `[@${name}](${uri})`;
-        }
-        if (uri.startsWith("file://")) {
-            const path = uri.replace("file://", "");
-            const fileName = path.split("/").pop() ?? path;
-            return `[@${fileName}](${uri})`;
-        }
-        return uri;
     }
 
     getSessionState(sessionId: string): SessionState {

@@ -78,6 +78,8 @@ import type {
     Turn,
     ThreadResumeParams,
     ThreadResumeResponse,
+    ThreadRevertParams,
+    ThreadRevertResponse,
     ThreadSettings,
     ThreadStartParams,
     ThreadStartResponse,
@@ -691,6 +693,10 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "thread/fork", params: params });
     }
 
+    async threadRevert(params: ThreadRevertParams): Promise<ThreadRevertResponse> {
+        return await this.sendRequest({method: "thread/revert", params});
+    }
+
     getThreadSettings(threadId: string): ThreadSettings | undefined {
         return this.threadSettings.get(threadId);
     }
@@ -781,11 +787,16 @@ export class CodexAppServerClient {
         if (response.thread.historyMode === "legacy") {
             return await this.threadRead({threadId, includeTurns: true});
         }
+        return {...response, thread: {...response.thread, turns: await this.threadPaginatedTurns(threadId)}};
+    }
+
+    /** The full turns of a paginated thread, oldest first. */
+    async threadPaginatedTurns(threadId: string): Promise<Turn[]> {
         const turns: Turn[] = [];
         for await (const page of this.threadHistoryPages(threadId)) {
             turns.push(...page);
         }
-        return {...response, thread: {...response.thread, turns}};
+        return turns;
     }
 
     /**

@@ -11,6 +11,7 @@ import {
     SESSION_STEERING_METHOD,
 } from "./AcpExtensions";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
+import {SESSION_REWIND_METHOD} from "./SessionRewind";
 import {CODEX_HOOKS_LIST_METHOD, CODEX_HOOKS_TRUST_METHOD} from "./CodexHookTrust";
 import {
     SESSION_ARCHIVE_METHOD,
@@ -55,6 +56,18 @@ const goalControlParamsParser = z.discriminatedUnion("action", [
 const asyncTaskStopParamsParser = z.object({
     sessionId: z.string().trim().min(1),
     asyncTaskId: z.string().trim().min(1),
+}).passthrough();
+
+const sessionHistoryPointParser = z.object({
+    messageId: z.string().trim().min(1),
+    messageFingerprint: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    messageOccurrence: z.number().int().positive(),
+});
+
+const sessionRewindParamsParser = z.object({
+    sessionId: z.string().trim().min(1),
+    beforeMessage: sessionHistoryPointParser,
+    resumeAtMessage: sessionHistoryPointParser.optional(),
 }).passthrough();
 
 const hooksListParamsParser = z.object({cwd: z.string().trim().min(1)});
@@ -200,6 +213,9 @@ function createRouter(
         .onRequest(acp.methods.agent.providers.list, (ctx) => getAgent().listProviders(ctx.params))
         .onRequest(acp.methods.agent.providers.set, (ctx) => getAgent().setProvider(ctx.params))
         .onRequest(acp.methods.agent.providers.disable, (ctx) => getAgent().disableProvider(ctx.params))
+        // Before `session/prompt`: the SDK tries the handlers in this order, so a prompt sent right after a
+        // rewind reaches the agent after it, and waits for it.
+        .onRequest(SESSION_REWIND_METHOD, sessionRewindParamsParser, (ctx) => getAgent(ctx.params).extMethod(SESSION_REWIND_METHOD, ctx.params))
         .onRequest(acp.methods.agent.session.prompt, (ctx) => getAgent(ctx.params).prompt(ctx.params, ctx.signal))
         .onNotification(acp.methods.agent.session.cancel, (ctx) => getAgent().cancel(ctx.params))
         .onRequest("authentication/status", emptyExtensionParamsParser, (ctx) => getAgent().extMethod("authentication/status", ctx.params))
@@ -233,6 +249,9 @@ function createRouter(
         // The v1-only `authentication/status|logout` extensions are not registered on v2.
         .onRequest(acpV2.methods.agent.auth.login, (ctx) => getAgent().authenticateV2(ctx.params, ctx.requestId, ctx.signal))
         .onRequest(acpV2.methods.agent.auth.logout, (ctx) => getAgent().logoutV2(ctx.params))
+        // Before `session/prompt`: the SDK tries the handlers in this order, so a prompt sent right after a
+        // rewind reaches the agent after it, and waits for it.
+        .onRequest(SESSION_REWIND_METHOD, sessionRewindParamsParser, (ctx) => getAgent(ctx.params).extMethod(SESSION_REWIND_METHOD, ctx.params))
         .onRequest(acpV2.methods.agent.session.prompt, (ctx) => getAgent(ctx.params).promptV2(ctx.params, ctx.signal))
         .onNotification(acpV2.methods.agent.session.cancel, (ctx) => getAgent().cancel(ctx.params))
         .onRequest(acpV2.methods.agent.providers.list, (ctx) => getAgent().listProviders(ctx.params))
