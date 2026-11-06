@@ -1428,9 +1428,12 @@ After a turn ends normally, the adapter sends AIR the prompt the user is most li
 - AIR shows the first non-blank `suggestions[].text` as gray text in an empty composer. Tab fills the composer without sending.
 - `suggestions: []` clears the prompt the client holds. The adapter sends it when a new prompt starts and when the new prediction is empty.
   The adapter does not repeat a value it already sent.
-- Codex does not predict prompts, so the adapter asks a cheap model on an ephemeral thread, one extra call per turn.
-  The thread is read-only, never asks for approval, uses low reasoning effort and a minimal system prompt, and is released after the call.
+- The adapter calls the experimental `thread/sample` on the session's own thread, one extra model call per turn.
+  It produces one response on an ephemeral fork that inherits the session's model, configuration and conversation, so most of the context comes from the prompt cache.
+  Tools never run during the sample. The adapter requests `high` reasoning effort, but Codex applies it only for OpenAI providers on models that support effort overrides. Otherwise the session's own effort is used.
+  The prompt asks for one line of at most 240 characters, or nothing.
   The prediction arrives after the prompt response. A prompt that starts first drops it.
+- There is no prediction in plan mode.
 - A turn that is cancelled or fails produces no prediction.
 - `CODEX_ACP_PROMPT_SUGGESTIONS=false` turns the feature off.
 

@@ -1,35 +1,21 @@
 import {afterEach, describe, expect, it, vi} from "vitest";
 import {
     connectSession,
-    createTurn,
     itemCompleted,
+    sessionId,
     settle,
-    titleThreadId,
     turnCompleted,
+    turnFinished,
     turnStarted,
     userMessageItem,
     type PromptSession,
 } from "./v2-prompt-harness";
-import type {ServerNotification} from "../../app-server";
 import type {ThreadItem} from "../../app-server/v2";
 
 const airCapabilities = {_meta: {jetbrains: {air: {version: 1}}}};
 
 function agentMessage(text: string, phase: "commentary" | "final_answer" | null): ThreadItem {
     return {type: "agentMessage", id: `msg-${phase}`, text, phase, memoryCitation: null, delivery: null, questions: null};
-}
-
-function suggestionTurnCompleted(suggestion: string): ServerNotification {
-    return {
-        method: "turn/completed",
-        params: {
-            threadId: titleThreadId,
-            turn: {
-                ...createTurn("completed", "title-turn"),
-                items: [agentMessage(JSON.stringify({suggestion, title: "A title"}), null)],
-            },
-        },
-    };
 }
 
 /** The `promptSuggestions` values of the session info updates the client received, in order. */
@@ -68,10 +54,26 @@ describe.each([1, 2] as const)("predicted follow-up prompt over ACP v%i", (proto
         vi.clearAllMocks();
     });
 
+    let sampleParams: Array<Record<string, unknown>> = [];
+
     function connect(air: boolean) {
-        return connectSession(protocolVersion, air
-            ? {clientCapabilities: airCapabilities, v1ClientCapabilities: airCapabilities}
-            : {});
+        sampleParams = [];
+        return connectSession(protocolVersion, {
+            ...(air ? {clientCapabilities: airCapabilities, v1ClientCapabilities: airCapabilities} : {}),
+            codexResponses: {
+                "thread/sample": async params => {
+                    sampleParams.push(params as Record<string, unknown>);
+                    return {
+                        sourceTurnId: (params as {expectedTurnId: string}).expectedTurnId,
+                        responseId: "r",
+                        text: JSON.stringify({suggestion: "Run the tests"}),
+                        inputTokens: null,
+                        cachedInputTokens: null,
+                        outputTokens: null,
+                    };
+                },
+            },
+        });
     }
 
     /** An AIR client gets the prediction after a turn and a clear when the next prompt starts. */
@@ -80,40 +82,84 @@ describe.each([1, 2] as const)("predicted follow-up prompt over ACP v%i", (proto
         closeClient = () => client.connection.close();
 
         await runTurn(client, protocolVersion, 0, "Fix the bug", "Fixed the bug.");
-        client.emit(suggestionTurnCompleted("Run the tests"));
         await vi.waitFor(() => expect(suggestionUpdates(client)).toEqual([{suggestions: [{text: "Run the tests"}]}]));
 
         await runTurn(client, protocolVersion, 1, "Run the tests", "Tests pass.");
-        expect(suggestionUpdates(client)).toEqual([
+        await vi.waitFor(() => expect(suggestionUpdates(client)).toHaveLength(3));
+        expect(suggestionUpdates(client).slice(0, 2)).toEqual([
             {suggestions: [{text: "Run the tests"}]},
             {suggestions: []},
         ]);
     });
 
-    /** The prediction comes from the final answer, not from a commentary message of the turn. */
-    it("feeds the final answer of the main thread to the model", async () => {
+    /** The prediction samples the session's own thread, anchored at the turn that just completed. */
+    it("samples the session thread with the completed turn id", async () => {
         const client = await connect(true);
         closeClient = () => client.connection.close();
-        const runModel = vi.spyOn(client.appServer, "runTurn");
 
         await runTurn(client, protocolVersion, 0, "Fix the bug", "Fixed the bug.");
-        await settle();
+        await vi.waitFor(() => expect(sampleParams).toHaveLength(1));
 
-        const inputs = runModel.mock.calls.map(([params]) => JSON.stringify(params.input));
-        expect(inputs.some(input => input.includes("Fixed the bug.") && input.includes("Fix the bug") && !input.includes("Looking at it."))).toBe(true);
+        expect(sampleParams[0]).toMatchObject({threadId: sessionId, expectedTurnId: "turn-1"});
     });
 
-    /** A client that is not AIR never receives a prediction. */
+    /** A client that is not AIR never receives a prediction and no sample is requested. */
     it("sends nothing to a client that is not AIR", async () => {
         const client = await connect(false);
         closeClient = () => client.connection.close();
-        const runModel = vi.spyOn(client.appServer, "runTurn");
 
         await runTurn(client, protocolVersion, 0, "Fix the bug", "Fixed the bug.");
-        client.emit(suggestionTurnCompleted("Run the tests"));
         await settle();
 
         expect(suggestionUpdates(client)).toEqual([]);
-        expect(runModel.mock.calls.some(([params]) => JSON.stringify(params.input).includes("predict"))).toBe(false);
+        expect(sampleParams).toEqual([]);
+    });
+
+    /** In plan mode no prediction is requested or published. */
+    it("does not predict in plan mode", async () => {
+        const client = await connect(true);
+        closeClient = () => client.connection.close();
+        await client.request("session/set_config_option", {
+            sessionId, configId: "collaboration_mode", value: "plan",
+            ...(protocolVersion === 2 ? {type: "id"} : {}),
+        });
+
+        await runTurn(client, protocolVersion, 0, "Plan the fix", "Here is the plan.");
+        await settle();
+
+        expect(suggestionUpdates(client)).toEqual([]);
+        expect(sampleParams).toEqual([]);
+    });
+
+    /** A turn Codex reports as interrupted requests no sample and publishes no prediction. */
+    it("does not predict after an interrupted turn", async () => {
+        const client = await connect(true);
+        closeClient = () => client.connection.close();
+
+        const response = client.sendPrompt([{type: "text", text: "Fix the bug"}]);
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+        client.emit(turnStarted("turn-1"));
+        client.emit(turnFinished("interrupted", "turn-1"));
+        await response.catch(() => undefined);
+        await settle();
+
+        expect(suggestionUpdates(client)).toEqual([]);
+        expect(sampleParams).toEqual([]);
+    });
+
+    /** A turn Codex reports as failed requests no sample and publishes no prediction. */
+    it("does not predict after a failed turn", async () => {
+        const client = await connect(true);
+        closeClient = () => client.connection.close();
+
+        const response = client.sendPrompt([{type: "text", text: "Fix the bug"}]);
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+        client.emit(turnStarted("turn-1"));
+        client.emit(turnFinished("failed", "turn-1"));
+        await response.catch(() => undefined);
+        await settle();
+
+        expect(suggestionUpdates(client)).toEqual([]);
+        expect(sampleParams).toEqual([]);
     });
 });
