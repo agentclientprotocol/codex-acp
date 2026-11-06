@@ -59,7 +59,7 @@ describe("jsonSnapshot", () => {
         }
     });
 
-    it("reads the value like JSON.stringify: each getter and toJSON once, in the same order, with the same keys", () => {
+    it.each([0, 300])("reads each getter and toJSON once, in JSON.stringify order with the same keys, at depth %i", (depth) => {
         const trace = (log: string[]) => {
             const item = {
                 get a() {
@@ -75,9 +75,9 @@ describe("jsonSnapshot", () => {
         };
         const stringified: string[] = [];
         const snapshotted: string[] = [];
-        const expected = JSON.stringify(trace(stringified));
+        const expected = JSON.stringify(nested(depth, trace(stringified)));
 
-        expect(text(jsonSnapshot(trace(snapshotted)))).toBe(expected);
+        expect(text(jsonSnapshot(nested(depth, trace(snapshotted))))).toBe(expected);
         expect(snapshotted).toEqual(stringified);
         expect(snapshotted).toEqual(["get a", "toJSON a", "get b", "toJSON 1"]);
     });
@@ -125,12 +125,13 @@ describe("jsonSnapshot", () => {
         }
     });
 
-    it("leaves values nested thousands deep to JSON.stringify", () => {
+    it("serializes values nested thousands deep and reuses unchanged snapshots", () => {
         const deep = nested(4000, 1);
+        const expected = JSON.stringify(deep);
         const snapshot = jsonSnapshot(deep);
 
-        expect(text(snapshot)).toBe(JSON.stringify(deep));
-        expect(sameJson(jsonSnapshot(nested(4000, 1), snapshot), snapshot)).toBe(true);
+        expect(text(snapshot)).toBe(expected);
+        expect(jsonSnapshot(nested(4000, 1), snapshot)).toBe(snapshot);
         expect(sameJson(jsonSnapshot(nested(4000, 2), snapshot), snapshot)).toBe(false);
     });
 
