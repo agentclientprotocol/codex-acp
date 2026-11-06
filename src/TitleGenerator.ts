@@ -138,16 +138,23 @@ export class TitleGenerator {
             ephemeral: true,
         });
 
-        const turnResult = await this.client.runTurn({
-            threadId: epThread.id,
-            input: [{
-                type: "text",
-                text: `${SYSTEM_PROMPT}\n\nUser's first message:\n${titleSource(userPromptText)}`,
-                text_elements: [],
-            }],
-            outputSchema: TITLE_OUTPUT_SCHEMA,
-            model: TITLE_MODEL,
-        });
+        let turnResult;
+        try {
+            turnResult = await this.client.runTurn({
+                threadId: epThread.id,
+                input: [{
+                    type: "text",
+                    text: `${SYSTEM_PROMPT}\n\nUser's first message:\n${titleSource(userPromptText)}`,
+                    text_elements: [],
+                }],
+                outputSchema: TITLE_OUTPUT_SCHEMA,
+                model: TITLE_MODEL,
+            });
+        } finally {
+            // Codex keeps a subscribed thread loaded, with its MCP servers, and session/close
+            // releases only the main thread.
+            await this.client.threadUnsubscribe({threadId: epThread.id}).catch(() => {});
+        }
 
         const title = extractTitle(turnResult.turn);
         if (!title) return;

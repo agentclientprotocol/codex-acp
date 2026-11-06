@@ -79,7 +79,9 @@ describe("a prompt after session/fork", () => {
             expect(forkId).toBe("fork-id");
             await expect(promptWithin(fixture, forkId)).resolves.toMatchObject({stopReason: "end_turn"});
             await expect(promptWithin(fixture, sourceId)).resolves.toMatchObject({stopReason: "end_turn"});
-            expect(requestsOf(fixture.current(), "thread/unsubscribe")).toEqual([]);
+            // Only the ephemeral title thread may be released; the fork and its source stay subscribed.
+            const unsubscribed = requestsOf(fixture.current(), "thread/unsubscribe") as {threadId: string}[];
+            expect(unsubscribed.filter(({threadId}) => threadId !== "title-thread")).toEqual([]);
             expect(subscribed).toContain(forkId);
             expect(subscribed).toContain(sourceId);
             fixture.agent.sessionIndex.dispose();
