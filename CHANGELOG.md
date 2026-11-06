@@ -1,5 +1,37 @@
 # Changelog
 
+## [2.6.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.5.0...v2.6.0) (2026-11-06)
+
+
+### Features
+
+* expose configured permission profiles as modes ([#395](https://github.com/agentclientprotocol/codex-acp/issues/395)) ([caf2e87](https://github.com/agentclientprotocol/codex-acp/commit/caf2e879bd1e740f2aafcdfa6fdd5a38e176f8f7))
+* predict the follow-up prompt with thread/sample on the session thread ([#740](https://github.com/agentclientprotocol/codex-acp/issues/740)) ([f9cb470](https://github.com/agentclientprotocol/codex-acp/commit/f9cb470edba4776ad34917eb3adb819441323b47))
+* show async Codex questions as elicitations ([#707](https://github.com/agentclientprotocol/codex-acp/issues/707)) ([cc57c7e](https://github.com/agentclientprotocol/codex-acp/commit/cc57c7ec18b2b541279ab6c26820b3b4ebe507eb))
+* update ACP SDK to 2.4 and align protocol behavior ([#727](https://github.com/agentclientprotocol/codex-acp/issues/727)) ([ab513aa](https://github.com/agentclientprotocol/codex-acp/commit/ab513aa482c36233b0251f904b97474272e864ec))
+
+
+### Bug Fixes
+
+* clear stale entity metadata during ACP v2 replay ([#716](https://github.com/agentclientprotocol/codex-acp/issues/716)) ([580d8b9](https://github.com/agentclientprotocol/codex-acp/commit/580d8b926b3350ae8a3c74d54da81df311601d85))
+* defer startup interactions until session setup is delivered ([#714](https://github.com/agentclientprotocol/codex-acp/issues/714)) ([ad993bb](https://github.com/agentclientprotocol/codex-acp/commit/ad993bb13ad9b8941a5db6c27ba94ff8b5e43ce9))
+* fence turn interrupt retries to the original prompt ([#723](https://github.com/agentclientprotocol/codex-acp/issues/723)) ([9c33f86](https://github.com/agentclientprotocol/codex-acp/commit/9c33f86df22e809815a1879b9edd47c57176e63b))
+* match vendor-prefixed gateway model ids such as OpenRouter's ([#731](https://github.com/agentclientprotocol/codex-acp/issues/731)) ([29195ec](https://github.com/agentclientprotocol/codex-acp/commit/29195ecef0268a29f5bd5728cfb3fa541bcacf03))
+* preserve sibling session metadata namespace fields ([#718](https://github.com/agentclientprotocol/codex-acp/issues/718)) ([3720341](https://github.com/agentclientprotocol/codex-acp/commit/3720341569e59b272177a6f39e715b4e47a2631f))
+* publish complete configuration updates for session changes ([#715](https://github.com/agentclientprotocol/codex-acp/issues/715)) ([b7ac0bf](https://github.com/agentclientprotocol/codex-acp/commit/b7ac0bfb0cfd12e675659e267cc1f73ea76fc3d5))
+* release the prompt suggestion thread and keep it minimal ([#709](https://github.com/agentclientprotocol/codex-acp/issues/709)) ([82ad58f](https://github.com/agentclientprotocol/codex-acp/commit/82ad58f17adbc04ccc9c97175e11693982ab7a92))
+* report verified standard subagent directories ([#722](https://github.com/agentclientprotocol/codex-acp/issues/722)) ([7d7e95a](https://github.com/agentclientprotocol/codex-acp/commit/7d7e95a95d55b55a53fb9ee18cd2d57db29b1e2c))
+* resynchronize current session metadata on ACP v2 resume ([#717](https://github.com/agentclientprotocol/codex-acp/issues/717)) ([927c480](https://github.com/agentclientprotocol/codex-acp/commit/927c4802f83c0859b439e7d641b5eb692560e5df))
+* scope authentication cancellation and initial status delivery ([#720](https://github.com/agentclientprotocol/codex-acp/issues/720)) ([e059ab7](https://github.com/agentclientprotocol/codex-acp/commit/e059ab7060bf99f9823c90dbb92b6df9568d5a03))
+* show commands in Zed approval prompts ([#735](https://github.com/agentclientprotocol/codex-acp/issues/735)) ([cca2dca](https://github.com/agentclientprotocol/codex-acp/commit/cca2dca479da3a17dabaa48110efebf0aa349830))
+* skip the app-server restart when providers/set repeats the applied config ([#728](https://github.com/agentclientprotocol/codex-acp/issues/728)) ([3b35338](https://github.com/agentclientprotocol/codex-acp/commit/3b35338e97eed0a946d90c5ba2aba490a079705a))
+* start the Codex app-server with the provider of the gateway routing ([#733](https://github.com/agentclientprotocol/codex-acp/issues/733)) ([cbcd446](https://github.com/agentclientprotocol/codex-acp/commit/cbcd4462d93edcf441c437f1dbf16602a577fe69))
+* suppress session messages after close ([#712](https://github.com/agentclientprotocol/codex-acp/issues/712)) ([85bf932](https://github.com/agentclientprotocol/codex-acp/commit/85bf932c129cd4c4cb92ed47c4e4bcae57b71b2c))
+* synchronize resumed titles and reset replayed message metadata ([#713](https://github.com/agentclientprotocol/codex-acp/issues/713)) ([ef45a6d](https://github.com/agentclientprotocol/codex-acp/commit/ef45a6d97cd81810aaebcba9533af5411dadec6f))
+* tear down session interactions and background processes on close ([#711](https://github.com/agentclientprotocol/codex-acp/issues/711)) ([1e89efa](https://github.com/agentclientprotocol/codex-acp/commit/1e89efa3b7f4b7cfa0b4b69b641ae467671715de))
+* update ACP SDK to 2.2 and align protocol behavior ([#710](https://github.com/agentclientprotocol/codex-acp/issues/710)) ([6f96fbe](https://github.com/agentclientprotocol/codex-acp/commit/6f96fbeaee722c0a273bb62104366c6b7d9688fe))
+* update codex to 0.166.0 ([#734](https://github.com/agentclientprotocol/codex-acp/issues/734)) ([e53f23e](https://github.com/agentclientprotocol/codex-acp/commit/e53f23e96c4d6d600faa94ef0f012cdd4aec32f1))
+
 ## [2.5.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.4.0...v2.5.0) (2026-10-29)
 
 
