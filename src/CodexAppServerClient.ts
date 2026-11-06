@@ -7,6 +7,7 @@ import type {
     ClientRequest,
     InitializeParams,
     InitializeResponse,
+    ReasoningEffort,
     ServerNotification
 } from "./app-server";
 import type {
@@ -842,6 +843,10 @@ export class CodexAppServerClient {
         return await this.sendRequest({method: "thread/backgroundTerminals/terminate", params});
     }
 
+    async threadSample(params: ThreadSampleParams): Promise<ThreadSampleResponse> {
+        return await this.sendRequest({method: "thread/sample", params});
+    }
+
     async *backgroundTerminalPages(threadId: string): AsyncGenerator<ThreadBackgroundTerminal[]> {
         const seen = new Set<string>();
         let cursor: string | null = null;
@@ -1377,6 +1382,7 @@ export type CompactionCompletedNotification =
     | { method: "item/completed", params: ItemCompletedNotification & { item: Extract<ItemCompletedNotification["item"], { type: "contextCompaction" }> } };
 
 type CodexRequest = DistributiveOmit<ClientRequest, "id"> | ThreadBackgroundTerminalsRequest
+    | { method: "thread/sample"; params: ThreadSampleParams }
 
 type DistributiveOmit<T, K extends keyof any> = T extends any
     ? Omit<T, K>
@@ -1406,6 +1412,23 @@ export type ExperimentalThreadForkResponse = ThreadForkResponse & ExperimentalTh
 export type ExperimentalTurnStartParams = TurnStartParams & {
     permissions?: string | null;
     runtimeWorkspaceRoots?: string[] | null;
+};
+
+// `thread/sample` is an experimental app-server method missing from the stable generated schema.
+export type ThreadSampleParams = {
+    threadId: string;
+    expectedTurnId: string;
+    prompt: string;
+    effort?: ReasoningEffort | null;
+};
+
+export type ThreadSampleResponse = {
+    sourceTurnId: string;
+    responseId: string;
+    text: string | null;
+    inputTokens: number | null;
+    cachedInputTokens: number | null;
+    outputTokens: number | null;
 };
 
 function isMcpServerStatusUpdatedNotification(notification: ServerNotification): notification is {
