@@ -8,6 +8,9 @@
       "appServer",
       "unknown"
     ],
+    "cwd": "/repo/project",
+    "sortKey": "updated_at",
+    "sortDirection": "desc",
     "useStateDbOnly": true
   },
   "plain": {
@@ -19,6 +22,9 @@
       "appServer",
       "unknown"
     ],
+    "cwd": "/repo/project",
+    "sortKey": "updated_at",
+    "sortDirection": "desc",
     "useStateDbOnly": true
   }
 }
