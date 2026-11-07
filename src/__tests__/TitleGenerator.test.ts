@@ -87,3 +87,49 @@ describe("TitleGenerator prompt", () => {
         expect(text.endsWith(`User's first message:\n${"a".repeat(3_999)}`)).toBe(true);
     });
 });
+
+describe("TitleGenerator MCP servers", () => {
+    async function startedThreadParams(configRead: unknown) {
+        const threadStart = vi.fn().mockResolvedValue({thread: {id: "ephemeral"}});
+        const generator = createGenerator({
+            configRead,
+            threadStart,
+            runTurn: vi.fn().mockResolvedValue({turn: {items: []}}),
+        } as unknown as Partial<CodexAppServerClient>);
+
+        generator.onTurnCompleted("hello");
+        await generator.waitForIdle(1_000);
+
+        expect(threadStart).toHaveBeenCalledTimes(1);
+        return threadStart.mock.calls[0]![0];
+    }
+
+    it("starts the title thread with every configured MCP server disabled", async () => {
+        const configRead = vi.fn().mockResolvedValue({
+            config: {mcp_servers: {docs: {command: "docs-mcp"}, "kirocrew-dashboard": {url: "http://127.0.0.1:1/mcp"}}},
+            origins: {},
+            layers: null,
+        });
+
+        const params = await startedThreadParams(configRead);
+
+        expect(configRead).toHaveBeenCalledWith({includeLayers: false, cwd: "/test/cwd"});
+        expect(params).toEqual({
+            cwd: "/test/cwd",
+            ephemeral: true,
+            config: {mcp_servers: {docs: {enabled: false}, "kirocrew-dashboard": {enabled: false}}},
+        });
+    });
+
+    it("passes no config when no MCP server is configured", async () => {
+        const params = await startedThreadParams(vi.fn().mockResolvedValue({config: {}, origins: {}, layers: null}));
+
+        expect(params).toEqual({cwd: "/test/cwd", ephemeral: true});
+    });
+
+    it("still generates the title when the config cannot be read", async () => {
+        const params = await startedThreadParams(vi.fn().mockRejectedValue(new Error("config/read failed")));
+
+        expect(params).toEqual({cwd: "/test/cwd", ephemeral: true});
+    });
+});

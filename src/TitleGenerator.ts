@@ -1,5 +1,6 @@
 import type { CodexAppServerClient } from "./CodexAppServerClient";
 import type { Turn } from "./app-server/v2";
+import type { JsonValue } from "./app-server/serde_json/JsonValue";
 
 // Use cheap model to generate a title
 export const TITLE_MODEL = "gpt-5.6-luna";
@@ -133,9 +134,11 @@ export class TitleGenerator {
 
         // Ephemeral thread: not persisted to disk, not visible in thread list,
         // but goes through the same auth layer as the main session.
+        const config = await this.mcpServersDisabledConfig();
         const { thread: epThread } = await this.client.threadStart({
             cwd: this.cwd,
             ephemeral: true,
+            ...(config !== null && {config}),
         });
 
         const turnResult = await this.client.runTurn({
@@ -175,6 +178,29 @@ export class TitleGenerator {
         await this.waitForRenameEcho(RENAME_ECHO_TIMEOUT_MS);
     }
 
+    /**
+     * A thread config that turns off every MCP server the Codex config defines for this cwd.
+     *
+     * The title turn uses no tools, but a thread starts all configured MCP servers.
+     * An empty `mcp_servers` table changes nothing, because Codex merges the thread config
+     * onto the loaded config, so each server is disabled by name. Only names the config defines
+     * can be disabled: an unknown name makes `thread/start` fail. `null` when no server is
+     * configured or the config cannot be read.
+     */
+    private async mcpServersDisabledConfig(): Promise<{ [key: string]: JsonValue } | null> {
+        let servers: JsonValue | undefined;
+        try {
+            const response = await this.client.configRead({includeLayers: false, cwd: this.cwd});
+            servers = response?.config?.["mcp_servers"];
+        } catch {
+            return null;
+        }
+        if (!isJsonObject(servers)) return null;
+        const names = Object.keys(servers);
+        if (names.length === 0) return null;
+        return {"mcp_servers": Object.fromEntries(names.map(name => [name, {enabled: false}]))};
+    }
+
     private async waitForRenameEcho(timeoutMs: number): Promise<void> {
         await new Promise<void>(resolve => {
             this.renameEchoResolve = resolve;
@@ -187,6 +213,10 @@ export class TitleGenerator {
     rebindAppServer(client: CodexAppServerClient): void {
         this.client = client;
     }
+}
+
+function isJsonObject(value: JsonValue | undefined): value is { [key: string]: JsonValue } {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function extractTitle(turn: Turn): string | null {
