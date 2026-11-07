@@ -54,7 +54,7 @@
         }
       },
       "mode": "form",
-      "message": "Codex keeps working while you answer. An answer sent after it finishes is not delivered.",
+      "message": "Codex keeps working while you answer. Your answer continues the conversation.",
       "_meta": {
         "codex": {
           "delivery": "async"

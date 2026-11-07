@@ -1,0 +1,26 @@
+[
+  {
+    "content": {
+      "text": "Implement the approved plan.",
+      "type": "text"
+    },
+    "messageId": "item-user",
+    "sessionUpdate": "user_message_chunk"
+  },
+  {
+    "content": {
+      "text": "Implement the approved plan.",
+      "type": "text"
+    },
+    "messageId": "external-user",
+    "sessionUpdate": "user_message_chunk"
+  },
+  {
+    "content": {
+      "text": "Done.",
+      "type": "text"
+    },
+    "messageId": "result",
+    "sessionUpdate": "agent_message_chunk"
+  }
+]
