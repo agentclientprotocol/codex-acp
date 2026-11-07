@@ -67,21 +67,12 @@
     "sessionId": "thread-1:subagent:worker",
     "update": {
       "toolCallId": "terminal",
+      "status": "completed",
       "_meta": {
         "terminal_output_delta": {
           "data": "Still streaming",
           "terminal_id": "terminal"
-        }
-      },
-      "sessionUpdate": "tool_call_update"
-    }
-  },
-  {
-    "sessionId": "thread-1:subagent:worker",
-    "update": {
-      "toolCallId": "terminal",
-      "status": "completed",
-      "_meta": {
+        },
         "terminal_exit": {
           "exit_code": 0,
           "signal": null,

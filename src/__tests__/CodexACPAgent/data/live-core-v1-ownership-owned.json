@@ -22,6 +22,16 @@
     "sessionId": "thread-1",
     "update": {
       "sessionId": "thread-1:subagent:worker",
+      "capabilities": {
+        "cancel": {}
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
       "cwd": "/workspace",
       "sessionUpdate": "subagent_update"
     }
@@ -32,16 +42,6 @@
       "sessionId": "thread-1:subagent:worker",
       "state": {
         "state": "running"
-      },
-      "sessionUpdate": "subagent_update"
-    }
-  },
-  {
-    "sessionId": "thread-1",
-    "update": {
-      "sessionId": "thread-1:subagent:worker",
-      "capabilities": {
-        "cancel": {}
       },
       "sessionUpdate": "subagent_update"
     }

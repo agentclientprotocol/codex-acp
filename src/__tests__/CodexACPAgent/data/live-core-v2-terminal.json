@@ -77,14 +77,9 @@
     "sessionId": "thread-1:subagent:worker",
     "update": {
       "terminalId": "terminal",
-      "data": "U3RpbGwgc3RyZWFtaW5n",
-      "sessionUpdate": "terminal_output_chunk"
-    }
-  },
-  {
-    "sessionId": "thread-1:subagent:worker",
-    "update": {
-      "terminalId": "terminal",
+      "output": {
+        "data": "U3RpbGwgc3RyZWFtaW5n"
+      },
       "exitStatus": {
         "exitCode": 0,
         "signal": null
