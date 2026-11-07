@@ -35,6 +35,7 @@ export const AIR_CODEX_HOOKS_KEY = "codexHooks";
 export const AIR_CONTENT_DELTA_KEY = "contentDelta";
 export const AIR_SUBAGENT_KEY = "subagent";
 export const AIR_CUSTOM_ANSWER_KEY = "customAnswer";
+export const AIR_CUSTOM_ANSWER_FIELDS_KEY = "customAnswerFields";
 /**
  * The root `_meta` spelling of {@link AIR_CUSTOM_ANSWER_KEY} that released AIR versions read.
  * Remove it when the ACP registry no longer serves AIR versions that read only this spelling.
@@ -130,4 +131,13 @@ function asRecord(value: unknown): Record<string, unknown> {
     return value !== null && typeof value === "object" && !Array.isArray(value)
         ? value as Record<string, unknown>
         : {};
+}
+
+/** Whether property metadata marks a text companion to a choice. */
+export function isAirCustomAnswer(meta: unknown): boolean {
+    const root = asRecord(meta);
+    const air = asRecord(asRecord(root[JETBRAINS_META_KEY])[AIR_META_KEY]);
+    const marker = air[AIR_CUSTOM_ANSWER_KEY] === undefined
+        ? root[LEGACY_AIR_CUSTOM_ANSWER_KEY] : air[AIR_CUSTOM_ANSWER_KEY];
+    return marker === true || Object.keys(asRecord(marker)).length > 0;
 }

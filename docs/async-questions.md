@@ -17,14 +17,13 @@ the questions were accepted, and the turn goes on.
 
 ## Answers
 
-- An accepted answer is steered into the turn that asked the question (`turn/steer` with that
-  turn as `expectedTurnId`). It is not echoed as a live user message.
+- An accepted answer joins the current turn through `turn/steer`. If the session is idle,
+  the adapter starts one new turn with the reply. The form summary shows the answer, without a second live user message.
 - Declining or cancelling sends nothing; the agent keeps its own default.
-- When the turn ends, its open elicitations are cancelled with `$/cancel_request`. The same happens
-  when the session closes or its app-server is lost.
-- An answer that arrives after its turn ended is dropped, as in the Codex TUI. This includes an
-  answer to a cancelled elicitation, and one that Codex rejects because a new turn has started. The
-  adapter then sends a `warning` notice, where the client supports notices.
+- The form stays open after its turn ends. Closing the session or losing its app-server cancels it.
+- A rejected answer produces a warning notice where the client supports notices.
+- On ACP v2, request metadata lists Air's companion field IDs under
+  `_meta.jetbrains.air.customAnswerFields`. The note stays part of its choice.
 
 ## Reply format and replay
 

@@ -6,6 +6,19 @@ mid-task instead of queueing until the turn ends or cancelling it. The method is
 standardization proposal is
 [agent-client-protocol PR #1261](https://github.com/agentclientprotocol/agent-client-protocol/pull/1261).
 
+## Native v2 prompts
+
+An ordinary v2 `session/prompt` steers a running turn. An idle session starts a new turn.
+Slash commands wait for their own execution slot. The adapter returns `messageId` only after
+Codex records the message. It emits the message once with that ID and keeps the foreground
+state unchanged during steering.
+
+If the turn ends before it can take the input, the adapter starts a new turn once. If Codex
+accepts the steer but never records its input, the prompt fails without a retry.
+A session cancellation or close interrupts the work. An individual request cancellation can
+stop an input before dispatch. After dispatch, insertion decides the response; cancelling
+that request does not interrupt the existing turn.
+
 ## Capability
 
 The adapter advertises steering in the `initialize` response as
