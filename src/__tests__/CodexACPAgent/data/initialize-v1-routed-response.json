@@ -49,7 +49,10 @@
     {
       "id": "chat-gpt",
       "name": "ChatGPT",
-      "description": "Use ChatGPT to authenticate"
+      "description": "Use ChatGPT to authenticate",
+      "_meta": {
+        "replaceLogin": true
+      }
     },
     {
       "id": "gateway",
