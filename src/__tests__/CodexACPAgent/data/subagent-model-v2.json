@@ -2,7 +2,7 @@
   {
     "sessionId": "root",
     "update": {
-      "sessionUpdate": "_subagent_update",
+      "sessionUpdate": "subagent_spawned",
       "subagentSessionId": "child-1",
       "name": "Reviewer",
       "task": "Review the diff",

@@ -21,12 +21,19 @@ const messageTags = new Set([
     "agent_thought_chunk", "agent_thought",
 ]);
 
+/** AIR retains its negotiated lifecycle extension names on both ACP versions. */
+const airLifecycleTags = new Set([
+    "subagent_spawned", "subagent_state_update",
+    "async_task_spawned", "async_task_progress", "async_task_state_update",
+]);
+
 /**
  * Why a `session/update` payload is not a valid ACP v2 update, or `null` if it is.
  *
  * Neither the SDK nor the TS types stop a v1-only tag (e.g. `tool_call`) or a custom unprefixed
- * tag from reaching a v2 client, so tests check the frames themselves: custom tags must start with
- * `_`, and standard ones must match their v2 schema. Terminal bytes must be base64, `cwd` and diff
+ * tag from reaching a v2 client, so tests check the frames themselves. AIR keeps its negotiated
+ * lifecycle tags; other custom tags must start with `_`. Standard updates must match their v2 schema.
+ * Terminal bytes must be base64, `cwd` and diff
  * paths absolute, and v1's private terminal and diff `_meta` keys must not reach the client.
  */
 export function v2SessionUpdateViolation(update: acpV2.SessionUpdate): string | null {
@@ -34,6 +41,7 @@ export function v2SessionUpdateViolation(update: acpV2.SessionUpdate): string | 
     if (typeof tag !== "string") {
         return `sessionUpdate is not a string: ${JSON.stringify(update)}`;
     }
+    if (airLifecycleTags.has(tag)) return null;
     if (acpV2.SessionUpdate.isCustom(update)) {
         return tag.startsWith("_") ? null : `unknown unprefixed sessionUpdate '${tag}'`;
     }

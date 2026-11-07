@@ -784,6 +784,7 @@ Without the capability, the config options keep their old shape and carry no rec
 Codex app-server owns shell commands that keep running after their tool call.
 The adapter exposes them as async tasks when the client declares `asyncTasks`.
 Without the capability, the adapter sends no async task update.
+ACP v1 and v2 use the same `async_task_spawned`, `async_task_progress`, and `async_task_state_update` names and payloads.
 
 ### Lifecycle
 
@@ -1000,6 +1001,7 @@ Recovery never removes the transcript record.
 The adapter implements the draft [ACP subagent RFD](https://github.com/agentclientprotocol/agent-client-protocol/pull/1992).
 [Subagent sessions](subagent-sessions.md) describes the lifecycle.
 This section covers only the AIR bridge.
+AIR receives `subagent_spawned` and `subagent_state_update` with the same names and payloads on ACP v1 and v2.
 
 - The canonical client field is `clientCapabilities.subagents: {}`.
 - Released ACP SDKs can strip that draft field.

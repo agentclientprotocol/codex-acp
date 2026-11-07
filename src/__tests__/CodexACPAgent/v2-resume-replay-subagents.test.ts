@@ -208,14 +208,14 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
             replayFrom: {type: "start"},
         });
 
-        const subagentUpdates = updates.map(({update}) => update).filter((update) => update.sessionUpdate === "_subagent_update");
+        const subagentUpdates = updates.map(({update}) => update).filter((update) => ["subagent_spawned", "subagent_state_update"].includes(update.sessionUpdate));
         expect(subagentUpdates).toEqual([
-            {sessionUpdate: "_subagent_update", subagentSessionId: childId, name: "Researcher", task: "Delegated task for Researcher", capabilities: {}},
-            {sessionUpdate: "_subagent_update", subagentSessionId: childId, state: "completed"},
+            {sessionUpdate: "subagent_spawned", subagentSessionId: childId, name: "Researcher", task: "Delegated task for Researcher", capabilities: {}},
+            {sessionUpdate: "subagent_state_update", subagentSessionId: childId, state: "completed"},
         ]);
 
         // Async tasks aren't gated on in this capability set, so nothing async-task-shaped renders.
-        expect(updates.some(({update}) => update.sessionUpdate.startsWith("_async_task_"))).toBe(false);
+        expect(updates.some(({update}) => update.sessionUpdate.startsWith("async_task_"))).toBe(false);
     });
 
     it('also emits the child subagent history (agent reply) alongside the lifecycle updates', async () => {
@@ -335,11 +335,11 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
         });
 
         const followupSessionId = `${childId}:generation:2`;
-        expect(updates.map(({update}) => update).filter((update) => update.sessionUpdate === "_subagent_update")).toEqual([
-            {sessionUpdate: "_subagent_update", subagentSessionId: childId, name: "Researcher", task: "Delegated task for Researcher", capabilities: {}},
-            {sessionUpdate: "_subagent_update", subagentSessionId: childId, state: "completed"},
-            {sessionUpdate: "_subagent_update", subagentSessionId: followupSessionId, name: "Researcher", task: "Delegated task for Researcher", capabilities: {}},
-            {sessionUpdate: "_subagent_update", subagentSessionId: followupSessionId, state: "completed"},
+        expect(updates.map(({update}) => update).filter((update) => ["subagent_spawned", "subagent_state_update"].includes(update.sessionUpdate))).toEqual([
+            {sessionUpdate: "subagent_spawned", subagentSessionId: childId, name: "Researcher", task: "Delegated task for Researcher", capabilities: {}},
+            {sessionUpdate: "subagent_state_update", subagentSessionId: childId, state: "completed"},
+            {sessionUpdate: "subagent_spawned", subagentSessionId: followupSessionId, name: "Researcher", task: "Delegated task for Researcher", capabilities: {}},
+            {sessionUpdate: "subagent_state_update", subagentSessionId: followupSessionId, state: "completed"},
         ]);
         const followupReplies = updates
             .filter(({sessionId, update}) => sessionId === followupSessionId && update.sessionUpdate === "agent_message_chunk")
@@ -362,10 +362,10 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
             replayFrom: {type: "start"},
         });
 
-        const asyncTaskUpdates = updates.map(({update}) => update).filter((update) => update.sessionUpdate === "_async_task_spawned");
+        const asyncTaskUpdates = updates.map(({update}) => update).filter((update) => update.sessionUpdate === "async_task_spawned");
         expect(asyncTaskUpdates).toEqual([
             {
-                sessionUpdate: "_async_task_spawned",
+                sessionUpdate: "async_task_spawned",
                 asyncTaskId: "child-1:child-command-1",
                 name: "npm test",
                 taskType: "shell",
