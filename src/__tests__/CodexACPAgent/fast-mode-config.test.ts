@@ -27,14 +27,11 @@ describe("Fast mode session config", () => {
         currentServiceTier: "fast" | "flex" | null = null,
         clientInfo: acp.Implementation | null = null,
         clientCapabilities?: acp.ClientCapabilities,
+        fastModel = createTestModel({id: "fast-model", additionalSpeedTiers: ["fast"]}),
     ) {
         const fixture = createCodexMockTestFixture();
         const codexAcpAgent = fixture.getCodexAcpAgent();
         const codexAcpClient = fixture.getCodexAcpClient();
-        const fastModel = createTestModel({
-            id: "fast-model",
-            additionalSpeedTiers: ["fast"],
-        });
         const slowModel = createTestModel({id: "slow-model"});
 
         vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
@@ -72,6 +69,42 @@ describe("Fast mode session config", () => {
         const {response} = await createSession();
 
         expect(response.configOptions).toContainEqual(createFastModeConfigOption(false));
+    });
+
+    it("advertises and applies Fast for a gateway model with a priority service tier", async () => {
+        const gatewayModel = createTestModel({
+            id: "fast-model",
+            serviceTiers: [{id: "priority", name: "Fast", description: "Priority processing"}],
+        });
+        const {response, codexAcpAgent, fixture} = await createSession(null, null, undefined, gatewayModel);
+
+        expect(response.configOptions).toContainEqual(createFastModeConfigOption(false));
+        expect(codexAcpAgent.getSessionState("session-id").currentModelSupportsFast).toBe(true);
+
+        const onResponse = await codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: FAST_MODE_CONFIG_ID,
+            value: FAST_MODE_ON,
+        });
+        expect(onResponse.configOptions).toContainEqual(createFastModeConfigOption(true));
+
+        const turnStartSpy = mockPromptTurn(fixture, "session-id");
+        await codexAcpAgent.prompt({sessionId: "session-id", prompt: [{type: "text", text: "test"}]});
+
+        expect(turnStartSpy).toHaveBeenCalledWith(expect.objectContaining({
+            serviceTier: "fast",
+        }));
+    });
+
+    it("does not advertise Fast for a gateway model offering only flex", async () => {
+        const gatewayModel = createTestModel({
+            id: "fast-model",
+            serviceTiers: [{id: "flex", name: "Flex", description: "Lower priority"}],
+        });
+        const {response, codexAcpAgent} = await createSession(null, null, undefined, gatewayModel);
+
+        expect(response.configOptions?.some(option => option.id === FAST_MODE_CONFIG_ID)).toBe(false);
+        expect(codexAcpAgent.getSessionState("session-id").currentModelSupportsFast).toBe(false);
     });
 
     it("returns the Fast mode config option as a boolean when the client supports it", async () => {
