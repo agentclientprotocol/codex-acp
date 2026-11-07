@@ -239,7 +239,7 @@ import {
     createUnavailableAgentFileChangeReport,
     parseAgentFileChangeReportRequest,
 } from "./AgentFileChangeReport";
-
+import {daybreakAccessProgram} from "./Daybreak";
 
 export interface SessionState extends SessionIndexTitleState {
     sessionId: string,
@@ -282,6 +282,7 @@ export interface SessionState extends SessionIndexTitleState {
     additionalDirectories: string[];
     mcpServers?: Array<AcpMcpServer>;
     fastModeEnabled: boolean;
+    daybreakEnabled?: boolean;
     currentModelSupportsFast: boolean;
     sessionMcpServers?: Array<string>;
     /** The capability choices of the client for tool call and plan reports. */
@@ -1396,6 +1397,7 @@ export class CodexAcpServer {
             ),
             availableAgentModes,
             collaborationMode: sessionMetadata.collaborationMode,
+            ...(sessionMetadata.daybreakEnabled !== undefined ? {daybreakEnabled: sessionMetadata.daybreakEnabled} : {}),
             currentTurnId: null,
             interruptTurnId: null,
             codexReportedRunningTurnId: null,
@@ -3629,6 +3631,7 @@ export class CodexAcpServer {
             ),
             availableAgentModes,
             collaborationMode: sessionMetadata.collaborationMode,
+            ...(sessionMetadata.daybreakEnabled !== undefined ? {daybreakEnabled: sessionMetadata.daybreakEnabled} : {}),
             currentTurnId: null,
             interruptTurnId: null,
             codexReportedRunningTurnId: null,
@@ -5226,6 +5229,10 @@ export class CodexAcpServer {
                     },
                     () => this.promptShouldStop(params.sessionId, activePrompt),
                     insertion?.clientUserMessageId,
+                    daybreakAccessProgram(
+                        sessionState.daybreakEnabled,
+                        this.findCurrentModel(sessionState.availableModels, sessionState.currentModelId),
+                    ),
                 ));
             void sendPromptPromise.catch((err) => {
                 if (this.activePrompts.get(params.sessionId) !== activePrompt) {
@@ -5344,6 +5351,10 @@ export class CodexAcpServer {
                             },
                             () => this.promptShouldStop(params.sessionId, activePrompt),
                             implementationClientUserMessageId,
+                            daybreakAccessProgram(
+                                sessionState.daybreakEnabled,
+                                this.findCurrentModel(sessionState.availableModels, sessionState.currentModelId),
+                            ),
                         ),
                     );
                     void implementationPromise.catch((err) => {

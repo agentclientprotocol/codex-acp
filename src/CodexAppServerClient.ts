@@ -18,6 +18,8 @@ import type {
     ConfigReadResponse,
     ConfigBatchWriteParams,
     ConfigWriteResponse,
+    CyberAccessProgram,
+    Thread,
     GetAccountParams,
     GetAccountRateLimitsResponse,
     GetAccountResponse,
@@ -698,6 +700,10 @@ export class CodexAppServerClient {
 
     async threadSettingsUpdate(params: ExperimentalThreadSettingsUpdateParams): Promise<void> {
         await this.connection.sendRequest("thread/settings/update", params);
+    }
+
+    async threadSetDaybreakEnabled(threadId: string, daybreakEnabled: boolean): Promise<void> {
+        await this.connection.sendRequest("thread/metadata/update", {threadId, daybreakEnabled});
     }
 
     async threadList(params: ThreadListParams): Promise<ThreadListResponse> {
@@ -1401,15 +1407,17 @@ export interface ExperimentalThreadSettingsUpdateParams {
 }
 
 // These fields are generated with `generate-ts --experimental`; `npm run generate-types` uses the stable schema.
-type ExperimentalThreadPermissions = {
+type ExperimentalThreadResponseFields = {
     activePermissionProfile?: ActivePermissionProfile | null;
+    thread: Thread & {daybreakEnabled?: boolean | null};
 };
 
-export type ExperimentalThreadStartResponse = ThreadStartResponse & ExperimentalThreadPermissions;
-export type ExperimentalThreadResumeResponse = ThreadResumeResponse & ExperimentalThreadPermissions;
-export type ExperimentalThreadForkResponse = ThreadForkResponse & ExperimentalThreadPermissions;
+export type ExperimentalThreadStartResponse = ThreadStartResponse & ExperimentalThreadResponseFields;
+export type ExperimentalThreadResumeResponse = ThreadResumeResponse & ExperimentalThreadResponseFields;
+export type ExperimentalThreadForkResponse = ThreadForkResponse & ExperimentalThreadResponseFields;
 
 export type ExperimentalTurnStartParams = TurnStartParams & {
+    cyberAccessProgram?: CyberAccessProgram;
     permissions?: string | null;
     runtimeWorkspaceRoots?: string[] | null;
 };

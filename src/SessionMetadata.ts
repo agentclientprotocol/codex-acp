@@ -18,6 +18,7 @@ export type SessionMetadata = {
     collaborationMode: ModeKind,
     modelProvider?: string | null,
     currentServiceTier?: ServiceTier | null,
+    daybreakEnabled?: boolean,
     threadStatus?: ThreadStatus,
     additionalDirectories: string[],
     skippedMcpServers?: string[],

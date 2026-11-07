@@ -8,6 +8,9 @@ import type {SessionState} from "./CodexAcpServer";
 import {createRateLimitsMap, type RateLimitsMap} from "./RateLimitsMap";
 import type {TokenCount} from "./TokenCount";
 import {logger} from "./Logger";
+import {ModelId} from "./ModelId";
+import {availableDaybreakAccessProgram, daybreakAccessProgram} from "./Daybreak";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import {MCP_COMMAND_INPUT_HINT, McpCommand} from "./mcp/McpCommand";
 import type {McpServerSignIn} from "./mcp/McpServerSignIn";
 import {createAgentTextMessageChunk} from "./ContentChunks";
@@ -144,6 +147,7 @@ export class CodexCommands {
         const commands = this.buildAvailableCommands(
             skillsResponse?.data ?? [],
             sessionState.clientCapabilities.airClient,
+            sessionState.daybreakEnabled === true || sessionState.availableModels.some(model => availableDaybreakAccessProgram(model) !== undefined),
         );
         // A slower initial read must not replace a newer list published during setup or replay.
         if ((this.snapshots.get(sessionState)?.revision ?? 0) < revision) {
@@ -194,10 +198,10 @@ export class CodexCommands {
         };
     }
 
-    private buildAvailableCommands(skillsEntries: SkillsListEntry[], airClient: boolean): AvailableCommand[] {
+    private buildAvailableCommands(skillsEntries: SkillsListEntry[], airClient: boolean, daybreakAvailable: boolean): AvailableCommand[] {
         const commands = new Map<string, AvailableCommand>();
 
-        for (const builtin of this.getBuiltinCommands(airClient)) {
+        for (const builtin of this.getBuiltinCommands(airClient, daybreakAvailable)) {
             commands.set(builtin.name, builtin);
         }
 
@@ -223,7 +227,7 @@ export class CodexCommands {
      * See the original cli commands documentation here: https://developers.openai.com/codex/cli/slash-commands/
      * Only AIR gets a command action, in `_meta.jetbrains.air.commandAction`.
      */
-    private getBuiltinCommands(airClient: boolean): AvailableCommand[] {
+    private getBuiltinCommands(airClient: boolean, daybreakAvailable: boolean): AvailableCommand[] {
         const commandAction = (action: Record<string, unknown>) => {
             const meta = airOnlyMeta(airClient, AIR_COMMAND_ACTION_KEY, action);
             return meta ? {_meta: meta} : {};
@@ -241,6 +245,11 @@ export class CodexCommands {
                     presentation: "state",
                 }),
             },
+            ...(daybreakAvailable ? [{
+                name: "daybreak",
+                description: "Toggle Daybreak for this session.",
+                input: null,
+            }] : []),
             {
                 name: "mcp",
                 description: "Show the status of the MCP servers, or reconnect them.",
@@ -327,6 +336,7 @@ export class CodexCommands {
         if (command === null || command.name.startsWith("$")) return {kind: "prompt"};
         switch (command.name) {
             case "plan":
+            case "daybreak":
             case "status":
             case "rename":
             case "logout":
@@ -375,6 +385,26 @@ export class CodexCommands {
                     : PLAN_COLLABORATION_MODE;
                 await options.setConfigOption?.(COLLABORATION_MODE_CONFIG_ID, mode);
                 return { handled: options.setConfigOption !== undefined };
+            }
+            case "daybreak": {
+                if (command.rest.length > 0) {
+                    await this.sendCommandUsageMessage(commandName, "no arguments", sessionId);
+                    return {handled: true};
+                }
+                const enabled = !sessionState.daybreakEnabled;
+                if (enabled) {
+                    const provider = await this.runWithProcessCheck(() => this.codexAcpClient.getCurrentModelProvider());
+                    if (provider !== null && provider !== "openai") {
+                        throw RequestError.invalidRequest(undefined, "Daybreak requires the OpenAI provider.");
+                    }
+                    const {model} = ModelId.fromString(sessionState.currentModelId);
+                    daybreakAccessProgram(true, sessionState.availableModels.find(candidate => candidate.id === model));
+                }
+                await this.runWithProcessCheck(() => this.codexAcpClient.setDaybreakEnabled(sessionId, enabled));
+                sessionState.daybreakEnabled = enabled;
+                const session = new ACPSessionConnection(this.connection, sessionId);
+                await session.update(createAgentTextMessageChunk(`Daybreak ${enabled ? "enabled" : "disabled"} for this session.`));
+                return {handled: true};
             }
             case "compact": {
                 options.onTurnStartPending?.();
