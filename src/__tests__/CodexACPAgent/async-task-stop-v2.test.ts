@@ -59,7 +59,7 @@ describe('_session/async_task/stop on ACP v2', () => {
         expectConformingV2SessionUpdates();
     });
 
-    it('stops a spawned async task on v2, returning {stopped: true} and rendering _async_task_state_update', async () => {
+    it('stops a spawned async task on v2, returning {stopped: true} and rendering async_task_state_update', async () => {
         const client = await connectSession(2, {clientCapabilities: asyncTasksClientCapabilities});
         closeClient = () => client.connection.close();
         client.setCodexResponse("thread/backgroundTerminals/list", async () => ({
@@ -71,7 +71,7 @@ describe('_session/async_task/stop on ACP v2', () => {
         await spawnAsyncTask(client);
 
         const spawned = client.transcript.flatMap(entry => "sessionUpdate" in entry ? [entry.sessionUpdate] : [])
-            .filter(update => update.sessionUpdate === "_async_task_spawned");
+            .filter(update => update.sessionUpdate === "async_task_spawned");
         expect(spawned).toEqual([expect.objectContaining({asyncTaskId: "command-1"})]);
 
         const stopRequest = client.request(ASYNC_TASK_STOP_METHOD, {sessionId, asyncTaskId: "command-1"});
@@ -79,16 +79,12 @@ describe('_session/async_task/stop on ACP v2', () => {
         await settle();
 
         const stateUpdates = client.transcript.flatMap(entry => "sessionUpdate" in entry ? [entry.sessionUpdate] : [])
-            .filter(update => update.sessionUpdate === "_async_task_state_update");
-        expect(stateUpdates).toEqual([{sessionUpdate: "_async_task_state_update", asyncTaskId: "command-1", state: "stopped", toolCallId: "command-1"}]);
+            .filter(update => update.sessionUpdate === "async_task_state_update");
+        expect(stateUpdates).toEqual([{sessionUpdate: "async_task_state_update", asyncTaskId: "command-1", state: "stopped", toolCallId: "command-1"}]);
     });
 
-    // v1 renders the same lifecycle as bare `async_task_spawned`/`async_task_state_update` tags
-    // (pre-`_`-prefix convention), which the real v1 SDK client schema does not model -- see
-    // `async-tasks.test.ts` for the v1 rendering pin, using a raw mock connection instead of the
-    // real wire-validating client. This file's v1 iterations below pin the *router-level*
-    // extension-method behavior (params, unknown-session/task handling, errors), which is
-    // unaffected by that.
+    // AIR uses the same lifecycle tags in both versions. The v1 SDK schema omits these extensions,
+    // so async-tasks.test.ts captures the v1 lifecycle through a raw connection.
 
     it('stopping an unknown task id returns {stopped: false} on both v1 and v2, matching an unknown session', async () => {
         for (const protocolVersion of [1, 2] as const) {

@@ -822,6 +822,7 @@ A model entry with efforts carries:
 Codex app-server owns shell commands that keep running after their tool call.
 The adapter exposes them as async tasks when the client declares `asyncTasks`.
 Without the capability, the adapter sends no async task update.
+ACP v1 and v2 use the same `async_task_spawned`, `async_task_progress`, and `async_task_state_update` names and payloads.
 
 ### Lifecycle
 
@@ -1046,6 +1047,7 @@ Recovery never removes the transcript record.
 AIR keeps the private subagent contract that predates the ACP Subagent Sessions RFD.
 [Subagent sessions](subagent-sessions.md#air-legacy-contract) describes its lifecycle and the standard contract of other clients.
 This section covers only the AIR bridge.
+AIR receives `subagent_spawned` and `subagent_state_update` with the same names and payloads on ACP v1 and v2.
 
 - AIR declares `nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`, or on v1 `clientCapabilities.subagents: {}`.
 - Either signal enables native subagent sessions for AIR.
