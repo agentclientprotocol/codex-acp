@@ -55,7 +55,7 @@ describe('ACPSessionConnection - session/update over ACP v2', () => {
         expectConformingV2SessionUpdates();
     });
 
-    async function connectV2Client() {
+    async function connectV2Client(capabilities?: acpV2.ClientCapabilities) {
         const {clientStream, agentConnection} = connectRouter();
         const received: unknown[] = [];
         const connection = acpV2.client({name: "test-client"})
@@ -68,6 +68,7 @@ describe('ACPSessionConnection - session/update over ACP v2', () => {
         await connection.agent.request(acpV2.methods.agent.initialize, {
             protocolVersion: 2,
             info: {name: "test-client", version: "1.0.0"},
+            ...(capabilities ? {capabilities} : {}),
         });
         const handle = agentConnection();
         if (!(handle instanceof AcpV2Connection)) {
@@ -107,8 +108,10 @@ describe('ACPSessionConnection - session/update over ACP v2', () => {
         await expect(dump(received)).toMatchFileSnapshot('data/session-update-v2-tool-calls-and-chunks.json');
     });
 
-    it('renders the subagent RFD upsert and async task updates under `_`-prefixed tags', async () => {
-        const {received, view} = await connectV2Client();
+    it('preserves the negotiated AIR lifecycle extensions on the v2 wire', async () => {
+        const {received, view} = await connectV2Client({
+            _meta: {jetbrains: {air: {version: 1, capabilities: ["nativeSubagentSessions", "asyncTasks"]}}},
+        });
         const session = new ACPSessionConnection(view, "session-1");
 
         await session.update({
@@ -116,7 +119,8 @@ describe('ACPSessionConnection - session/update over ACP v2', () => {
             subagentSessionId: "child-1",
             name: "Researcher",
             task: "Look into flaky tests",
-            capabilities: {},
+            capabilities: {cancel: true},
+            _meta: {source: "delegation"},
         });
         await session.update({sessionUpdate: "subagent_state_update", subagentSessionId: "child-1", state: "completed"});
         await session.update({
@@ -129,13 +133,19 @@ describe('ACPSessionConnection - session/update over ACP v2', () => {
             toolCallId: "call-1",
         });
         await session.update({
+            sessionUpdate: "async_task_progress",
+            asyncTaskId: "task-1",
+            summary: "Tests are running",
+            toolCallId: "call-1",
+        });
+        await session.update({
             sessionUpdate: "async_task_state_update",
             asyncTaskId: "task-1",
             state: "completed",
             toolCallId: "call-1",
         });
 
-        await vi.waitFor(() => expect(received).toHaveLength(4));
+        await vi.waitFor(() => expect(received).toHaveLength(5));
         await expect(dump(received)).toMatchFileSnapshot('data/session-update-v2-subagent-and-async-task.json');
     });
 
