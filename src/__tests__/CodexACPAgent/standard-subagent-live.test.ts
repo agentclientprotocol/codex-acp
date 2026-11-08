@@ -69,6 +69,12 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
     });
     const childUpdates = () => h.scopedUpdates.filter(entry =>
         entry.sessionId.includes(":subagent:") || entry.update.sessionUpdate === "subagent_update");
+    async function waitForChildDirectory() {
+        await vi.waitFor(() => expect(childUpdates()).toContainEqual({
+            sessionId, update: {sessionUpdate: "subagent_update", sessionId: childId, cwd},
+        }));
+        await flush(h);
+    }
     async function snapshot(name: string) {
         await flush(h);
         await expect(JSON.stringify(childUpdates(), null, 2) + "\n").toMatchFileSnapshot(`data/live-core-v${version}-${name}.json`);
@@ -275,6 +281,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         await load();
         await flush(h);
         expect(resumes).toEqual(parent === sessionId ? [sessionId, worker] : [sessionId]);
+        if (parent === sessionId) await waitForChildDirectory();
         h.emit(onWorker(turnStarted("child-turn")));
         await flush(h);
         if (parent === sessionId) expect(await approval("restored")).toEqual({decision: "accept"});
@@ -290,8 +297,10 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         await flush(h);
         history(h);
         await load();
+        await waitForChildDirectory();
         await flush(h);
         h.emit({method: "item/commandExecution/outputDelta", params: {threadId: worker, turnId: "child-turn", itemId: "terminal", delta: "Still streaming"}});
+        await flush(h);
         h.emit({method: "item/completed", params: {threadId: worker, turnId: "child-turn", completedAtMs: 0,
             item: {...commandExecutionItem("terminal", "completed"), exitCode: 0, aggregatedOutput: "Still streaming"}}});
         await snapshot("terminal");
