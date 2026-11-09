@@ -43,6 +43,15 @@ describe('native v2 prompt steering', () => {
         await startPrompt(client, version);
     }
 
+    async function insertPromptInTurn(turnNumber: number, text: string): Promise<string> {
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(turnNumber));
+        const turnId = `turn-${turnNumber}`;
+        const messageId = client.turnStartParams[turnNumber - 1]!['clientUserMessageId'] as string;
+        client.emit(turnStarted(turnId));
+        client.emit(itemCompleted(userMessageItem(messageId, text), turnId));
+        return messageId;
+    }
+
     it.each([1, 2] as const)('delivers a follow-up during generation in v%s without restarting the turn', async version => {
         await connect(version);
         const response = version === 1
@@ -191,19 +200,12 @@ describe('native v2 prompt steering', () => {
         await expect(pending).rejects.toMatchObject({code: -32800});
         await expect(later).rejects.toMatchObject({code: -32800});
         await client.promptRunFinished();
-        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(2));
-        client.emit(turnStarted('turn-2'));
-        client.emit(itemCompleted(userMessageItem(
-            client.turnStartParams[1]!['clientUserMessageId'] as string, 'Fallback',
-        ), 'turn-2'));
+        await insertPromptInTurn(2, 'Fallback');
         await expect(steering).resolves.toEqual({outcome: 'startedNewTurn'});
         client.emit(turnCompleted('turn-2'));
         await client.promptRunFinished(1);
         const next = client.sendPrompt([{type: 'text', text: 'After cancellation'}]);
-        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(3));
-        const messageId = client.turnStartParams[2]!['clientUserMessageId'] as string;
-        client.emit(turnStarted('turn-3'));
-        client.emit(itemCompleted(userMessageItem(messageId, 'After cancellation'), 'turn-3'));
+        const messageId = await insertPromptInTurn(3, 'After cancellation');
         await expect(next).resolves.toEqual({messageId});
         client.emit(turnCompleted('turn-3'));
         await client.promptRunFinished(2);
