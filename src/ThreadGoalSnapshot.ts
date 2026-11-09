@@ -1,22 +1,36 @@
-import {GOAL_CONTROL_METHOD} from "./AcpExtensions";
+import type {ACPSessionConnection, UpdateSessionEvent} from "./ACPSessionConnection";
+import {AIR_GOAL_KEY, publishAirSessionMetadata, withAirMeta} from "./AirExtension";
+import {GOAL_CONTROL_METHOD, type GoalSnapshot, type GoalStatus} from "./GoalExtension";
 import type {ThreadGoal} from "./app-server/v2";
 
-export interface ThreadGoalSnapshot {
-    objective: string;
-    status: ThreadGoal["status"];
-    tokenBudget: number | null;
-    timeUsedSeconds: number;
-    createdAt: number;
-    controlMethod: typeof GOAL_CONTROL_METHOD;
+export type ThreadGoalSnapshot = GoalSnapshot;
+
+function toGoalStatus(status: ThreadGoal["status"]): GoalStatus {
+    switch (status) {
+        case "active":
+        case "paused":
+        case "blocked":
+        case "complete":
+            return status;
+        case "usageLimited":
+        case "budgetLimited":
+            return "limited";
+    }
+}
+
+function toUnixMilliseconds(timestampSeconds: number): number {
+    return timestampSeconds * 1000;
 }
 
 export function toThreadGoalSnapshot(goal: ThreadGoal): ThreadGoalSnapshot {
     return {
         objective: goal.objective.trim(),
-        status: goal.status,
+        status: toGoalStatus(goal.status),
         tokenBudget: goal.tokenBudget,
+        tokensUsed: goal.tokensUsed,
         timeUsedSeconds: goal.timeUsedSeconds,
-        createdAt: goal.createdAt,
+        createdAt: toUnixMilliseconds(goal.createdAt),
+        updatedAt: toUnixMilliseconds(goal.updatedAt),
         controlMethod: GOAL_CONTROL_METHOD,
     };
 }
@@ -31,4 +45,17 @@ export function sameThreadGoalSnapshot(
         && left.status === right.status
         && left.tokenBudget === right.tokenBudget
         && left.createdAt === right.createdAt;
+}
+
+/** Only AIR gets the goal. The update carries nothing else, so another client gets no update. */
+export function goalSessionInfoUpdate(goal: ThreadGoalSnapshot | null, airClient: boolean): UpdateSessionEvent | null {
+    if (!airClient) return null;
+    return {
+        sessionUpdate: "session_info_update",
+        _meta: withAirMeta(undefined, AIR_GOAL_KEY, goal),
+    };
+}
+
+export function publishGoalSessionInfo(session: ACPSessionConnection, goal: ThreadGoalSnapshot | null, airClient: boolean): Promise<void> {
+    return airClient ? publishAirSessionMetadata(session, AIR_GOAL_KEY, goal) : Promise.resolve();
 }

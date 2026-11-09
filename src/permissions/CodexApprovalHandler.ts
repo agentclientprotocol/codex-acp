@@ -1,0 +1,179 @@
+import * as acp from "@agentclientprotocol/sdk/unstable";
+import type {ApprovalHandler} from "../CodexAppServerClient";
+import type {
+    CommandExecutionRequestApprovalParams,
+    CommandExecutionRequestApprovalResponse,
+    FileChangeRequestApprovalParams,
+    FileChangeRequestApprovalResponse,
+    GrantedPermissionProfile,
+    PermissionsRequestApprovalParams,
+    PermissionsRequestApprovalResponse,
+    RequestPermissionProfile,
+} from "../app-server/v2";
+import {logger} from "../Logger";
+import type {AcpClientConnection} from "../ACPSessionConnection";
+import {
+    commandDecisionOptions,
+    fileChangeDecisionOptions,
+    permissionProfileOptions,
+    type CommandParamsWithAvailableDecisions,
+    type DecisionOption,
+} from "./options";
+import {ApprovalOptionId} from "./option-ids";
+import {
+    CODEX_ADDITIONAL_PERMISSIONS_TITLE,
+    CODEX_COMMAND_PERMISSION_TITLE,
+    CODEX_FILE_CHANGE_PERMISSION_TITLE,
+    CODEX_NETWORK_PERMISSION_TITLE,
+    requestPermissionMeta,
+} from "./metadata";
+import type {PermissionPromptContext} from "./lifecycle";
+import {AcpToolCallRenderer} from "../tool-calls/AcpToolCallRenderer";
+import {subagentInteractionSignal, withSubagentUserAction} from "../subagents/SubagentInteraction";
+import {CommandReporter} from "../tool-calls/reporters/CommandReporter";
+import {FileChangeReporter} from "../tool-calls/reporters/FileChangeReporter";
+import {SandboxPermissionReporter} from "../tool-calls/reporters/SandboxPermissionReporter";
+
+export class CodexApprovalHandler implements ApprovalHandler {
+    constructor(
+        private readonly connection: AcpClientConnection,
+        private readonly permissionContext: PermissionPromptContext,
+        private readonly cancellationSignal: AbortSignal | undefined,
+        private readonly renderer: AcpToolCallRenderer,
+    ) {}
+
+    async handleCommandExecution(
+        params: CommandExecutionRequestApprovalParams,
+    ): Promise<CommandExecutionRequestApprovalResponse> {
+        const authoritativeParams = params as CommandParamsWithAvailableDecisions;
+        const decisions = commandDecisionOptions(authoritativeParams);
+        if (!decisions) {
+            logger.error("Cancelling command approval without a complete authoritative decision set", undefined);
+            return {decision: "cancel"};
+        }
+
+        try {
+            const response = await this.requestPermission({
+                sessionId: params.threadId,
+                toolCall: this.renderer.renderPermissionToolCall(CommandReporter.permission(
+                    authoritativeParams,
+                    this.permissionContext.commandStarted(params.threadId, params.itemId),
+                    this.permissionContext.commandName(params.threadId, params.itemId),
+                )),
+                options: decisions.map(({option}) => option),
+                ...requestPermissionMeta(
+                    this.renderer.capabilities,
+                    params.networkApprovalContext ? CODEX_NETWORK_PERMISSION_TITLE : CODEX_COMMAND_PERMISSION_TITLE,
+                    params.reason,
+                ),
+            });
+            return {decision: this.selectedDecision(response, decisions) ?? "cancel"};
+        } catch (error) {
+            logger.error("Error requesting command execution permission", error);
+            return {decision: "cancel"};
+        }
+    }
+
+    async handleFileChange(params: FileChangeRequestApprovalParams): Promise<FileChangeRequestApprovalResponse> {
+        const decisions = fileChangeDecisionOptions();
+        try {
+            const response = await this.requestPermission({
+                sessionId: params.threadId,
+                toolCall: this.renderer.renderPermissionToolCall(FileChangeReporter.permission(
+                    params,
+                    this.permissionContext.fileChange(params.threadId, params.itemId),
+                )),
+                options: decisions.map(({option}) => option),
+                ...requestPermissionMeta(
+                    this.renderer.capabilities,
+                    CODEX_FILE_CHANGE_PERMISSION_TITLE,
+                    params.reason,
+                ),
+            });
+            return {decision: this.selectedDecision(response, decisions) ?? "cancel"};
+        } catch (error) {
+            logger.error("Error requesting file change permission", error);
+            return {decision: "cancel"};
+        }
+    }
+
+    async handlePermissionsRequest(
+        params: PermissionsRequestApprovalParams,
+    ): Promise<PermissionsRequestApprovalResponse> {
+        try {
+            const response = await this.requestPermission({
+                sessionId: params.threadId,
+                toolCall: this.renderer.renderPermissionToolCall(SandboxPermissionReporter.permission(
+                    params.itemId,
+                    params.cwd,
+                    params.environmentId,
+                    params.permissions,
+                )),
+                options: permissionProfileOptions(),
+                ...requestPermissionMeta(
+                    this.renderer.capabilities,
+                    CODEX_ADDITIONAL_PERMISSIONS_TITLE,
+                    params.reason,
+                ),
+            });
+            return this.permissionsResponse(params.permissions, response);
+        } catch (error) {
+            logger.error("Error requesting permissions", error);
+            return this.rejectPermissionsResponse();
+        }
+    }
+
+    private requestPermission(request: acp.RequestPermissionRequest): Promise<acp.RequestPermissionResponse> {
+        const signal = subagentInteractionSignal(request.sessionId, this.cancellationSignal);
+        return withSubagentUserAction(request.sessionId, () => this.connection.request(
+            acp.methods.client.session.requestPermission,
+            request,
+            signal ? {cancellationSignal: signal} : undefined,
+        ), request.toolCall.toolCallId);
+    }
+
+    private selectedDecision<T>(response: acp.RequestPermissionResponse, decisions: DecisionOption<T>[]): T | undefined {
+        // A v2 client may answer with a custom outcome instead of "cancelled"; only "selected"
+        // carries an `optionId` (ACP-ENUM-203).
+        if (response.outcome.outcome !== "selected") return undefined;
+        const optionId = response.outcome.optionId;
+        return decisions.find(({option}) => option.optionId === optionId)?.decision;
+    }
+
+    private permissionsResponse(
+        permissions: RequestPermissionProfile,
+        response: acp.RequestPermissionResponse,
+    ): PermissionsRequestApprovalResponse {
+        if (response.outcome.outcome !== "selected") return this.rejectPermissionsResponse();
+        switch (response.outcome.optionId) {
+            case ApprovalOptionId.AllowPermissionsForTurn:
+                return this.grantedPermissionsResponse(permissions, "turn", false);
+            case ApprovalOptionId.AllowPermissionsForTurnWithStrictAutoReview:
+                return this.grantedPermissionsResponse(permissions, "turn", true);
+            case ApprovalOptionId.AllowPermissionsForSession:
+                return this.grantedPermissionsResponse(permissions, "session", false);
+            case ApprovalOptionId.RejectPermissions:
+            default:
+                return this.rejectPermissionsResponse();
+        }
+    }
+
+    private grantedPermissionsResponse(
+        permissions: RequestPermissionProfile,
+        scope: "turn" | "session",
+        strictAutoReview: boolean,
+    ): PermissionsRequestApprovalResponse {
+        return {permissions: this.grantedPermissions(permissions), scope, strictAutoReview};
+    }
+
+    private rejectPermissionsResponse(): PermissionsRequestApprovalResponse {
+        return {permissions: {}, scope: "turn", strictAutoReview: false};
+    }
+
+    private grantedPermissions(permissions: RequestPermissionProfile): GrantedPermissionProfile {
+        return {
+            ...(permissions.network ? {network: permissions.network} : {}),
+            ...(permissions.fileSystem ? {fileSystem: permissions.fileSystem} : {}),
+        };
+    }
+}

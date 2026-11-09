@@ -1,0 +1,360 @@
+# Changelog
+
+## [2.6.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.5.0...v2.6.0) (2026-11-06)
+
+
+### Features
+
+* expose configured permission profiles as modes ([#395](https://github.com/agentclientprotocol/codex-acp/issues/395)) ([caf2e87](https://github.com/agentclientprotocol/codex-acp/commit/caf2e879bd1e740f2aafcdfa6fdd5a38e176f8f7))
+* predict the follow-up prompt with thread/sample on the session thread ([#740](https://github.com/agentclientprotocol/codex-acp/issues/740)) ([f9cb470](https://github.com/agentclientprotocol/codex-acp/commit/f9cb470edba4776ad34917eb3adb819441323b47))
+* show async Codex questions as elicitations ([#707](https://github.com/agentclientprotocol/codex-acp/issues/707)) ([cc57c7e](https://github.com/agentclientprotocol/codex-acp/commit/cc57c7ec18b2b541279ab6c26820b3b4ebe507eb))
+* update ACP SDK to 2.4 and align protocol behavior ([#727](https://github.com/agentclientprotocol/codex-acp/issues/727)) ([ab513aa](https://github.com/agentclientprotocol/codex-acp/commit/ab513aa482c36233b0251f904b97474272e864ec))
+
+
+### Bug Fixes
+
+* clear stale entity metadata during ACP v2 replay ([#716](https://github.com/agentclientprotocol/codex-acp/issues/716)) ([580d8b9](https://github.com/agentclientprotocol/codex-acp/commit/580d8b926b3350ae8a3c74d54da81df311601d85))
+* defer startup interactions until session setup is delivered ([#714](https://github.com/agentclientprotocol/codex-acp/issues/714)) ([ad993bb](https://github.com/agentclientprotocol/codex-acp/commit/ad993bb13ad9b8941a5db6c27ba94ff8b5e43ce9))
+* fence turn interrupt retries to the original prompt ([#723](https://github.com/agentclientprotocol/codex-acp/issues/723)) ([9c33f86](https://github.com/agentclientprotocol/codex-acp/commit/9c33f86df22e809815a1879b9edd47c57176e63b))
+* match vendor-prefixed gateway model ids such as OpenRouter's ([#731](https://github.com/agentclientprotocol/codex-acp/issues/731)) ([29195ec](https://github.com/agentclientprotocol/codex-acp/commit/29195ecef0268a29f5bd5728cfb3fa541bcacf03))
+* preserve sibling session metadata namespace fields ([#718](https://github.com/agentclientprotocol/codex-acp/issues/718)) ([3720341](https://github.com/agentclientprotocol/codex-acp/commit/3720341569e59b272177a6f39e715b4e47a2631f))
+* publish complete configuration updates for session changes ([#715](https://github.com/agentclientprotocol/codex-acp/issues/715)) ([b7ac0bf](https://github.com/agentclientprotocol/codex-acp/commit/b7ac0bfb0cfd12e675659e267cc1f73ea76fc3d5))
+* release the prompt suggestion thread and keep it minimal ([#709](https://github.com/agentclientprotocol/codex-acp/issues/709)) ([82ad58f](https://github.com/agentclientprotocol/codex-acp/commit/82ad58f17adbc04ccc9c97175e11693982ab7a92))
+* report verified standard subagent directories ([#722](https://github.com/agentclientprotocol/codex-acp/issues/722)) ([7d7e95a](https://github.com/agentclientprotocol/codex-acp/commit/7d7e95a95d55b55a53fb9ee18cd2d57db29b1e2c))
+* resynchronize current session metadata on ACP v2 resume ([#717](https://github.com/agentclientprotocol/codex-acp/issues/717)) ([927c480](https://github.com/agentclientprotocol/codex-acp/commit/927c4802f83c0859b439e7d641b5eb692560e5df))
+* scope authentication cancellation and initial status delivery ([#720](https://github.com/agentclientprotocol/codex-acp/issues/720)) ([e059ab7](https://github.com/agentclientprotocol/codex-acp/commit/e059ab7060bf99f9823c90dbb92b6df9568d5a03))
+* show commands in Zed approval prompts ([#735](https://github.com/agentclientprotocol/codex-acp/issues/735)) ([cca2dca](https://github.com/agentclientprotocol/codex-acp/commit/cca2dca479da3a17dabaa48110efebf0aa349830))
+* skip the app-server restart when providers/set repeats the applied config ([#728](https://github.com/agentclientprotocol/codex-acp/issues/728)) ([3b35338](https://github.com/agentclientprotocol/codex-acp/commit/3b35338e97eed0a946d90c5ba2aba490a079705a))
+* start the Codex app-server with the provider of the gateway routing ([#733](https://github.com/agentclientprotocol/codex-acp/issues/733)) ([cbcd446](https://github.com/agentclientprotocol/codex-acp/commit/cbcd4462d93edcf441c437f1dbf16602a577fe69))
+* suppress session messages after close ([#712](https://github.com/agentclientprotocol/codex-acp/issues/712)) ([85bf932](https://github.com/agentclientprotocol/codex-acp/commit/85bf932c129cd4c4cb92ed47c4e4bcae57b71b2c))
+* synchronize resumed titles and reset replayed message metadata ([#713](https://github.com/agentclientprotocol/codex-acp/issues/713)) ([ef45a6d](https://github.com/agentclientprotocol/codex-acp/commit/ef45a6d97cd81810aaebcba9533af5411dadec6f))
+* tear down session interactions and background processes on close ([#711](https://github.com/agentclientprotocol/codex-acp/issues/711)) ([1e89efa](https://github.com/agentclientprotocol/codex-acp/commit/1e89efa3b7f4b7cfa0b4b69b641ae467671715de))
+* update ACP SDK to 2.2 and align protocol behavior ([#710](https://github.com/agentclientprotocol/codex-acp/issues/710)) ([6f96fbe](https://github.com/agentclientprotocol/codex-acp/commit/6f96fbeaee722c0a273bb62104366c6b7d9688fe))
+* update codex to 0.166.0 ([#734](https://github.com/agentclientprotocol/codex-acp/issues/734)) ([e53f23e](https://github.com/agentclientprotocol/codex-acp/commit/e53f23e96c4d6d600faa94ef0f012cdd4aec32f1))
+
+## [2.5.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.4.0...v2.5.0) (2026-10-29)
+
+
+### Features
+
+* publish a predicted follow-up prompt as _meta.promptSuggestions ([#703](https://github.com/agentclientprotocol/codex-acp/issues/703)) ([87569c5](https://github.com/agentclientprotocol/codex-acp/commit/87569c5a9e095ee99acf83d0d7062c9835f2d176))
+
+
+### Bug Fixes
+
+* update ACP SDK to 2.1 and align protocol behavior ([#704](https://github.com/agentclientprotocol/codex-acp/issues/704)) ([597a037](https://github.com/agentclientprotocol/codex-acp/commit/597a03767ebd3356825284efae8746e84b1dd1bd))
+
+## [2.4.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.3.0...v2.4.0) (2026-10-29)
+
+
+### Features
+
+* add batch session metadata lookup ([#669](https://github.com/agentclientprotocol/codex-acp/issues/669)) ([0539d3d](https://github.com/agentclientprotocol/codex-acp/commit/0539d3da63948f55be3a90727fc550db40c5e8bb))
+* add live standard ACP subagent sessions ([#682](https://github.com/agentclientprotocol/codex-acp/issues/682)) ([fe3ae92](https://github.com/agentclientprotocol/codex-acp/commit/fe3ae92487f991fe456541f3e9344732faeadac7))
+* replay recorded subagent conversations ([#684](https://github.com/agentclientprotocol/codex-acp/issues/684)) ([bbe14f6](https://github.com/agentclientprotocol/codex-acp/commit/bbe14f6661bb90027938374346f15cc7254708a6))
+
+
+### Bug Fixes
+
+* explain an unreachable ChatGPT backend as a connection failure ([#697](https://github.com/agentclientprotocol/codex-acp/issues/697)) ([b7ca688](https://github.com/agentclientprotocol/codex-acp/commit/b7ca6881c4b45f53a7e929d31427c4a4a3a7fe89))
+* recover recorded paths for known subagents ([#687](https://github.com/agentclientprotocol/codex-acp/issues/687)) ([6cce035](https://github.com/agentclientprotocol/codex-acp/commit/6cce03545eaaf5daef849aa9647d4ccfdc22eb41))
+* render Codex file citations as Markdown links, parsed the way Codex does ([#698](https://github.com/agentclientprotocol/codex-acp/issues/698)) ([3f6d371](https://github.com/agentclientprotocol/codex-acp/commit/3f6d371b142efc1bc7efe66de665c511d7744a6c))
+* support a host-owned idle steering fallback ([#593](https://github.com/agentclientprotocol/codex-acp/issues/593)) ([356abaf](https://github.com/agentclientprotocol/codex-acp/commit/356abaf0e7b5194489b62304011a37e5b02f1184))
+* update codex to 0.165.0 ([#692](https://github.com/agentclientprotocol/codex-acp/issues/692)) ([e0de9bb](https://github.com/agentclientprotocol/codex-acp/commit/e0de9bb4662481fa8210ce32ff246af82cebe6c3))
+
+
+### Performance Improvements
+
+* no rollout reads and no archived listing for the session list ([#689](https://github.com/agentclientprotocol/codex-acp/issues/689)) ([582e545](https://github.com/agentclientprotocol/codex-acp/commit/582e545eb1868763645ea59b1a2c106e50d5d471))
+
+## [2.3.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.2.2...v2.3.0) (2026-10-26)
+
+
+### Features
+
+* add ACP v2 support again ([#620](https://github.com/agentclientprotocol/codex-acp/issues/620)) ([9e1690f](https://github.com/agentclientprotocol/codex-acp/commit/9e1690ff79aad55f173721907c7a65d9fe8b8d64))
+* mark session list rows of worktrees Codex made (agentWorktree) ([#631](https://github.com/agentclientprotocol/codex-acp/issues/631)) ([aa02d43](https://github.com/agentclientprotocol/codex-acp/commit/aa02d439f2d7a47a1338c9db92b62780555a460b))
+* narrow models to what the providers/set gateway lists ([#627](https://github.com/agentclientprotocol/codex-acp/issues/627)) ([3f555f9](https://github.com/agentclientprotocol/codex-acp/commit/3f555f9cd9566b759aef2711d1dbec1e3220dfa3))
+* report the model of each native subagent session ([#678](https://github.com/agentclientprotocol/codex-acp/issues/678)) ([51005a6](https://github.com/agentclientprotocol/codex-acp/commit/51005a6e11fd2cb7caa2d27fcfdd5ad0fbf41027))
+* return initial ACP v2 session commands ([#652](https://github.com/agentclientprotocol/codex-acp/issues/652)) ([5e9b7c5](https://github.com/agentclientprotocol/codex-acp/commit/5e9b7c55a023683829559d6c5c90a3bc3af5903b))
+* support AIR sessionIndex extension ([#590](https://github.com/agentclientprotocol/codex-acp/issues/590)) v2 ([#622](https://github.com/agentclientprotocol/codex-acp/issues/622)) ([2fd758c](https://github.com/agentclientprotocol/codex-acp/commit/2fd758ce212e0f1121f0fe608d7d59cc169cc65c))
+* support append-mode ACP system prompts ([#653](https://github.com/agentclientprotocol/codex-acp/issues/653)) ([5993a12](https://github.com/agentclientprotocol/codex-acp/commit/5993a12febe914d556332fc81f70e2b4613ee104))
+
+
+### Bug Fixes
+
+* disable Codex's Visualize skill, whose output ACP clients show as raw text ([#667](https://github.com/agentclientprotocol/codex-acp/issues/667)) ([0ba94f5](https://github.com/agentclientprotocol/codex-acp/commit/0ba94f520ec521a5a23353dbf34e51ca488b92c9))
+* display the selected wire provider as JetBrains Air Gateway ([#589](https://github.com/agentclientprotocol/codex-acp/issues/589)) ([cc54abf](https://github.com/agentclientprotocol/codex-acp/commit/cc54abf3e4cdb6e58629b24060b0a1e39be73c0a))
+* explain Codex config load errors caused by a deleted working directory ([#626](https://github.com/agentclientprotocol/codex-acp/issues/626)) ([a636804](https://github.com/agentclientprotocol/codex-acp/commit/a636804e57d41c3ec52c40aab9ffcef70de3db5d))
+* explain invalid_encrypted_content errors after a provider change ([#668](https://github.com/agentclientprotocol/codex-acp/issues/668)) ([a77829f](https://github.com/agentclientprotocol/codex-acp/commit/a77829fecc87cebbb2e53782ce6795aee072adc8))
+* hold a fork back from the session list until its session/fork response is out ([#642](https://github.com/agentclientprotocol/codex-acp/issues/642)) ([59974c7](https://github.com/agentclientprotocol/codex-acp/commit/59974c7d173e4fd6ef9498fc1e91779606c2404d))
+* include subagent edits in the agent file-change report ([#632](https://github.com/agentclientprotocol/codex-acp/issues/632)) ([7d07123](https://github.com/agentclientprotocol/codex-acp/commit/7d071236c66e12c20f83e4b04d7a3619fd90de2d))
+* leave codex exec runs out of the session list without sessionIndex ([#639](https://github.com/agentclientprotocol/codex-acp/issues/639)) ([df75d2b](https://github.com/agentclientprotocol/codex-acp/commit/df75d2b70fe2a0540cd621ebe664883860b90c6c))
+* migrate to ACP SDK 2.0 ([#649](https://github.com/agentclientprotocol/codex-acp/issues/649)) ([c8fd166](https://github.com/agentclientprotocol/codex-acp/commit/c8fd16652b55c226329fb43d58f5419798fa541b))
+* publish the commands when the skills change ([#643](https://github.com/agentclientprotocol/codex-acp/issues/643)) ([a62b568](https://github.com/agentclientprotocol/codex-acp/commit/a62b56847f473a2be6c67ea779c1ef9c7f227c38))
+* report structured ACP v2 failures ([#651](https://github.com/agentclientprotocol/codex-acp/issues/651)) ([5377bfe](https://github.com/agentclientprotocol/codex-acp/commit/5377bfeea1c0f0d6530441046274c7c033c82db8))
+* show a Codex subagent's follow-up turn in a new subagent session ([#634](https://github.com/agentclientprotocol/codex-acp/issues/634)) ([7c761c7](https://github.com/agentclientprotocol/codex-acp/commit/7c761c7f8fb3f6166587013f5cf9eb48911d3617))
+* synchronize ACP v2 foreground state ([#650](https://github.com/agentclientprotocol/codex-acp/issues/650)) ([986955a](https://github.com/agentclientprotocol/codex-acp/commit/986955aeb4bfc2dd074b4a9e3642022f3f3b38fc))
+* update codex to 0.164.0 ([#666](https://github.com/agentclientprotocol/codex-acp/issues/666)) ([e227c0e](https://github.com/agentclientprotocol/codex-acp/commit/e227c0eb098437e3b2897eeb1aab5bcde5012c3e))
+* wait for the compact turn to finish ([#654](https://github.com/agentclientprotocol/codex-acp/issues/654)) ([ced4c34](https://github.com/agentclientprotocol/codex-acp/commit/ced4c34368d271d61bbc81f4047813b4db387623))
+
+## [2.2.2](https://github.com/agentclientprotocol/codex-acp/compare/v2.2.1...v2.2.2) (2026-10-10)
+
+
+### Bug Fixes
+
+* title listed sessions by name, title, summary, then preview ([#606](https://github.com/agentclientprotocol/codex-acp/issues/606)) ([90fea43](https://github.com/agentclientprotocol/codex-acp/commit/90fea43dc15a6e8e3538ecea5c96ffe55dfcc42f))
+
+## [2.2.1](https://github.com/agentclientprotocol/codex-acp/compare/v2.2.0...v2.2.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* resume a session without messages after an app-server restart ([#604](https://github.com/agentclientprotocol/codex-acp/issues/604)) ([9ac3254](https://github.com/agentclientprotocol/codex-acp/commit/9ac32543b2990574b43bb29b41e3b2b3f6fbc6a7))
+
+## [2.2.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.1.1...v2.2.0) (2026-10-10)
+
+
+### Features
+
+* add pre-session Codex hook trust ([#588](https://github.com/agentclientprotocol/codex-acp/issues/588)) ([51aa211](https://github.com/agentclientprotocol/codex-acp/commit/51aa21123c1724db96ef3b7b2de982437e9ab4e4))
+* add the AIR sessionIndex extension for fast session lists ([#590](https://github.com/agentclientprotocol/codex-acp/issues/590)) ([95bc33f](https://github.com/agentclientprotocol/codex-acp/commit/95bc33f354a2260cd65990450525b1f65bbe1e41))
+* report the MCP servers that the Codex config replaces ([#587](https://github.com/agentclientprotocol/codex-acp/issues/587)) ([fbb15ad](https://github.com/agentclientprotocol/codex-acp/commit/fbb15adc6ff5a821543818e48170ee0b006a8fc7))
+* show live MCP server status and reconnect from /mcp ([#579](https://github.com/agentclientprotocol/codex-acp/issues/579)) ([ca1d971](https://github.com/agentclientprotocol/codex-acp/commit/ca1d97173ad37b471d5a4e5847725a4657d34e29))
+* Support custom instructions for agent sessions via meta ([#546](https://github.com/agentclientprotocol/codex-acp/issues/546)) ([51f78d6](https://github.com/agentclientprotocol/codex-acp/commit/51f78d67e46c3a96ee8d8bf4e43fc917ab21c73e))
+
+
+### Bug Fixes
+
+* report cancelled device-code sign-in as auth error instead of invalid params ([#594](https://github.com/agentclientprotocol/codex-acp/issues/594)) ([951844f](https://github.com/agentclientprotocol/codex-acp/commit/951844f87e276cc4cb1640defe7afce7068a50c0))
+* update codex to 0.160.1 ([#586](https://github.com/agentclientprotocol/codex-acp/issues/586)) ([cf83291](https://github.com/agentclientprotocol/codex-acp/commit/cf83291d3f35821c89308985f8b123f0d283ae48))
+
+## [2.1.1](https://github.com/agentclientprotocol/codex-acp/compare/v2.1.0...v2.1.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* preserve attachments in imported session history ([#571](https://github.com/agentclientprotocol/codex-acp/issues/571)) ([b9fc02b](https://github.com/agentclientprotocol/codex-acp/commit/b9fc02b63e3267cb4350cab774219b947dae72da))
+* send the legacy custom answer key to AIR ([#577](https://github.com/agentclientprotocol/codex-acp/issues/577)) ([56cc428](https://github.com/agentclientprotocol/codex-acp/commit/56cc4287f13453e830b0c3801fea7db2d4379044))
+* show readable service error messages ([#572](https://github.com/agentclientprotocol/codex-acp/issues/572)) ([4578615](https://github.com/agentclientprotocol/codex-acp/commit/4578615599705a7a55fe7096fa90bf3c9fc1549a))
+
+## [2.1.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.0.1...v2.1.0) (2026-10-01)
+
+
+### Features
+
+* add ACP v2 support ([#552](https://github.com/agentclientprotocol/codex-acp/issues/552)) ([ba7b216](https://github.com/agentclientprotocol/codex-acp/commit/ba7b21636190a95626631c9a9226298d41d19325))
+
+
+### Bug Fixes
+
+* mark the request_user_input note as the AIR custom answer ([#570](https://github.com/agentclientprotocol/codex-acp/issues/570)) ([2283d33](https://github.com/agentclientprotocol/codex-acp/commit/2283d33800aa2558135aaf0d4ad4041ee40260f9))
+* report a thread held by another Codex client as a clear error ([#564](https://github.com/agentclientprotocol/codex-acp/issues/564)) ([5065453](https://github.com/agentclientprotocol/codex-acp/commit/506545315e52c0593415d18b05dd2d3dbe527d32))
+* temporarily revert ACP v2 commit ba7b216 ([#573](https://github.com/agentclientprotocol/codex-acp/issues/573)) ([e46eed1](https://github.com/agentclientprotocol/codex-acp/commit/e46eed1ef4c1b64733969c66fe54197f4356db7d))
+
+## [2.0.1](https://github.com/agentclientprotocol/codex-acp/compare/v2.0.0...v2.0.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* update codex to 0.159.0 ([#562](https://github.com/agentclientprotocol/codex-acp/issues/562)) ([9785e75](https://github.com/agentclientprotocol/codex-acp/commit/9785e75c1ffe110032b57e78ec2a2da17c2c81e2))
+* update codex to 0.159.1 ([#565](https://github.com/agentclientprotocol/codex-acp/issues/565)) ([645da2a](https://github.com/agentclientprotocol/codex-acp/commit/645da2a09f1b6fdfc6e6f28e781faf033d22a0d8))
+
+## [2.0.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.13.1...v2.0.0) (2026-09-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* AIR tool call contract, exact diff patches, and fixes for every client ([#530](https://github.com/agentclientprotocol/codex-acp/issues/530))
+
+### Features
+
+* add  _meta.mcpStartupAwaitTimeoutMs option to allow awaiting for requested MCP servers startup outcome on session start ([#517](https://github.com/agentclientprotocol/codex-acp/issues/517)) ([cf6609e](https://github.com/agentclientprotocol/codex-acp/commit/cf6609e6be2f932251a7a379a0f3d2d79efd23d0))
+* AIR tool call contract, exact diff patches, and fixes for every client ([#530](https://github.com/agentclientprotocol/codex-acp/issues/530)) ([966a544](https://github.com/agentclientprotocol/codex-acp/commit/966a544bdb798de7f965df05ef66d2e3cb055364))
+
+
+### Bug Fixes
+
+* report authentication failures through ACP login flow ([#550](https://github.com/agentclientprotocol/codex-acp/issues/550)) ([2a26ee4](https://github.com/agentclientprotocol/codex-acp/commit/2a26ee44e07bdfbd6f2416a528fa2a6c18ff696d))
+* resolve ACP v1 conformance failures found by acp-tck ([#536](https://github.com/agentclientprotocol/codex-acp/issues/536)) ([1cc6223](https://github.com/agentclientprotocol/codex-acp/commit/1cc62233fb6f2abde7cadd518a53de9d0826ea77))
+* restore read-only mode and clarify access presets ([#480](https://github.com/agentclientprotocol/codex-acp/issues/480)) ([7fee150](https://github.com/agentclientprotocol/codex-acp/commit/7fee150a55098f7140a03907fec5f11edbe45086))
+* specify correct default behavior in mcp-stratup-await-timeout.md ([#551](https://github.com/agentclientprotocol/codex-acp/issues/551)) ([bf37821](https://github.com/agentclientprotocol/codex-acp/commit/bf37821e8f3c1f1e9b6954171855a9e2579cd2c9))
+* update codex to 0.157.0 ([#549](https://github.com/agentclientprotocol/codex-acp/issues/549)) ([7839796](https://github.com/agentclientprotocol/codex-acp/commit/78397963740f7263fdb8ae9178682d0fc714790e))
+* update codex to 0.157.1 ([#554](https://github.com/agentclientprotocol/codex-acp/issues/554)) ([9510cf1](https://github.com/agentclientprotocol/codex-acp/commit/9510cf18248023e1e165b422416919e43776b93e))
+* update codex to 0.158.0 ([#559](https://github.com/agentclientprotocol/codex-acp/issues/559)) ([59d0fb0](https://github.com/agentclientprotocol/codex-acp/commit/59d0fb0b6fd9dc85bf7c45f841f39a5225bea232))
+
+## [1.13.1](https://github.com/agentclientprotocol/codex-acp/compare/v1.13.0...v1.13.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* update codex to 0.156.1 ([#541](https://github.com/agentclientprotocol/codex-acp/issues/541)) ([761264b](https://github.com/agentclientprotocol/codex-acp/commit/761264b6323f1caffbfd75941de132cb4744a9e2))
+
+## [1.13.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.12.0...v1.13.0) (2026-09-22)
+
+
+### Features
+
+* Add experimental session notices for Codex advisories ([#532](https://github.com/agentclientprotocol/codex-acp/issues/532)) ([e4c9af6](https://github.com/agentclientprotocol/codex-acp/commit/e4c9af6f4459013e4382dd18e25e8f184b63cb33))
+* Add expermental ACP session compaction updates ([#515](https://github.com/agentclientprotocol/codex-acp/issues/515)) ([6ec22f3](https://github.com/agentclientprotocol/codex-acp/commit/6ec22f39774320d759bf9ba37fc536c68766d1af))
+
+
+### Bug Fixes
+
+* prefer terminal output deltas ([#528](https://github.com/agentclientprotocol/codex-acp/issues/528)) ([71bceb1](https://github.com/agentclientprotocol/codex-acp/commit/71bceb19c20887c91df3a30a6bf930abb033ccf8))
+* update codex to 0.155.0 ([#523](https://github.com/agentclientprotocol/codex-acp/issues/523)) ([d7b07c1](https://github.com/agentclientprotocol/codex-acp/commit/d7b07c1b44a28890cdf3d5450f8974a812db5ae2))
+* update codex to 0.155.1 ([#525](https://github.com/agentclientprotocol/codex-acp/issues/525)) ([acc035a](https://github.com/agentclientprotocol/codex-acp/commit/acc035a7444bf7550aabcc24597ed845ba3e593b))
+
+## [1.12.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.11.0...v1.12.0) (2026-09-15)
+
+
+### Features
+
+* Add tool names to ACP tool call events ([#513](https://github.com/agentclientprotocol/codex-acp/issues/513)) ([e46df48](https://github.com/agentclientprotocol/codex-acp/commit/e46df48fe7e54f2a4073cb11f9e24f1a223fc9e6))
+
+
+### Bug Fixes
+
+* improve request_user_input elicitation forms ([#299](https://github.com/agentclientprotocol/codex-acp/issues/299)) ([472e60e](https://github.com/agentclientprotocol/codex-acp/commit/472e60e4e99234c47c6de67a6d9cc8a71ebda47e))
+* update codex to 0.154.0 ([#494](https://github.com/agentclientprotocol/codex-acp/issues/494)) ([a24ebc4](https://github.com/agentclientprotocol/codex-acp/commit/a24ebc4f35e6e800b37ddc59c58e58abe7cf8a5c))
+
+
+### Performance Improvements
+
+* derive file change reports from turn diffs ([#518](https://github.com/agentclientprotocol/codex-acp/issues/518)) ([caddefe](https://github.com/agentclientprotocol/codex-acp/commit/caddefe56ff55a3f0827aa8ad60d03779f168425))
+
+## [1.11.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.10.0...v1.11.0) (2026-09-09)
+
+
+### Features
+
+* advertise recommended model and reasoning effort ([#491](https://github.com/agentclientprotocol/codex-acp/issues/491)) ([649b63c](https://github.com/agentclientprotocol/codex-acp/commit/649b63cbcd033f626676c5189a0db3b1166195b0))
+* simplify GPT model display names ([#493](https://github.com/agentclientprotocol/codex-acp/issues/493)) ([df025c7](https://github.com/agentclientprotocol/codex-acp/commit/df025c73ba02d9e35d728aa81a0fbb3b13f4c8fb))
+
+
+### Bug Fixes
+
+* finalize standalone MCP elicitation permission requests ([#471](https://github.com/agentclientprotocol/codex-acp/issues/471)) ([7c374bc](https://github.com/agentclientprotocol/codex-acp/commit/7c374bc9ce6808d278c5d47887fb6a7ad1e65b28))
+* paginate thread history when forking and loading sessions ([#481](https://github.com/agentclientprotocol/codex-acp/issues/481)) ([1a3c01e](https://github.com/agentclientprotocol/codex-acp/commit/1a3c01e8ca317f83e3b60bc5632cf052882bea15))
+
+## [1.10.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.9.0...v1.10.0) (2026-09-04)
+
+
+### Features
+
+* expose background terminals as async tasks ([#460](https://github.com/agentclientprotocol/codex-acp/issues/460)) ([e31c8c3](https://github.com/agentclientprotocol/codex-acp/commit/e31c8c369ec74f551d017d09abdb6d04d926dcab))
+
+
+### Bug Fixes
+
+* update codex to 0.153.3 ([#476](https://github.com/agentclientprotocol/codex-acp/issues/476)) ([b9f1386](https://github.com/agentclientprotocol/codex-acp/commit/b9f1386e0d14e1322dca5b6574146f8faa6ecea6))
+
+## [1.9.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.8.0...v1.9.0) (2026-09-04)
+
+
+### Features
+
+* report the agent's auth identity over ACP (authStatus extension) ([#467](https://github.com/agentclientprotocol/codex-acp/issues/467)) ([fe696b0](https://github.com/agentclientprotocol/codex-acp/commit/fe696b0a12b20a2d4dbfab68ff703a5adb7fe38c))
+
+
+### Bug Fixes
+
+* report complete status usage and limits ([#463](https://github.com/agentclientprotocol/codex-acp/issues/463)) ([5552cef](https://github.com/agentclientprotocol/codex-acp/commit/5552cef60fd60d3c7f8ad2ae8cefea401addeb37))
+* update codex to 0.153.2 ([#469](https://github.com/agentclientprotocol/codex-acp/issues/469)) ([6cd7048](https://github.com/agentclientprotocol/codex-acp/commit/6cd7048e55195aea5bc7ce618f4c13fb9e9378f9))
+
+## [1.8.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.7.0...v1.8.0) (2026-09-01)
+
+
+### Features
+
+* AI session title generation and /rename command ([#392](https://github.com/agentclientprotocol/codex-acp/issues/392)) ([4823131](https://github.com/agentclientprotocol/codex-acp/commit/4823131475b3b0d996ccc305e49dcf9fdaa6ee52))
+* support ACP session forks ([#435](https://github.com/agentclientprotocol/codex-acp/issues/435)) ([69ca755](https://github.com/agentclientprotocol/codex-acp/commit/69ca755d9878238aecf0737c0e4568b3bab37be2))
+
+
+### Bug Fixes
+
+* **LLM-25012:** OAuth2 Authentication for MCP Server Connections ([#452](https://github.com/agentclientprotocol/codex-acp/issues/452)) ([06765be](https://github.com/agentclientprotocol/codex-acp/commit/06765be12a7303048722946ece6c2a3b1695e28d))
+* update codex to 0.152.0 ([#455](https://github.com/agentclientprotocol/codex-acp/issues/455)) ([d70e380](https://github.com/agentclientprotocol/codex-acp/commit/d70e3809e7beed8a1c51c59ee206f53d8d9df690))
+
+## [1.7.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.6.2...v1.7.0) (2026-08-27)
+
+
+### Features
+
+* add ACP v1 permission presentation ([#405](https://github.com/agentclientprotocol/codex-acp/issues/405)) ([8ff9e67](https://github.com/agentclientprotocol/codex-acp/commit/8ff9e67f79335345ce53b3157b3d690c191ea027))
+* add native ACP subagent sessions ([#419](https://github.com/agentclientprotocol/codex-acp/issues/419)) ([6067b7f](https://github.com/agentclientprotocol/codex-acp/commit/6067b7f48fe37db82b6ddb9d596a4a4d8cb8a2e4))
+* expose permission mode kinds ([#430](https://github.com/agentclientprotocol/codex-acp/issues/430)) ([50f69e5](https://github.com/agentclientprotocol/codex-acp/commit/50f69e57ca761ccafd2ca29de7fb591068277516))
+
+
+### Bug Fixes
+
+* report AIR file changes from audit turns ([a2152e2](https://github.com/agentclientprotocol/codex-acp/commit/a2152e2d337291ca2f8dd7f9cc8b68a2355ce955))
+* send elicitation complete event for device authentication ([#421](https://github.com/agentclientprotocol/codex-acp/issues/421)) ([6b01a28](https://github.com/agentclientprotocol/codex-acp/commit/6b01a28c4706762a9663914845c51cd605cde339))
+* suppress late session updates after close ([#418](https://github.com/agentclientprotocol/codex-acp/issues/418)) ([ae048a6](https://github.com/agentclientprotocol/codex-acp/commit/ae048a66e485bae5184cb87ae75fcfa1549b69d5))
+
+## [1.6.2](https://github.com/agentclientprotocol/codex-acp/compare/v1.6.1...v1.6.2) (2026-08-19)
+
+
+### Bug Fixes
+
+* right-size the apt timeouts so a slow mirror still finishes ([86e0772](https://github.com/agentclientprotocol/codex-acp/commit/86e0772204a07d6fc4a8853c523ceb5006431f88))
+
+## [1.6.1](https://github.com/agentclientprotocol/codex-acp/compare/v1.6.0...v1.6.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* kill stalled apt from outside and serialize the unit suite ([51e011f](https://github.com/agentclientprotocol/codex-acp/commit/51e011fef27b812b238bf29c2a815f8ad149fa87))
+
+## [1.6.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.5.1...v1.6.0) (2026-08-19)
+
+
+### Features
+
+* harden release pipeline against hangs and e2e flakes ([#413](https://github.com/agentclientprotocol/codex-acp/issues/413)) ([39af81c](https://github.com/agentclientprotocol/codex-acp/commit/39af81c29b79a85f878db096f9cb593b6d1c7429))
+
+## [1.5.1](https://github.com/agentclientprotocol/codex-acp/compare/v1.5.0...v1.5.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* update codex to 0.148.0 ([#410](https://github.com/agentclientprotocol/codex-acp/issues/410)) ([3616954](https://github.com/agentclientprotocol/codex-acp/commit/3616954dc0e24af83b512adb618d7acbc5b98de5))
+
+## [1.5.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.4.0...v1.5.0) (2026-08-17)
+
+
+### Features
+
+* switch providers for loaded Codex sessions ([#404](https://github.com/agentclientprotocol/codex-acp/issues/404)) ([47b57da](https://github.com/agentclientprotocol/codex-acp/commit/47b57da5641a04df9aeeedc254a3aef53a9497da))
+
+## [1.4.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.3.0...v1.4.0) (2026-08-16)
+
+
+### Features
+
+* report changed files to AIR ([#403](https://github.com/agentclientprotocol/codex-acp/issues/403)) ([e305394](https://github.com/agentclientprotocol/codex-acp/commit/e305394d3f001f21e600597f41a3bee3d4530762))
+
+## [1.3.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.2.0...v1.3.0) (2026-08-14)
+
+
+### Features
+
+* add versioned context compaction metadata ([#396](https://github.com/agentclientprotocol/codex-acp/issues/396)) ([c4a9311](https://github.com/agentclientprotocol/codex-acp/commit/c4a9311f60a638e3a4b03a475afff1d7678e594f))
+* align typed session failures with AIR protocol ([#393](https://github.com/agentclientprotocol/codex-acp/issues/393)) ([e4fb92f](https://github.com/agentclientprotocol/codex-acp/commit/e4fb92fffd8b8b9db9b40591ccbdb375c9f3f525))
+
+
+### Bug Fixes
+
+* Restore native provider state after overrides ([#400](https://github.com/agentclientprotocol/codex-acp/issues/400)) ([90ed600](https://github.com/agentclientprotocol/codex-acp/commit/90ed60077a928a02ce795a35c90c2ed3a8af381e))
+
+## [1.2.0](https://github.com/agentclientprotocol/codex-acp/compare/v1.1.14...v1.2.0) (2026-08-11)
+
+
+### Features
+
+* expose typed session failures for AIR ([#383](https://github.com/agentclientprotocol/codex-acp/issues/383)) ([54987e1](https://github.com/agentclientprotocol/codex-acp/commit/54987e1c4a4f878af9afad96ec8b6b0b48c7045e))
+
+
+### Bug Fixes
+
+* normalize cwd filters for Windows sessions ([#377](https://github.com/agentclientprotocol/codex-acp/issues/377)) ([145ebba](https://github.com/agentclientprotocol/codex-acp/commit/145ebba5d2030b4aa6d19cbb89d190b7b498d454))

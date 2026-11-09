@@ -5,11 +5,42 @@ import type {
     NewSessionResponse,
     ResumeSessionResponse,
     SessionId,
-} from "@agentclientprotocol/sdk";
+} from "@agentclientprotocol/sdk/unstable";
+import {
+    GOAL_CONTROL_METHOD,
+    LEGACY_GOAL_CONTROL_METHOD,
+    type GoalControlRequest,
+} from "./GoalExtension";
+import {
+    ASYNC_TASK_STOP_METHOD,
+    type AsyncTaskStopExtRequest,
+} from "./async-tasks/AsyncTaskExtension";
+
+export {
+    AUTH_STATUS_META_KEY,
+    AUTH_STATUS_UPDATE_METHOD,
+    authStatusCapability,
+    sameAuthStatus,
+    type AuthStatus,
+    type AuthStatusCapability,
+    type AuthStatusKind,
+    type AuthStatusUpdateNotification,
+} from "./AuthStatusMeta";
+
+export {
+    GOAL_CONTROL_ACTIONS,
+    GOAL_CONTROL_METHOD,
+    GOAL_EXTENSION_VERSION,
+    LEGACY_GOAL_CONTROL_METHOD,
+    type GoalCapability,
+    type GoalControlAction,
+    type GoalControlRequest,
+    type GoalSnapshot,
+    type GoalStatus,
+} from "./GoalExtension";
 
 export const LEGACY_SET_SESSION_MODEL_METHOD = "session/set_model";
 export const SESSION_STEERING_METHOD = "_session/steering";
-export const GOAL_CONTROL_METHOD = "_codex/session/goal_control";
 
 export type LegacySessionModel = {
     modelId: string;
@@ -47,15 +78,24 @@ export type ExtMethodRequest =
     | LegacySetSessionModelExtRequest
     | SessionSteeringExtRequest
     | GoalControlExtRequest
+    | AsyncTaskStopExtRequest
 
 export function isExtMethodRequest(request: { method: string, params: Record<string, unknown> }): request is ExtMethodRequest {
     return request.method === "authentication/status"
         || request.method === "authentication/logout"
         || request.method === LEGACY_SET_SESSION_MODEL_METHOD
         || request.method === GOAL_CONTROL_METHOD
-        || request.method === SESSION_STEERING_METHOD;
+        || request.method === LEGACY_GOAL_CONTROL_METHOD
+        || request.method === SESSION_STEERING_METHOD
+        || request.method === ASYNC_TASK_STOP_METHOD;
 }
 
+/**
+ * @deprecated Legacy pull method; it drops the ChatGPT `planType` and predates
+ * the standard `logout` method. Listen to the `authStatus` extension instead:
+ * the agent pushes `_auth/status_update` (see `AuthStatusMeta.ts`), which
+ * follows the upstream auth-identity RFD.
+ */
 export type AuthenticationStatusRequest = { method: "authentication/status", params: {} }
 export type AuthenticationStatusResponse = { type: "api-key" } | { type: "chat-gpt", email: string } | { type: "gateway", name: string } | { type: "unauthenticated" }
 
@@ -67,13 +107,8 @@ export type LegacySetSessionModelExtRequest = {
     params: LegacySetSessionModelRequest;
 }
 
-export type GoalControlRequest = {
-    sessionId: SessionId;
-    action: "pause" | "clear";
-}
-
 export type GoalControlExtRequest = {
-    method: typeof GOAL_CONTROL_METHOD;
+    method: typeof GOAL_CONTROL_METHOD | typeof LEGACY_GOAL_CONTROL_METHOD;
     params: GoalControlRequest;
 }
 
@@ -87,11 +122,17 @@ export async function legacySetSessionModel(
 export type SessionSteerRequest = {
     sessionId: SessionId;
     prompt: ContentBlock[];
+    _meta?: {
+        steering?: {
+            /** Leave idle input unconsumed so the host can own a normal prompt lifecycle. */
+            idleBehavior?: "promptRequired";
+        };
+    };
 }
 
-export type SessionSteeringResponse = {
-    outcome: "injected" | "startedNewTurn" | "failed";
-}
+export type SessionSteeringResponse =
+    | {outcome: "injected" | "startedNewTurn" | "failed"}
+    | {outcome: "promptRequired", reason: "noRunningTurn"}
 
 export type SessionSteeringExtRequest = {
     method: typeof SESSION_STEERING_METHOD;

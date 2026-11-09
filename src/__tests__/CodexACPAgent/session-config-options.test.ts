@@ -1,11 +1,12 @@
-import {describe, expect, it, vi} from "vitest";
+import {afterEach, describe, expect, it, vi} from "vitest";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
 import {AgentMode, MODE_CONFIG_ID} from "../../AgentMode";
 import {
     MODEL_CONFIG_ID,
     REASONING_EFFORT_CONFIG_ID,
 } from "../../ModelConfigOption";
-import type {Model, ReasoningEffortOption} from "../../app-server/v2";
+import type {Model, PermissionProfileSummary, ReasoningEffortOption, Turn} from "../../app-server/v2";
 import {LEGACY_SET_SESSION_MODEL_METHOD} from "../../AcpExtensions";
 import {
     COLLABORATION_MODE_CONFIG_ID,
@@ -31,30 +32,66 @@ function buildModels(): {fast: Model; slow: Model} {
         description: "Strong",
         supportedReasoningEfforts: [lowEffort, mediumEffort],
         defaultReasoningEffort: "low",
+        isDefault: false,
     });
     return {fast, slow};
 }
 
-async function createSession(currentModelId: string, availableModels: Array<Model>) {
+async function createSession(
+    currentModelId: string,
+    availableModels: Array<Model>,
+    options: {
+        clientCapabilities?: acp.ClientCapabilities;
+        additionalDirectories?: string[];
+        permissionProfiles?: PermissionProfileSummary[];
+        activePermissionProfileId?: string | null;
+        approvalPolicy?: "on-request" | "never";
+        approvalsReviewer?: "user" | "auto_review";
+    } = {},
+) {
+    const {
+        clientCapabilities,
+        additionalDirectories = [],
+        permissionProfiles = [],
+        activePermissionProfileId = null,
+        approvalPolicy = "on-request",
+        approvalsReviewer = "user",
+    } = options;
     const fixture = createCodexMockTestFixture();
     const codexAcpAgent = fixture.getCodexAcpAgent();
     const codexAcpClient = fixture.getCodexAcpClient();
 
-    vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+    vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
     vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
     vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
         sessionId: "session-id",
         currentModelId,
         models: availableModels,
         collaborationMode: "default",
-        additionalDirectories: [],
+        additionalDirectories,
+        activePermissionProfileId,
+        approvalPolicy,
+        approvalsReviewer,
+        permissionProfiles,
     });
 
-    const response = await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: []});
+    if (clientCapabilities) {
+        await codexAcpAgent.initialize({protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities});
+    }
+
+    const response = await codexAcpAgent.newSession({
+        cwd: "/test/cwd",
+        mcpServers: [],
+        _meta: {additionalRoots: additionalDirectories},
+    });
     return {fixture, codexAcpAgent, codexAcpClient, response};
 }
 
 describe("Session config options", () => {
+    afterEach(() => {
+        vi.unstubAllEnvs();
+    });
+
     it("exposes mode, model, reasoning_effort and fast-mode in the new session response", async () => {
         const {fast, slow} = buildModels();
         const {response} = await createSession("fast-model[medium]", [fast, slow]);
@@ -72,6 +109,7 @@ describe("Session config options", () => {
                 {value: "slow-model", name: "Slow model", description: "Strong"},
             ],
         });
+        expect(modelOption?._meta).toBeUndefined();
 
         const effortOption = response.configOptions?.find(o => o.id === REASONING_EFFORT_CONFIG_ID);
         expect(effortOption).toMatchObject({
@@ -84,16 +122,42 @@ describe("Session config options", () => {
                 {value: "high", name: "High"},
             ],
         });
+        expect(effortOption?._meta).toBeUndefined();
 
         const modeOption = response.configOptions?.find(o => o.id === MODE_CONFIG_ID);
         expect(modeOption).toMatchObject({
             category: "mode",
             currentValue: AgentMode.DEFAULT_AGENT_MODE.id,
             type: "select",
+            options: [
+                {
+                    value: "read-only",
+                    name: "Read-only",
+                    description: "Requires approval to edit files and access the internet.",
+                },
+                {
+                    value: "workspace-write",
+                    name: "Workspace access",
+                    description: "Edit workspace files; ask before writing outside the workspace or accessing the network.",
+                },
+                {
+                    value: "agent",
+                    name: "Auto review",
+                    description: "Only ask for actions detected as potentially unsafe",
+                },
+                {
+                    value: "agent-full-access",
+                    name: "Full access",
+                    description: "Unrestricted access to the internet and any file on your computer",
+                },
+            ],
         });
         expect((modeOption as any).options.map((o: any) => o.value)).toEqual(
             AgentMode.all().map(m => m.id)
         );
+        expect(response.modes?.availableModes.map(mode => mode.id)).toEqual([
+            "read-only", "workspace-write", "agent", "agent-full-access",
+        ]);
     });
 
     it("shows the current uncataloged model as its own selectable option", async () => {
@@ -125,6 +189,134 @@ describe("Session config options", () => {
         expect(codexAcpAgent.getSessionState("session-id").currentModelId).toBe("custom-model[high]");
     });
 
+    it("advertises the default model and its effort as recommended values after negotiation", async () => {
+        const {fast, slow} = buildModels();
+        const {response} = await createSession("slow-model[medium]", [fast, slow], {
+            clientCapabilities: {
+                _meta: {jetbrains: {air: {version: 1, capabilities: ["recommendedValue"]}}},
+            },
+        });
+
+        expect(response.configOptions?.find(option => option.id === MODEL_CONFIG_ID)).toMatchObject({
+            currentValue: "slow-model",
+            _meta: {jetbrains: {air: {version: 1, recommendedValue: "fast-model"}}},
+        });
+        expect(response.configOptions?.find(option => option.id === REASONING_EFFORT_CONFIG_ID)).toMatchObject({
+            currentValue: "medium",
+            _meta: {jetbrains: {air: {version: 1, recommendedValue: "low"}}},
+        });
+    });
+
+    it("updates the recommended effort when the selected model changes", async () => {
+        const {fast, slow} = buildModels();
+        const {codexAcpAgent} = await createSession("fast-model[medium]", [fast, slow], {
+            clientCapabilities: {
+                _meta: {jetbrains: {air: {version: 1, capabilities: ["recommendedValue"]}}},
+            },
+        });
+
+        const response = await codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: MODEL_CONFIG_ID,
+            value: "slow-model",
+        });
+
+        expect(response.configOptions?.find(option => option.id === MODEL_CONFIG_ID)).toMatchObject({
+            currentValue: "slow-model",
+            _meta: {jetbrains: {air: {recommendedValue: "fast-model"}}},
+        });
+        expect(response.configOptions?.find(option => option.id === REASONING_EFFORT_CONFIG_ID)).toMatchObject({
+            currentValue: "medium",
+            _meta: {jetbrains: {air: {recommendedValue: "low"}}},
+        });
+    });
+
+    it("omits a model recommendation when the catalog has no default", async () => {
+        const {fast, slow} = buildModels();
+        fast.isDefault = false;
+        const {response} = await createSession("slow-model[medium]", [fast, slow], {
+            clientCapabilities: {
+                _meta: {jetbrains: {air: {version: 1, capabilities: ["recommendedValue"]}}},
+            },
+        });
+
+        expect(response.configOptions?.find(option => option.id === MODEL_CONFIG_ID)?._meta).toBeUndefined();
+        expect(response.configOptions?.find(option => option.id === REASONING_EFFORT_CONFIG_ID)).toHaveProperty(
+            "_meta.jetbrains.air.recommendedValue",
+            "low",
+        );
+    });
+
+    it("exposes allowed custom permission profiles as modes and selects the active profile", async () => {
+        const {fast} = buildModels();
+        const permissionProfiles: PermissionProfileSummary[] = [
+            {id: ":workspace", description: "Built-in workspace", allowed: true},
+            {id: "blocked", description: "Blocked by requirements", allowed: false},
+            {id: "team-default", description: "Team default permissions", allowed: true},
+            {id: "team-fallback", description: null, allowed: true},
+        ];
+        const {codexAcpAgent, response} = await createSession(
+            "fast-model[medium]",
+            [fast],
+            {
+                permissionProfiles,
+                activePermissionProfileId: "team-default",
+                approvalPolicy: "never",
+            },
+        );
+
+        const expectedModeId = "permission-profile:team-default";
+        const modeOption = response.configOptions?.find(option => option.id === MODE_CONFIG_ID);
+        await expect(JSON.stringify({modes: response.modes, modeOption}, null, 2))
+            .toMatchFileSnapshot("data/session-config-options-permission-profile.json");
+        expect(codexAcpAgent.getSessionState("session-id").agentMode.id).toBe(expectedModeId);
+        expect(codexAcpAgent.getSessionState("session-id").agentMode.approvalPolicy).toBe("never");
+        expect(codexAcpAgent.getSessionState("session-id").agentMode.approvalsReviewer).toBe("user");
+
+        await codexAcpAgent.setSessionMode({sessionId: "session-id", modeId: "permission-profile:team-fallback"});
+        expect(codexAcpAgent.getSessionState("session-id").agentMode.permissionProfileId).toBe("team-fallback");
+    });
+
+    it.each([null, ":read-only", ":workspace", ":danger-full-access", "missing", "blocked"])(
+        "keeps the default mode when the active profile is unavailable or built-in: %s",
+        async activePermissionProfileId => {
+            vi.stubEnv("INITIAL_AGENT_MODE", undefined);
+            const {fast} = buildModels();
+            const {response} = await createSession("fast-model[medium]", [fast], {
+                activePermissionProfileId,
+                permissionProfiles: [
+                    {id: ":read-only", description: null, allowed: true},
+                    {id: ":workspace", description: null, allowed: true},
+                    {id: ":danger-full-access", description: null, allowed: true},
+                    {id: "blocked", description: null, allowed: false},
+                ],
+            });
+
+            expect(response.modes?.currentModeId).toBe(AgentMode.DEFAULT_AGENT_MODE.id);
+            expect(response.configOptions?.find(option => option.id === MODE_CONFIG_ID)?.currentValue)
+                .toBe(AgentMode.DEFAULT_AGENT_MODE.id);
+        },
+    );
+
+    it.each([
+        {initialMode: "permission-profile:team-default", expectedMode: "permission-profile:team-default"},
+        {initialMode: "permission-profile:blocked", expectedMode: AgentMode.DEFAULT_AGENT_MODE.id},
+        {initialMode: "permission-profile:missing", expectedMode: AgentMode.DEFAULT_AGENT_MODE.id},
+    ])("honors INITIAL_AGENT_MODE=$initialMode before the active profile", async ({initialMode, expectedMode}) => {
+        vi.stubEnv("INITIAL_AGENT_MODE", initialMode);
+        const {fast} = buildModels();
+        const {response} = await createSession("fast-model[medium]", [fast], {
+            activePermissionProfileId: "other",
+            permissionProfiles: [
+                {id: "team-default", description: null, allowed: true},
+                {id: "other", description: null, allowed: true},
+                {id: "blocked", description: null, allowed: false},
+            ],
+        });
+
+        expect(response.modes?.currentModeId).toBe(expectedMode);
+    });
+
     it("keeps the legacy models list as combined model/effort entries", async () => {
         const {fast, slow} = buildModels();
         const {response} = await createSession("fast-model[medium]", [fast, slow]);
@@ -146,12 +338,93 @@ describe("Session config options", () => {
         const result = await codexAcpAgent.setSessionConfigOption({
             sessionId: "session-id",
             configId: MODE_CONFIG_ID,
-            value: AgentMode.ReadOnly.id,
+            value: AgentMode.Agent.id,
         });
 
-        expect(codexAcpAgent.getSessionState("session-id").agentMode).toBe(AgentMode.ReadOnly);
+        expect(codexAcpAgent.getSessionState("session-id").agentMode).toBe(AgentMode.Agent);
         const modeOption = result.configOptions?.find(o => o.id === MODE_CONFIG_ID);
-        expect((modeOption as any).currentValue).toBe(AgentMode.ReadOnly.id);
+        expect((modeOption as any).currentValue).toBe(AgentMode.Agent.id);
+    });
+
+    it.each([
+        {selection: "INITIAL_AGENT_MODE", initialMode: "read-only", modeId: "read-only"},
+        {selection: "session/set_mode", initialMode: "agent", modeId: "read-only"},
+        {selection: "session/set_mode", initialMode: "workspace-write", modeId: "read-only"},
+        {selection: "session/set_mode", initialMode: "agent-full-access", modeId: "read-only"},
+        {selection: "session/set_config_option", initialMode: "agent", modeId: "read-only"},
+        {selection: "session/set_config_option", initialMode: "workspace-write", modeId: "read-only"},
+        {selection: "session/set_config_option", initialMode: "agent-full-access", modeId: "read-only"},
+        {selection: "INITIAL_AGENT_MODE", initialMode: "workspace-write", modeId: "workspace-write"},
+        {selection: "session/set_mode", initialMode: "read-only", modeId: "workspace-write"},
+        {selection: "session/set_config_option", initialMode: "read-only", modeId: "workspace-write"},
+    ])("applies $modeId permissions after $selection from $initialMode", async ({selection, initialMode, modeId}) => {
+        vi.stubEnv("INITIAL_AGENT_MODE", initialMode);
+        const {fast} = buildModels();
+        const {fixture, codexAcpAgent, response} = await createSession("fast-model[medium]", [fast], {
+            clientCapabilities: {
+                fs: {readTextFile: false, writeTextFile: false},
+                terminal: false,
+            },
+            additionalDirectories: ["/test/extra"],
+        });
+        expect(response.modes?.currentModeId).toBe(initialMode);
+
+        if (selection === "session/set_mode") {
+            await codexAcpAgent.setSessionMode({sessionId: response.sessionId, modeId});
+        } else if (selection === "session/set_config_option") {
+            const result = await codexAcpAgent.setSessionConfigOption({
+                sessionId: response.sessionId,
+                configId: "mode",
+                value: modeId,
+            });
+            expect(result.configOptions.find(option => option.id === "mode")?.currentValue).toBe(modeId);
+        }
+
+        const appServer = fixture.getCodexAppServerClient();
+        vi.spyOn(appServer, "listSkills").mockResolvedValue({data: []});
+        const turn: Turn = {
+            id: "turn-id", rootTurnId: null, items: [], itemsView: "notLoaded", status: "inProgress", error: null,
+            startedAt: null, completedAt: null, durationMs: null,
+        };
+        const turnStart = vi.spyOn(appServer, "turnStart").mockResolvedValue({turn});
+        vi.spyOn(appServer, "awaitTurnCompleted").mockResolvedValue({
+            threadId: response.sessionId,
+            turn: {...turn, status: "completed"},
+        });
+
+        await codexAcpAgent.prompt({
+            sessionId: response.sessionId,
+            prompt: [{type: "text", text: "Create summary.md containing PINEAPPLE."}],
+        });
+
+        // Assert the actual outgoing policy, independently of the preset object.
+        // Additional session roots are writable only in the workspace-write preset.
+        const policies = turnStart.mock.calls.map(([{approvalPolicy, approvalsReviewer, sandboxPolicy}]) => ({
+            approvalPolicy, approvalsReviewer, sandboxPolicy,
+        }));
+        await expect(JSON.stringify(policies, null, 2) + "\n").toMatchFileSnapshot(`data/${modeId}-mode-policy.json`);
+    });
+
+    it("changes to a custom permission profile via setSessionConfigOption", async () => {
+        const {fast} = buildModels();
+        const {codexAcpAgent} = await createSession("fast-model[medium]", [fast], {
+            permissionProfiles: [{
+                id: "team-default",
+                description: "Team default permissions",
+                allowed: true,
+            }],
+        });
+
+        const result = await codexAcpAgent.setSessionConfigOption({
+            sessionId: "session-id",
+            configId: MODE_CONFIG_ID,
+            value: "permission-profile:team-default",
+        });
+
+        expect(codexAcpAgent.getSessionState("session-id").agentMode.permissionProfileId).toBe("team-default");
+        expect(result.configOptions?.find(option => option.id === MODE_CONFIG_ID)).toMatchObject({
+            currentValue: "permission-profile:team-default",
+        });
     });
 
     it("changes collaboration mode without starting a model turn", async () => {
@@ -273,7 +546,7 @@ describe("Session config options", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         const {fast} = buildModels();
 
-        vi.spyOn(codexAcpClient, "authRequired").mockResolvedValue(false);
+        vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
         vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
             sessionId: "session-id",

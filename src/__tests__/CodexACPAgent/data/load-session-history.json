@@ -1,4 +1,16 @@
 {
+  "method": "notify",
+  "args": [
+    "_auth/status_update",
+    {
+      "authStatus": {
+        "kind": "none",
+        "label": "Not logged in"
+      }
+    }
+  ]
+}
+{
   "method": "sessionUpdate",
   "args": [
     {
@@ -9,21 +21,14 @@
           {
             "name": "plan",
             "description": "Turn plan mode on.",
-            "input": null,
-            "_meta": {
-              "commandAction": {
-                "kind": "setConfigOption",
-                "configId": "collaboration_mode",
-                "value": "plan",
-                "resetValue": "default",
-                "presentation": "state"
-              }
-            }
+            "input": null
           },
           {
             "name": "mcp",
-            "description": "List configured Model Context Protocol (MCP) tools.",
-            "input": null
+            "description": "Show the status of the MCP servers, or reconnect them.",
+            "input": {
+              "hint": "[reconnect]"
+            }
           },
           {
             "name": "skills",
@@ -66,12 +71,13 @@
             "description": "Set a goal to keep pursuing.",
             "input": {
               "hint": "[<objective>|clear|pause|resume]"
-            },
-            "_meta": {
-              "commandAction": {
-                "kind": "prefixPrompt",
-                "presentation": "state"
-              }
+            }
+          },
+          {
+            "name": "rename",
+            "description": "Rename the current session.",
+            "input": {
+              "hint": "new name"
             }
           },
           {
@@ -80,29 +86,6 @@
             "input": null
           }
         ]
-      }
-    }
-  ]
-}
-{
-  "method": "sessionUpdate",
-  "args": [
-    {
-      "sessionId": "session-1",
-      "update": {
-        "sessionUpdate": "session_info_update",
-        "_meta": {
-          "codex": {
-            "goal": {
-              "objective": "Keep the restored migration green",
-              "status": "paused",
-              "tokenBudget": null,
-              "timeUsedSeconds": 46,
-              "createdAt": 1710000000,
-              "controlMethod": "_codex/session/goal_control"
-            }
-          }
-        }
       }
     }
   ]
@@ -146,6 +129,22 @@
         "content": {
           "type": "text",
           "text": "[@image](https://example.com/image.png)"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "session-1",
+      "update": {
+        "sessionUpdate": "user_message_chunk",
+        "messageId": "item-user-1",
+        "content": {
+          "type": "text",
+          "text": "image:file-saved-image"
         }
       }
     }
@@ -222,11 +221,6 @@
       "update": {
         "sessionUpdate": "tool_call_update",
         "toolCallId": "item-cmd-1",
-        "status": "completed",
-        "rawOutput": {
-          "formatted_output": "Added.txt\nREADME.md\n",
-          "exit_code": 0
-        },
         "_meta": {
           "terminal_output_delta": {
             "data": "Added.txt\nREADME.md\n",
@@ -250,8 +244,8 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-file-1",
-        "title": "Editing files",
         "kind": "edit",
+        "title": "Editing files",
         "status": "completed",
         "content": [
           {
@@ -299,9 +293,19 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-dyn-1",
+        "name": "list_apps",
         "kind": "execute",
         "title": "list_apps",
         "status": "completed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "Done"
+            }
+          }
+        ],
         "rawInput": {
           "arguments": {
             "includeDisabled": false
@@ -319,6 +323,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-image-view-1",
+        "name": "view_image",
         "kind": "read",
         "title": "View Image /test/project/input.png",
         "status": "completed",
@@ -391,12 +396,9 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-context-compaction-1",
-        "kind": "other",
-        "title": "Context compacted",
-        "status": "completed",
-        "_meta": {
-          "contextCompaction": true
-        }
+        "kind": "think",
+        "title": "Compact conversation",
+        "status": "completed"
       }
     }
   ]
@@ -408,23 +410,14 @@
       "sessionId": "session-1",
       "update": {
         "sessionUpdate": "tool_call",
-        "title": "Start subagent test_audit",
-        "kind": "other",
         "toolCallId": "item-subagent-1",
+        "kind": "other",
+        "title": "Start subagent test_audit",
         "status": "completed",
         "rawInput": {
           "agentThreadId": "thread-child-1",
           "agentPath": "/root/test_audit",
           "activityKind": "started"
-        },
-        "_meta": {
-          "codex": {
-            "subagent": {
-              "threadId": "thread-child-1",
-              "path": "/root/test_audit",
-              "activity": "started"
-            }
-          }
         }
       }
     }

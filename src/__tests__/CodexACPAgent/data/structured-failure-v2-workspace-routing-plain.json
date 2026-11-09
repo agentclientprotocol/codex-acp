@@ -1,0 +1,15 @@
+{
+  "error": {
+    "code": -32603,
+    "message": "Codex can't reach chatgpt.com to look up your ChatGPT workspace. Check your network connection and any proxy, VPN, or firewall that blocks chatgpt.com, then try again. (workspace routing discovery failed)"
+  },
+  "stopReason": "error",
+  "_meta": {
+    "quota": {
+      "token_count": null,
+      "model_usage": []
+    }
+  },
+  "state": "idle",
+  "sessionUpdate": "state_update"
+}

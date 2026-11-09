@@ -1,0 +1,26 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "compaction-session",
+      "update": {
+        "sessionUpdate": "compaction_update",
+        "compactionId": "compaction-item",
+        "status": "in_progress"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "compaction-session",
+      "update": {
+        "sessionUpdate": "compaction_update",
+        "compactionId": "compaction-item",
+        "status": "cancelled"
+      }
+    }
+  ]
+}

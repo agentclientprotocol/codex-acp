@@ -1,0 +1,133 @@
+import type {ClientCapabilities} from "@agentclientprotocol/sdk/unstable";
+import type {ACPSessionConnection} from "./ACPSessionConnection";
+
+/**
+ * Wire names for the versioned JetBrains AIR ACP extension.
+ *
+ * `jetbrains.air` is a protocol namespace, not user-facing branding: `jetbrains`
+ * owns the non-standard contract and `air` identifies the client that defines its
+ * rendering semantics. Keeping both levels prevents unrelated JetBrains ACP clients
+ * from accidentally interpreting or colliding with this metadata.
+ */
+export const JETBRAINS_META_KEY = "jetbrains";
+export const AIR_META_KEY = "air";
+export const AIR_EXTENSION_VERSION_KEY = "version";
+export const AIR_EXTENSION_CAPABILITIES_KEY = "capabilities";
+export const AIR_DIFF_PATCH_KEY = "diffPatch";
+export const AIR_SESSION_FAILURE_KEY = "sessionFailure";
+export const AIR_AGENT_FILE_CHANGE_REPORT_KEY = "agentFileChangeReport";
+export const AIR_CUSTOM_INSTRUCTIONS_KEY = "customInstructions";
+export const AIR_NATIVE_SUBAGENT_SESSIONS_KEY = "nativeSubagentSessions";
+export const AIR_ASYNC_TASKS_KEY = "asyncTasks";
+export const AIR_RECOMMENDED_CONFIG_VALUE_KEY = "recommendedValue";
+export const AIR_ASYNC_TASKS_BACKGROUNDED_KEY = "backgrounded";
+export const AIR_AGENT_FILE_CHANGE_REPORT_REQUEST_KEY = "agentFileChangeReportRequest";
+export const AIR_MESSAGE_PHASE_KEY = "phase";
+export const AIR_GOAL_KEY = "goal";
+export const AIR_KIND_KEY = "kind";
+export const AIR_COMMAND_ACTION_KEY = "commandAction";
+export const AIR_SKILL_PATH_KEY = "skillPath";
+export const AIR_PERMISSION_KEY = "permission";
+export const AIR_CONTEXT_COMPACTION_KEY = "contextCompaction";
+export const AIR_RAW_INPUT_RENDERING_KEY = "rawInputRendering";
+export const AIR_PLAN_CONTENT_DELTA_KEY = "planContentDelta";
+export const AIR_CODEX_HOOKS_KEY = "codexHooks";
+export const AIR_CONTENT_DELTA_KEY = "contentDelta";
+export const AIR_SUBAGENT_KEY = "subagent";
+export const AIR_CUSTOM_ANSWER_KEY = "customAnswer";
+/**
+ * The root `_meta` spelling of {@link AIR_CUSTOM_ANSWER_KEY} that released AIR versions read.
+ * Remove it when the ACP registry no longer serves AIR versions that read only this spelling.
+ */
+export const LEGACY_AIR_CUSTOM_ANSWER_KEY = "_askUserQuestionCustomAnswer";
+export const AIR_EXTENSION_VERSION = 1;
+
+/** Merge one AIR payload into metadata while preserving other object namespaces. */
+export function withAirMeta(
+    meta: Record<string, unknown> | null | undefined,
+    key: string,
+    value: unknown,
+): Record<string, unknown> {
+    return withAirMetadata(meta, {[key]: value});
+}
+
+/** Compose AIR-owned fields; this is a producer operation, not a protocol metadata merge. */
+export function withAirMetadata(
+    meta: Record<string, unknown> | null | undefined,
+    fields: Record<string, unknown>,
+): Record<string, unknown> {
+    const root = asRecord(meta);
+    const jetbrains = asRecord(root[JETBRAINS_META_KEY]);
+    const air = asRecord(jetbrains[AIR_META_KEY]);
+    return {
+        ...root,
+        [JETBRAINS_META_KEY]: {
+            ...jetbrains,
+            [AIR_META_KEY]: {
+                ...air,
+                [AIR_EXTENSION_VERSION_KEY]: AIR_EXTENSION_VERSION,
+                ...fields,
+            },
+        },
+    };
+}
+
+/** A v2 session patch replaces the whole JetBrains value, so compose it at publication time. */
+export function publishAirSessionMetadata(session: ACPSessionConnection, key: string, value: unknown): Promise<void> {
+    if (session.protocolVersion === 2) {
+        return session.patchSessionMetadata(current => ({
+            [JETBRAINS_META_KEY]: withAirMeta(current, key, value)[JETBRAINS_META_KEY],
+        }));
+    }
+    return session.update({sessionUpdate: "session_info_update", _meta: withAirMeta(undefined, key, value)});
+}
+
+/**
+ * The metadata of a key that exists only for AIR.
+ * AIR gets `_meta.jetbrains.air.<key>`. Every other client gets no metadata.
+ */
+export function airOnlyMeta(airClient: boolean, key: string, value: unknown): Record<string, unknown> | undefined {
+    return airClient ? withAirMeta(undefined, key, value) : undefined;
+}
+
+/**
+ * Tells whether the client is AIR.
+ * A client is AIR when `clientCapabilities._meta.jetbrains.air` is present.
+ */
+export function isAirClient(capabilities: ClientCapabilities | null | undefined): boolean {
+    const meta = asRecord(capabilities?._meta);
+    const jetbrains = asRecord(meta[JETBRAINS_META_KEY]);
+    const air = jetbrains[AIR_META_KEY];
+    return air !== null && typeof air === "object" && !Array.isArray(air);
+}
+
+export function clientSupportsAirCapability(
+    capabilities: ClientCapabilities | null | undefined,
+    capability: string,
+): boolean {
+    const meta = asRecord(capabilities?._meta);
+    const jetbrains = asRecord(meta[JETBRAINS_META_KEY]);
+    const air = asRecord(jetbrains[AIR_META_KEY]);
+    const version = air[AIR_EXTENSION_VERSION_KEY];
+    const supported = air[AIR_EXTENSION_CAPABILITIES_KEY];
+    return typeof version === "number"
+        && Number.isInteger(version)
+        && version >= AIR_EXTENSION_VERSION
+        && Array.isArray(supported)
+        && supported.includes(capability);
+}
+
+/** Read custom instructions from `session/new` metadata. */
+export function airCustomInstructions(meta: unknown): string | undefined {
+    const root = asRecord(meta);
+    const jetbrains = asRecord(root[JETBRAINS_META_KEY]);
+    const air = asRecord(jetbrains[AIR_META_KEY]);
+    const instructions = air[AIR_CUSTOM_INSTRUCTIONS_KEY];
+    return typeof instructions === "string" ? instructions : undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+    return value !== null && typeof value === "object" && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : {};
+}

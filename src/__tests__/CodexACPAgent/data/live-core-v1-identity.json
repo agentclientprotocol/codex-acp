@@ -1,0 +1,75 @@
+[
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "title": "Worker",
+      "capabilities": {},
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "state": {
+        "state": "running"
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "content": {
+        "text": "First answer",
+        "type": "text"
+      },
+      "messageId": "first",
+      "sessionUpdate": "agent_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "state": {
+        "stopReason": "end_turn",
+        "state": "idle"
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "state": {
+        "state": "running"
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "content": {
+        "text": "Second answer",
+        "type": "text"
+      },
+      "messageId": "second",
+      "sessionUpdate": "agent_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "state": {
+        "stopReason": "end_turn",
+        "state": "idle"
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  }
+]

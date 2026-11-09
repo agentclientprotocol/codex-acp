@@ -1,0 +1,26 @@
+[
+  {
+    "messageId": "item-agent",
+    "content": {
+      "text": "See ",
+      "type": "text"
+    },
+    "sessionUpdate": "agent_message_chunk"
+  },
+  {
+    "messageId": "item-agent",
+    "content": {
+      "text": "[src/a.ts](/workspace/src/a.ts). Unfinished: ",
+      "type": "text"
+    },
+    "sessionUpdate": "agent_message_chunk"
+  },
+  {
+    "messageId": "item-agent",
+    "content": {
+      "text": ":codex-fi",
+      "type": "text"
+    },
+    "sessionUpdate": "agent_message_chunk"
+  }
+]

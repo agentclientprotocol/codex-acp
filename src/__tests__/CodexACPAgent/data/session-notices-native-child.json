@@ -1,0 +1,82 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "subagent_spawned",
+        "subagentSessionId": "notice-child",
+        "name": "Notice child",
+        "task": "Check the delegated task.",
+        "capabilities": {}
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-child",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Child integration unavailable"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-child",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "info",
+        "title": "Model rerouted",
+        "description": "Switched from original-model to fallback-model (highRiskCyberActivity)."
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-child",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "info",
+        "title": "Context compacted",
+        "description": "Conversation compacted to fit the model's context window."
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Root integration unavailable"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "subagent_state_update",
+        "subagentSessionId": "notice-child",
+        "state": "completed"
+      }
+    }
+  ]
+}

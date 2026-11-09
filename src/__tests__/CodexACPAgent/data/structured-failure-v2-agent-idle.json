@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": -32603,
+    "message": "Provider unavailable"
+  },
+  "stopReason": "error",
+  "state": "idle",
+  "sessionUpdate": "state_update"
+}

@@ -6,9 +6,9 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "command-search-no-query-no-path",
-        "status": "in_progress",
         "kind": "search",
-        "title": "Search"
+        "title": "Search",
+        "status": "in_progress"
       }
     }
   ]

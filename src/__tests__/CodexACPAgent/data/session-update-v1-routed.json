@@ -1,0 +1,22 @@
+[
+  {
+    "sessionId": "session-1",
+    "update": {
+      "toolCallId": "call-1",
+      "title": "Run tests",
+      "sessionUpdate": "tool_call"
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "used": 1200,
+      "size": 200000,
+      "cost": {
+        "amount": 0.25,
+        "currency": "USD"
+      },
+      "sessionUpdate": "usage_update"
+    }
+  }
+]

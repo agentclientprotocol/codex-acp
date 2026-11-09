@@ -1,0 +1,89 @@
+{
+  "modes": {
+    "availableModes": [
+      {
+        "id": "read-only",
+        "name": "Read-only",
+        "description": "Requires approval to edit files and access the internet."
+      },
+      {
+        "id": "workspace-write",
+        "name": "Workspace access",
+        "description": "Edit workspace files; ask before writing outside the workspace or accessing the network."
+      },
+      {
+        "id": "agent",
+        "name": "Auto review",
+        "description": "Only ask for actions detected as potentially unsafe"
+      },
+      {
+        "id": "agent-full-access",
+        "name": "Full access",
+        "description": "Unrestricted access to the internet and any file on your computer"
+      },
+      {
+        "id": "permission-profile:team-default",
+        "name": "team-default",
+        "description": "Team default permissions"
+      },
+      {
+        "id": "permission-profile:team-fallback",
+        "name": "team-fallback",
+        "description": "Use the team-fallback Codex permission profile."
+      }
+    ],
+    "currentModeId": "permission-profile:team-default"
+  },
+  "modeOption": {
+    "id": "mode",
+    "name": "Mode",
+    "description": "Approval and sandboxing preset for the session",
+    "category": "mode",
+    "type": "select",
+    "currentValue": "permission-profile:team-default",
+    "options": [
+      {
+        "group": "sandbox-modes",
+        "name": "Sandbox Modes",
+        "options": [
+          {
+            "value": "read-only",
+            "name": "Read-only",
+            "description": "Requires approval to edit files and access the internet."
+          },
+          {
+            "value": "workspace-write",
+            "name": "Workspace access",
+            "description": "Edit workspace files; ask before writing outside the workspace or accessing the network."
+          },
+          {
+            "value": "agent",
+            "name": "Auto review",
+            "description": "Only ask for actions detected as potentially unsafe"
+          },
+          {
+            "value": "agent-full-access",
+            "name": "Full access",
+            "description": "Unrestricted access to the internet and any file on your computer"
+          }
+        ]
+      },
+      {
+        "group": "permission-profiles",
+        "name": "Permission Profiles",
+        "options": [
+          {
+            "value": "permission-profile:team-default",
+            "name": "team-default",
+            "description": "Team default permissions"
+          },
+          {
+            "value": "permission-profile:team-fallback",
+            "name": "team-fallback",
+            "description": "Use the team-fallback Codex permission profile."
+          }
+        ]
+      }
+    ]
+  }
+}

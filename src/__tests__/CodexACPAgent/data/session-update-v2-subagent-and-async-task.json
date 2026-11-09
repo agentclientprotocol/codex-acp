@@ -1,0 +1,41 @@
+[
+  {
+    "sessionId": "session-1",
+    "update": {
+      "sessionUpdate": "_subagent_update",
+      "subagentSessionId": "child-1",
+      "name": "Researcher",
+      "task": "Look into flaky tests",
+      "capabilities": {}
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "sessionUpdate": "_subagent_update",
+      "subagentSessionId": "child-1",
+      "state": "completed"
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "sessionUpdate": "_async_task_spawned",
+      "asyncTaskId": "task-1",
+      "name": "npm test",
+      "taskType": "shell",
+      "showInTranscript": false,
+      "canStop": true,
+      "toolCallId": "call-1"
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "sessionUpdate": "_async_task_state_update",
+      "asyncTaskId": "task-1",
+      "state": "completed",
+      "toolCallId": "call-1"
+    }
+  }
+]

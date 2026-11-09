@@ -12,6 +12,11 @@ cursor?: string | null, /**
  * Optional page size; defaults to a reasonable server-side value.
  */
 limit?: number | null, /**
+ * Thread IDs to exclude before applying the result limit. Up to 100
+ * entries; invalid IDs or a larger list are rejected, never truncated.
+ * Send the same exclusions on each page. Omitted, null, or empty means no exclusions.
+ */
+excludedThreadIds?: Array<string> | null, /**
  * Optional sort key; defaults to created_at.
  */
 sortKey?: ThreadSortKey | null, /**
@@ -26,10 +31,19 @@ modelProviders?: Array<string> | null, /**
  * are returned. When omitted or empty, defaults to interactive sources.
  */
 sourceKinds?: Array<ThreadSourceKind> | null, /**
+ * Optional originator allowlist, matching any supplied value exactly.
+ * Supported by hosted backends only; the local app-server rejects a nonempty list.
+ * Omitted or empty lists leave originators unrestricted.
+ */
+originators?: Array<string> | null, /**
  * Optional archived filter; when set to true, only archived threads are returned.
  * If false or null, only non-archived threads are returned.
  */
 archived?: boolean | null, /**
+ * Omit to include every section, set to `null` for unsectioned threads,
+ * or provide a section ID to return only threads in that section.
+ */
+sectionId?: string | null, /**
  * Optional cwd filter or filters; when set, only threads whose session cwd
  * exactly matches one of these paths are returned.
  */

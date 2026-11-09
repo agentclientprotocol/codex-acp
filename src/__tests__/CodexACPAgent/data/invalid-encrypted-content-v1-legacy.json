@@ -1,0 +1,21 @@
+{
+  "result": {
+    "stopReason": "end_turn",
+    "usage": null,
+    "_meta": {
+      "quota": {
+        "token_count": null,
+        "model_usage": []
+      }
+    }
+  },
+  "updates": [
+    {
+      "sessionUpdate": "agent_message_chunk",
+      "content": {
+        "type": "text",
+        "text": "The current provider can't read this thread's earlier reasoning, which another provider or account encrypted. This happens after the provider changes in a thread. Switch back to the previous provider or start a new thread.\n\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+[
+  {
+    "method": "sessionUpdate",
+    "args": [
+      {
+        "sessionId": "compaction-child",
+        "update": {
+          "sessionUpdate": "compaction_update",
+          "compactionId": "compaction-item",
+          "status": "cancelled"
+        }
+      }
+    ]
+  },
+  {
+    "method": "sessionUpdate",
+    "args": [
+      {
+        "sessionId": "failed-compaction-child",
+        "update": {
+          "sessionUpdate": "compaction_update",
+          "compactionId": "compaction-item",
+          "status": "failed"
+        }
+      }
+    ]
+  },
+  {
+    "method": "sessionUpdate",
+    "args": [
+      {
+        "sessionId": "compaction-session",
+        "update": {
+          "sessionUpdate": "subagent_state_update",
+          "subagentSessionId": "compaction-child",
+          "state": "cancelled"
+        }
+      }
+    ]
+  },
+  {
+    "method": "sessionUpdate",
+    "args": [
+      {
+        "sessionId": "compaction-session",
+        "update": {
+          "sessionUpdate": "subagent_state_update",
+          "subagentSessionId": "failed-compaction-child",
+          "state": "failed"
+        }
+      }
+    ]
+  }
+]

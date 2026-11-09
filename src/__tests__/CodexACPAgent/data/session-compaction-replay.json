@@ -1,0 +1,47 @@
+[
+  {
+    "method": "sessionUpdate",
+    "args": [
+      {
+        "sessionId": "compaction-session",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "messageId": "before-message",
+          "content": {
+            "type": "text",
+            "text": "Before compaction."
+          }
+        }
+      }
+    ]
+  },
+  {
+    "method": "sessionUpdate",
+    "args": [
+      {
+        "sessionId": "compaction-session",
+        "update": {
+          "sessionUpdate": "compaction_update",
+          "compactionId": "compaction-item",
+          "status": "completed"
+        }
+      }
+    ]
+  },
+  {
+    "method": "sessionUpdate",
+    "args": [
+      {
+        "sessionId": "compaction-session",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "messageId": "after-message",
+          "content": {
+            "type": "text",
+            "text": "After compaction."
+          }
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "sessionId": "codex-root",
+    "cwd": "codex",
+    "agentWorktree": true
+  },
+  {
+    "sessionId": "codex-subdirectory",
+    "cwd": "codex/pkg",
+    "agentWorktree": true
+  },
+  {
+    "sessionId": "user-worktree",
+    "cwd": "user",
+    "agentWorktree": null
+  },
+  {
+    "sessionId": "main-checkout",
+    "cwd": "repo",
+    "agentWorktree": null
+  }
+]

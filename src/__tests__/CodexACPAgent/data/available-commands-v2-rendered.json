@@ -1,0 +1,28 @@
+{
+  "sessionUpdate": "available_commands_update",
+  "availableCommands": [
+    {
+      "name": "review",
+      "description": "Review changes",
+      "input": {
+        "hint": "focus",
+        "type": "text"
+      },
+      "_meta": {
+        "kind": "hint"
+      },
+      "type": "command"
+    },
+    {
+      "name": "status",
+      "description": "Show status",
+      "input": null,
+      "type": "command"
+    },
+    {
+      "name": "compact",
+      "description": "Compact the thread",
+      "type": "command"
+    }
+  ]
+}

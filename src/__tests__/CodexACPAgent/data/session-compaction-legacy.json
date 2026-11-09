@@ -1,0 +1,53 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "compaction-session",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "compaction-item",
+        "kind": "think",
+        "title": "Compact conversation",
+        "status": "in_progress",
+        "_meta": {
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "contextCompaction": {
+                "version": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "compaction-session",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "compaction-item",
+        "status": "completed"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "compaction-session",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "*Context compacted to fit the model's context window.*\n\n"
+        }
+      }
+    }
+  ]
+}

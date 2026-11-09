@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { CodexAcpServer } from '../../CodexAcpServer';
-import * as acp from '@agentclientprotocol/sdk';
+import * as acp from '@agentclientprotocol/sdk/unstable';
 import { createMockConnections } from './test-utils';
 import {getCodexAuthMethods} from "../../CodexAuthMethod";
 import {CodexAcpClient} from "../../CodexAcpClient";
@@ -52,18 +52,48 @@ describe('CodexACPAgent - initialize', () => {
                     list: {},
                     close: {},
                     delete: {},
+                    fork: {},
+                    title: {},
                     additionalDirectories: {},
+                    subagents: {},
+                    systemPrompt: {},
                 },
                 mcpCapabilities: {
                     acp: false,
                     http: true,
                     sse: false,
                 },
+                _meta: {
+                    authStatus: {},
+                },
             },
             authMethods: getCodexAuthMethods(),
             _meta: {
                 steering: {
                     supported: true,
+                },
+            },
+        });
+    });
+
+    it('should advertise the AIR extension only to AIR', async () => {
+        const result = await agent.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {_meta: {jetbrains: {air: {version: 1, capabilities: []}}}},
+        });
+        expect(result._meta).toEqual({
+            steering: {
+                supported: true,
+            },
+            jetbrains: {
+                air: {
+                    version: 1,
+                    goal: {
+                        version: 1,
+                        controlMethod: "_session/goal",
+                        actions: ["set", "pause", "resume", "clear"],
+                    },
+                    capabilities: ["sessionFailure", "diffPatch", "agentFileChangeReport", "customInstructions", "nativeSubagentSessions", "asyncTasks", "recommendedValue", "rawInputRendering", "planContentDelta", "codexHooks"],
                 },
             },
         });
@@ -122,6 +152,16 @@ describe('CodexACPAgent - initialize', () => {
             expect.objectContaining({id: "codex-api-key"}),
             expect.objectContaining({id: "openai-api-key"}),
         ]));
+    });
+
+    it('should advertise ChatGPT device code auth only when the client supports URL elicitation', () => {
+        const withUrlElicitation = getCodexAuthMethods({elicitation: {url: {}}})
+            .map((method) => method.id);
+        expect(withUrlElicitation).toContain("chat-gpt-device-code");
+
+        const withoutUrlElicitation = getCodexAuthMethods({elicitation: {form: {}}})
+            .map((method) => method.id);
+        expect(withoutUrlElicitation).not.toContain("chat-gpt-device-code");
     });
 
     it('should not advertise ChatGPT auth when browser auth is disabled', () => {

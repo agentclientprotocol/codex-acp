@@ -1,0 +1,15 @@
+[
+  {
+    "approvalPolicy": "on-request",
+    "approvalsReviewer": "user",
+    "sandboxPolicy": {
+      "type": "workspaceWrite",
+      "writableRoots": [
+        "/test/extra"
+      ],
+      "networkAccess": false,
+      "excludeTmpdirEnvVar": false,
+      "excludeSlashTmp": false
+    }
+  }
+]

@@ -1,9 +1,7 @@
-import type {SessionConfigOption} from "@agentclientprotocol/sdk";
-import type * as acp from "@agentclientprotocol/sdk";
-import type {ServiceTier} from "./app-server";
+import type {SessionConfigOption} from "@agentclientprotocol/sdk/unstable";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
+import type {ServiceTier} from "./app-server/ServiceTier";
 import type {Model} from "./app-server/v2";
-
-export type SupportedServiceTier = ServiceTier | "priority";
 
 export const FAST_MODE_CONFIG_ID = "fast-mode";
 export const FAST_MODE_CATEGORY = "model_config";
@@ -16,7 +14,8 @@ export function modelSupportsFast(model: Model | undefined): boolean {
     return model?.additionalSpeedTiers?.includes("fast") ?? false;
 }
 
-export function serviceTierEnablesFast(serviceTier: SupportedServiceTier | null | undefined): boolean {
+export function serviceTierEnablesFast(serviceTier: string | null | undefined): boolean {
+    // Codex returns the canonical "priority" tier even when configured with "fast".
     return serviceTier === "fast" || serviceTier === "priority";
 }
 

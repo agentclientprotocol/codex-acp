@@ -6,11 +6,18 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "context-compaction-id",
-        "kind": "other",
-        "title": "Context compacting",
+        "kind": "think",
+        "title": "Compact conversation",
         "status": "in_progress",
         "_meta": {
-          "contextCompaction": true
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "contextCompaction": {
+                "version": 1
+              }
+            }
+          }
         }
       }
     }
@@ -24,11 +31,7 @@
       "update": {
         "sessionUpdate": "tool_call_update",
         "toolCallId": "context-compaction-id",
-        "title": "Context compacted",
-        "status": "completed",
-        "_meta": {
-          "contextCompaction": true
-        }
+        "status": "completed"
       }
     }
   ]

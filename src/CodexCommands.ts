@@ -1,12 +1,15 @@
-import type * as acp from "@agentclientprotocol/sdk";
-import type {AvailableCommand} from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
+import type {AvailableCommand} from "@agentclientprotocol/sdk/unstable";
 import {ACPSessionConnection, type AcpClientConnection} from "./ACPSessionConnection";
+import {AIR_COMMAND_ACTION_KEY, AIR_SKILL_PATH_KEY, airOnlyMeta} from "./AirExtension";
 import type {CodexAcpClient} from "./CodexAcpClient";
 import type {RateLimitSnapshot, ReviewTarget, SkillsListEntry, SkillsListParams, TurnCompletedNotification} from "./app-server/v2";
 import type {SessionState} from "./CodexAcpServer";
-import type {RateLimitsMap} from "./RateLimitsMap";
+import {createRateLimitsMap, type RateLimitsMap} from "./RateLimitsMap";
 import type {TokenCount} from "./TokenCount";
 import {logger} from "./Logger";
+import {MCP_COMMAND_INPUT_HINT, McpCommand} from "./mcp/McpCommand";
+import type {McpServerSignIn} from "./mcp/McpServerSignIn";
 import {createAgentTextMessageChunk} from "./ContentChunks";
 import {
     COLLABORATION_MODE_CONFIG_ID,
@@ -23,39 +26,155 @@ export type CommandHandleResult =
     | { handled: false }
     | { handled: true, turnCompleted?: TurnCompletedNotification };
 
+export type PromptKind =
+    | { kind: "prompt" }
+    | { kind: "localCommand", name: string }
+    | { kind: "codexTurnCommand", name: string };
+
 export type CommandHandleOptions = {
+    /** Aborts when the prompt ends. A command then sends no more updates. */
+    signal?: AbortSignal;
     onTurnStartPending?: () => void;
     onTurnStarted?: (turnId: string, threadId: string) => void;
+    /**
+     * Fired once Codex accepts a command that runs a turn but records no user message
+     * (`/compact`, `/goal`), so a v2 caller can insert its own live-only one right away.
+     */
+    onCommandAccepted?: () => void;
     setConfigOption?: (configId: string, value: string) => Promise<void>;
 };
 
 export type LogoutHandler = () => void | Promise<void>;
+
+/** How long a `skills/changed` burst settles before the commands are listed again. */
+const SKILLS_CHANGED_PUBLISH_DELAY_MS = 300;
+
+/** How long a `skills/changed` burst may hold the publish back before it goes out anyway. */
+const SKILLS_CHANGED_PUBLISH_MAX_DELAY_MS = 2_000;
+
+/** A publish that waits out a burst of skill file changes, and the moment it stops waiting for more. */
+type PendingSkillsPublish = {timer: ReturnType<typeof setTimeout>; deadline: number};
 
 export class CodexCommands {
     private readonly connection: AcpClientConnection;
     private readonly codexAcpClient: CodexAcpClient;
     private readonly runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>;
     private readonly onLogout: LogoutHandler;
+    private readonly mcpCommand: McpCommand;
+    /** The commands that each session got last, to skip a publish that changes nothing. */
+    private readonly published = new WeakMap<SessionState, string>();
+    /** The pending publish of each session whose skills changed, so one burst of file changes lists once. */
+    private readonly pendingSkillsPublishes = new WeakMap<SessionState, PendingSkillsPublish>();
+    /** The publish each session started last, so a slower earlier one does not overwrite its list. */
+    private readonly publishRevisions = new WeakMap<SessionState, number>();
+    /** Latest completed list, also used by v2 setup responses after history replay. */
+    private readonly snapshots = new WeakMap<SessionState, {revision: number; commands: AvailableCommand[]}>();
 
     constructor(
         connection: AcpClientConnection,
         codexAcpClient: CodexAcpClient,
         runWithProcessCheck: <T>(operation: () => Promise<T>) => Promise<T>,
-        onLogout: LogoutHandler = () => {}
+        onLogout: LogoutHandler,
+        mcpServerSignIn: McpServerSignIn,
     ) {
         this.connection = connection;
         this.codexAcpClient = codexAcpClient;
         this.runWithProcessCheck = runWithProcessCheck;
         this.onLogout = onLogout;
+        this.mcpCommand = new McpCommand(codexAcpClient, runWithProcessCheck, mcpServerSignIn);
     }
 
-    async publish(sessionState: SessionState): Promise<void> {
+    /**
+     * Lists the skills again and publishes the commands once the skill files settle.
+     *
+     * Codex watches the skill files and reports every change as `skills/changed`, naming nothing that changed, so
+     * the list is the only way to learn what a session has now. An editor that writes a skill, or a checkout that
+     * adds one, fires several of those notifications, so the publish waits out the burst. Each session keeps one
+     * pending publish, and a publish that changes no command sends nothing.
+     */
+    publishOnSkillsChanged(sessionState: SessionState, shouldPublish: () => boolean): void {
+        const pending = this.pendingSkillsPublishes.get(sessionState);
+        clearTimeout(pending?.timer);
+        // A checkout, or a watcher that keeps writing, would otherwise push the publish out forever.
+        const deadline = pending?.deadline ?? Date.now() + SKILLS_CHANGED_PUBLISH_MAX_DELAY_MS;
+        const delay = Math.max(0, Math.min(SKILLS_CHANGED_PUBLISH_DELAY_MS, deadline - Date.now()));
+        const timer = setTimeout(() => {
+            this.pendingSkillsPublishes.delete(sessionState);
+            void this.publish(sessionState, shouldPublish, true);
+        }, delay);
+        // The adapter must not stay alive for a publish that no one waits for.
+        timer.unref?.();
+        this.pendingSkillsPublishes.set(sessionState, {timer, deadline});
+    }
+
+    /** Drops the publish a closing session was still waiting out. */
+    cancelPendingSkillsPublish(sessionState: SessionState): void {
+        const pending = this.pendingSkillsPublishes.get(sessionState);
+        if (pending === undefined) {
+            return;
+        }
+        clearTimeout(pending.timer);
+        this.pendingSkillsPublishes.delete(sessionState);
+    }
+
+    /** Loads v2's initial commands without sending an initial notification. */
+    async initialize(sessionState: SessionState, shouldPublish: () => boolean): Promise<void> {
         try {
-            const skillsResponse = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills(this.createSkillsListParams(sessionState)));
-            const availableCommands = this.buildAvailableCommands(skillsResponse?.data ?? []);
-            if (availableCommands.length === 0) {
+            if (shouldPublish()) {
+                await this.loadCommands(sessionState);
+            }
+        } catch (err) {
+            if (shouldPublish()) {
+                logger.error(`Failed to load initial commands for session ${sessionState.sessionId}`, err);
+            }
+        }
+    }
+
+    /** Takes the response snapshot and seeds change detection for later notifications. */
+    initialCommands(sessionState: SessionState): AvailableCommand[] {
+        const commands = this.snapshots.get(sessionState)?.commands ?? [];
+        this.published.set(sessionState, JSON.stringify(commands));
+        return commands;
+    }
+
+    private async loadCommands(sessionState: SessionState): Promise<{revision: number; commands: AvailableCommand[]}> {
+        const revision = (this.publishRevisions.get(sessionState) ?? 0) + 1;
+        this.publishRevisions.set(sessionState, revision);
+        const skillsResponse = await this.runWithProcessCheck(() => this.codexAcpClient.listSkills(this.createSkillsListParams(sessionState)));
+        const commands = this.buildAvailableCommands(
+            skillsResponse?.data ?? [],
+            sessionState.clientCapabilities.airClient,
+        );
+        // A slower initial read must not replace a newer list published during setup or replay.
+        if ((this.snapshots.get(sessionState)?.revision ?? 0) < revision) {
+            this.snapshots.set(sessionState, {revision, commands});
+        }
+        return {revision, commands};
+    }
+
+    /** Sends the available commands. With `onlyChanges`, it sends nothing when the commands did not change. */
+    async publish(
+        sessionState: SessionState,
+        shouldPublish: () => boolean = () => true,
+        onlyChanges = false,
+    ): Promise<void> {
+        try {
+            if (!shouldPublish()) {
                 return;
             }
+            const {revision, commands: availableCommands} = await this.loadCommands(sessionState);
+            // A publish that started later already listed the skills, and its list is the newer one.
+            if (this.publishRevisions.get(sessionState) !== revision) {
+                return;
+            }
+            if (availableCommands.length === 0 || !shouldPublish()) {
+                return;
+            }
+            const key = JSON.stringify(availableCommands);
+            if (onlyChanges && this.published.get(sessionState) === key) {
+                return;
+            }
+            this.published.set(sessionState, key);
 
             const session = new ACPSessionConnection(this.connection, sessionState.sessionId);
             await session.update({
@@ -63,7 +182,9 @@ export class CodexCommands {
                 availableCommands
             });
         } catch (err) {
-            logger.error(`Failed to publish available commands for session ${sessionState.sessionId}`, err);
+            if (shouldPublish()) {
+                logger.error(`Failed to publish available commands for session ${sessionState.sessionId}`, err);
+            }
         }
     }
 
@@ -73,10 +194,10 @@ export class CodexCommands {
         };
     }
 
-    private buildAvailableCommands(skillsEntries: SkillsListEntry[]): AvailableCommand[] {
+    private buildAvailableCommands(skillsEntries: SkillsListEntry[], airClient: boolean): AvailableCommand[] {
         const commands = new Map<string, AvailableCommand>();
 
-        for (const builtin of this.getBuiltinCommands()) {
+        for (const builtin of this.getBuiltinCommands(airClient)) {
             commands.set(builtin.name, builtin);
         }
 
@@ -85,10 +206,13 @@ export class CodexCommands {
                 const name = `$${skill.name}`;
                 if (commands.has(name)) continue;
                 const description = skill.shortDescription ?? skill.description ?? skill.name;
+                // Only AIR gets the SKILL.md path, in `_meta.jetbrains.air.skillPath`. A click on the skill chip opens it.
+                const meta = airOnlyMeta(airClient, AIR_SKILL_PATH_KEY, skill.path);
                 commands.set(name, {
                     name,
                     description,
                     input: null,
+                    ...(meta ? {_meta: meta} : {}),
                 });
             }
         }
@@ -97,27 +221,30 @@ export class CodexCommands {
 
     /**
      * See the original cli commands documentation here: https://developers.openai.com/codex/cli/slash-commands/
+     * Only AIR gets a command action, in `_meta.jetbrains.air.commandAction`.
      */
-    private getBuiltinCommands(): AvailableCommand[] {
+    private getBuiltinCommands(airClient: boolean): AvailableCommand[] {
+        const commandAction = (action: Record<string, unknown>) => {
+            const meta = airOnlyMeta(airClient, AIR_COMMAND_ACTION_KEY, action);
+            return meta ? {_meta: meta} : {};
+        };
         return [
             {
                 name: "plan",
                 description: "Turn plan mode on.",
                 input: null,
-                _meta: {
-                    commandAction: {
-                        kind: "setConfigOption",
-                        configId: COLLABORATION_MODE_CONFIG_ID,
-                        value: PLAN_COLLABORATION_MODE,
-                        resetValue: DEFAULT_COLLABORATION_MODE,
-                        presentation: "state",
-                    },
-                },
+                ...commandAction({
+                    kind: "setConfigOption",
+                    configId: COLLABORATION_MODE_CONFIG_ID,
+                    value: PLAN_COLLABORATION_MODE,
+                    resetValue: DEFAULT_COLLABORATION_MODE,
+                    presentation: "state",
+                }),
             },
             {
                 name: "mcp",
-                description: "List configured Model Context Protocol (MCP) tools.",
-                input: null
+                description: "Show the status of the MCP servers, or reconnect them.",
+                input: { hint: MCP_COMMAND_INPUT_HINT }
             },
             {
                 name: "skills",
@@ -153,12 +280,15 @@ export class CodexCommands {
                 name: "goal",
                 description: "Set a goal to keep pursuing.",
                 input: { hint: "[<objective>|clear|pause|resume]" },
-                _meta: {
-                    commandAction: {
-                        kind: "prefixPrompt",
-                        presentation: "state",
-                    },
-                },
+                ...commandAction({
+                    kind: "prefixPrompt",
+                    presentation: "state",
+                }),
+            },
+            {
+                name: "rename",
+                description: "Rename the current session.",
+                input: { hint: "new name" }
             },
             {
                 name: "logout",
@@ -187,6 +317,42 @@ export class CodexCommands {
         };
     }
 
+    /**
+     * Tells ahead of time how `tryHandleCommand` will handle a prompt: as a regular prompt, as a
+     * command handled locally without a Codex turn, or as a command that runs a Codex turn.
+     * Keep in sync with `tryHandleCommand`.
+     */
+    classifyPrompt(prompt: acp.ContentBlock[]): PromptKind {
+        const command = this.parseCommand(prompt);
+        if (command === null || command.name.startsWith("$")) return {kind: "prompt"};
+        switch (command.name) {
+            case "plan":
+            case "status":
+            case "rename":
+            case "logout":
+            case "skills":
+            case "mcp":
+                return {kind: "localCommand", name: command.name};
+            case "compact":
+            case "review":
+                return {kind: "codexTurnCommand", name: command.name};
+            case "review-branch":
+            case "review-commit":
+                return command.rest.length === 0
+                    ? {kind: "localCommand", name: command.name}
+                    : {kind: "codexTurnCommand", name: command.name};
+            case "goal": {
+                const argument = command.rest.trim().toLowerCase();
+                if (argument.length === 0 || argument === "pause" || argument === "clear" || argument.length > 4000) {
+                    return {kind: "localCommand", name: command.name};
+                }
+                return {kind: "codexTurnCommand", name: command.name};
+            }
+            default:
+                return {kind: "prompt"};
+        }
+    }
+
     async tryHandleCommand(
         prompt: acp.ContentBlock[],
         sessionState: SessionState,
@@ -211,8 +377,13 @@ export class CodexCommands {
                 return { handled: options.setConfigOption !== undefined };
             }
             case "compact": {
-                await this.runWithProcessCheck(() => this.codexAcpClient.runCompact(sessionId));
-                return { handled: true };
+                options.onTurnStartPending?.();
+                const turnCompleted = await this.runWithProcessCheck(() => this.codexAcpClient.runCompact(
+                    sessionId,
+                    (turnId) => options.onTurnStarted?.(turnId, sessionId),
+                    options.onCommandAccepted,
+                ));
+                return { handled: true, turnCompleted };
             }
             case "goal": {
                 return await this.runGoalCommand(sessionState, command.rest, options);
@@ -246,9 +417,20 @@ export class CodexCommands {
                 return { handled: true, turnCompleted };
             }
             case "status": {
+                await this.refreshRateLimits(sessionState);
                 const session = new ACPSessionConnection(this.connection, sessionId);
                 const message = this.buildStatusMessage(sessionState);
                 await session.update(createAgentTextMessageChunk(message));
+                return { handled: true };
+            }
+            case "rename": {
+                if (command.rest.length === 0) {
+                    await this.sendCommandUsageMessage(commandName, "new name", sessionId);
+                    return { handled: true };
+                }
+                // The new name replaces a `_session/rename` title, so its echo must be shown.
+                delete sessionState.sessionIndexExplicitTitle;
+                await this.runWithProcessCheck(() => this.codexAcpClient.renameSession(sessionId, command.rest));
                 return { handled: true };
             }
             case "logout": {
@@ -273,19 +455,10 @@ export class CodexCommands {
                 return { handled: true };
             }
             case "mcp": {
-                const servers = await this.runWithProcessCheck(() => this.codexAcpClient.listMcpServers());
-                const configuredServers = servers.data.map(server => {
-                    const toolCount = Object.keys(server.tools ?? {}).length;
-                    const resourceCount = (server.resources ?? []).length;
-                    return `- ${server.name}: ${toolCount} tools, ${resourceCount} resources, auth=${server.authStatus}`;
-                });
-                const sessionServers = sessionState.sessionMcpServers
-                    ? sessionState.sessionMcpServers.map(serverName => `- ${serverName}`)
-                    : [];
-                const lines = [...configuredServers, ...sessionServers];
-                const text = lines.length > 0
-                    ? ["Configured MCP servers:", ...lines].join("\n")
-                    : "No MCP servers configured.";
+                const text = await this.mcpCommand.run(command.rest, sessionState, options.signal);
+                if (text === null) {
+                    return { handled: true };
+                }
                 const session = new ACPSessionConnection(this.connection, sessionId);
                 await session.update(createAgentTextMessageChunk(text));
                 return { handled: true };
@@ -308,6 +481,7 @@ export class CodexCommands {
             (turnId, threadId) => {
                 this.handleCommandTurnStarted(sessionState, options, turnId, threadId);
             },
+            options.onCommandAccepted,
         ));
     }
 
@@ -334,6 +508,8 @@ export class CodexCommands {
                     (turnId) => {
                         this.handleCommandTurnStarted(sessionState, options, turnId, sessionId);
                     },
+                    undefined,
+                    options.onCommandAccepted,
                 )));
             case "clear":
                 await this.runWithProcessCheck(() => this.codexAcpClient.clearGoal(sessionId));
@@ -353,6 +529,8 @@ export class CodexCommands {
             (turnId) => {
                 this.handleCommandTurnStarted(sessionState, options, turnId, sessionId);
             },
+            undefined,
+            options.onCommandAccepted,
         )));
     }
 
@@ -370,6 +548,9 @@ export class CodexCommands {
     }
 
     private createGoalCommandResult(turnCompleted: TurnCompletedNotification | null): CommandHandleResult {
+        // No matching turn observed within `runGoalSet`'s 1 s grace window. Codex auto-continues
+        // active goals itself; don't start a synthetic continuation turn here (that also skipped
+        // the goal-status check, so it fired even when the goal had stopped, e.g. budgetLimited).
         if (turnCompleted === null) {
             return { handled: true };
         }
@@ -402,12 +583,15 @@ export class CodexCommands {
             sessionState.lastTokenUsage,
             sessionState.modelContextWindow
         );
+        const permissionLine = agentMode.permissionProfileId
+            ? `**Permission profile:** ${agentMode.permissionProfileId}`
+            : `**Sandbox:** ${agentMode.sandboxMode}`;
 
         const lines = [
             `**Model:** ${sessionState.currentModelId}`,
             `**Directory:** ${sessionState.cwd}`,
             `**Approval:** ${agentMode.approvalPolicy}`,
-            `**Sandbox:** ${agentMode.sandboxMode}`,
+            permissionLine,
             `**Account:** ${accountText}`,
             `**Session:** \`${sessionState.sessionId}\``,
             ``,
@@ -417,6 +601,17 @@ export class CodexCommands {
         ];
 
         return lines.join("  \n");
+    }
+
+    private async refreshRateLimits(sessionState: SessionState): Promise<void> {
+        try {
+            const response = await this.runWithProcessCheck(() => this.codexAcpClient.getRateLimits());
+            if (response) {
+                sessionState.rateLimits = createRateLimitsMap(response);
+            }
+        } catch (err) {
+            logger.error(`Failed to refresh rate limits for session ${sessionState.sessionId}`, err);
+        }
     }
 
     private formatAccountInfo(account: SessionState["account"]): string {
@@ -443,7 +638,10 @@ export class CodexCommands {
         const input = this.formatTokenCount(usage.inputTokens);
         const cachedInput = this.formatTokenCount(usage.cachedInputTokens);
         const output = this.formatTokenCount(usage.outputTokens);
-        return `${total} total  (${input} input + ${cachedInput} cached input, ${output} output)`;
+        const cacheWrite = usage.cacheWriteInputTokens > 0
+            ? ` + ${this.formatTokenCount(usage.cacheWriteInputTokens)} cache write`
+            : "";
+        return `${total} total  (${input} input + ${cachedInput} cached input${cacheWrite}, ${output} output)`;
     }
 
     private formatContextWindow(usage: TokenCount | null, contextWindow: number | null): string {
@@ -451,10 +649,10 @@ export class CodexCommands {
             return "data not available yet";
         }
         const used = usage.totalTokens;
-        const percentLeft = Math.round(((contextWindow - used) / contextWindow) * 100);
+        const percentUsed = Math.round((used / contextWindow) * 100);
         const usedFormatted = this.formatTokenCount(used);
         const totalFormatted = this.formatTokenCount(contextWindow);
-        return `${percentLeft}% left (${usedFormatted} used / ${totalFormatted})`;
+        return `${percentUsed}% used (${usedFormatted} used / ${totalFormatted})`;
     }
 
     private formatRateLimitLines(rateLimits: RateLimitsMap | null): string[] {
@@ -497,7 +695,33 @@ export class CodexCommands {
             }
         }
 
+        if (rateLimits.individualLimit) {
+            const limit = rateLimits.individualLimit;
+            const used = this.formatCreditAmount(limit.used);
+            const total = this.formatCreditAmount(limit.limit);
+            if (used !== null && total !== null) {
+                const percentLeft = Math.round(Math.min(100, Math.max(0, limit.remainingPercent)));
+                const resetDate = new Date(limit.resetsAt * 1000)
+                    .toLocaleDateString("en-US", {month: "short", day: "numeric"});
+                lines.push(
+                    `**${prefix}individual spend limit:** ${percentLeft}% left (${used} of ${total} credits used; resets ${resetDate})`,
+                );
+            }
+        }
+
         return lines;
+    }
+
+    private formatCreditAmount(raw: string): string | null {
+        const trimmed = raw.trim();
+        if (trimmed.length === 0) {
+            return null;
+        }
+        const value = Number(trimmed);
+        if (!Number.isFinite(value) || value < 0) {
+            return null;
+        }
+        return Math.round(value).toLocaleString("en-US");
     }
 
     private formatWindowLabel(windowDurationMins: number | null): string {

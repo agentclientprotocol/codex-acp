@@ -1,0 +1,26 @@
+{
+  "updates": [
+    {
+      "sessionUpdate": "agent_message_chunk",
+      "messageId": "next-message",
+      "content": {
+        "type": "text",
+        "text": "Hi."
+      }
+    },
+    {
+      "sessionUpdate": "session_info_update",
+      "title": "hello"
+    }
+  ],
+  "response": {
+    "stopReason": "end_turn",
+    "usage": null,
+    "_meta": {
+      "quota": {
+        "token_count": null,
+        "model_usage": []
+      }
+    }
+  }
+}

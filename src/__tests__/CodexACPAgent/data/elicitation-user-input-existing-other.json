@@ -1,0 +1,58 @@
+{
+  "method": "createElicitation",
+  "args": [
+    {
+      "sessionId": "test-session-id",
+      "toolCallId": "request-user-input-1",
+      "mode": "form",
+      "message": "Codex needs your input to continue.",
+      "requestedSchema": {
+        "type": "object",
+        "properties": {
+          "next_step": {
+            "title": "What should I do next?",
+            "description": "Next step",
+            "_meta": {
+              "codex": {
+                "isOther": true,
+                "isSecret": false
+              }
+            },
+            "type": "string",
+            "oneOf": [
+              {
+                "const": "Run tests",
+                "title": "Run tests",
+                "description": "Run the focused test suite."
+              },
+              {
+                "const": "None of the above",
+                "title": "None of the above",
+                "description": "Use a different approach."
+              }
+            ]
+          },
+          "next_step_note": {
+            "type": "string",
+            "title": "Additional answer or note",
+            "_meta": {
+              "codex": {
+                "questionId": "next_step",
+                "role": "user_note",
+                "isSecret": false
+              }
+            }
+          }
+        },
+        "required": [
+          "next_step"
+        ]
+      },
+      "_meta": {
+        "codex": {
+          "autoResolutionMs": null
+        }
+      }
+    }
+  ]
+}
