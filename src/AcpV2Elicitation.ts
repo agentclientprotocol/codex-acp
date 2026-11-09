@@ -3,7 +3,7 @@ import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import {AIR_CUSTOM_ANSWER_FIELDS_KEY, isAirCustomAnswer, withAirMeta} from "./AirExtension";
 
 /**
- * Keeps the shared elicitation wire shape and moves Air's companion IDs to v2 request metadata.
+ * Keeps the shared elicitation wire shape and copies Air's companion IDs to v2 request metadata.
  * V2 responses retain arbitrary JSON values for validation by their shared consumers.
  */
 export function toV2CreateElicitationRequest(request: acp.CreateElicitationRequest): acpV2.CreateElicitationRequest {
@@ -12,7 +12,7 @@ export function toV2CreateElicitationRequest(request: acp.CreateElicitationReque
         .filter(([, property]) => isAirCustomAnswer(property._meta))
         .map(([id]) => id);
     if (fields.length === 0) return request as unknown as acpV2.CreateElicitationRequest;
-    // V2 schema properties have no metadata. Keep the companion IDs on the request.
+    // AIR's Kotlin v2 property models omit metadata. Keep the companion IDs on the request.
     return {...request, _meta: withAirMeta(request._meta, AIR_CUSTOM_ANSWER_FIELDS_KEY, fields)} as unknown as acpV2.CreateElicitationRequest;
 }
 

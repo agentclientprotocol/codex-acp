@@ -68,14 +68,14 @@ describe.each([1, 2] as const)('AIR subagent and async task updates on ACP v%s',
 
         expect(updates).toEqual([
             {
-                sessionUpdate: "subagent_spawned",
+                sessionUpdate: version === 1 ? "subagent_spawned" : "_subagent_update",
                 subagentSessionId: "child-1",
                 name: "Researcher",
                 task: "Delegated task for Researcher",
                 capabilities: {},
             },
             {
-                sessionUpdate: "subagent_state_update",
+                sessionUpdate: version === 1 ? "subagent_state_update" : "_subagent_update",
                 subagentSessionId: "child-1",
                 state: "cancelled",
             },
@@ -126,21 +126,21 @@ describe.each([1, 2] as const)('AIR subagent and async task updates on ACP v%s',
 
         expect(updates).toEqual([
             {
-                sessionUpdate: "subagent_spawned",
+                sessionUpdate: version === 1 ? "subagent_spawned" : "_subagent_update",
                 subagentSessionId: "child-1",
                 name: "Researcher",
                 task: "Delegated task for Researcher",
                 capabilities: {},
             },
-            {sessionUpdate: "subagent_state_update", subagentSessionId: "child-1", state: "completed"},
+            {sessionUpdate: version === 1 ? "subagent_state_update" : "_subagent_update", subagentSessionId: "child-1", state: "completed"},
             {
-                sessionUpdate: "subagent_spawned",
+                sessionUpdate: version === 1 ? "subagent_spawned" : "_subagent_update",
                 subagentSessionId: "child-1:generation:2",
                 name: "Researcher",
                 task: "Delegated task for Researcher",
                 capabilities: {},
             },
-            {sessionUpdate: "subagent_state_update", subagentSessionId: "child-1:generation:2", state: "completed"},
+            {sessionUpdate: version === 1 ? "subagent_state_update" : "_subagent_update", subagentSessionId: "child-1:generation:2", state: "completed"},
         ]);
     });
 
@@ -217,7 +217,7 @@ describe.each([1, 2] as const)('AIR subagent and async task updates on ACP v%s',
                 _meta: {jetbrains: {air: {asyncTasks: {backgrounded: true}}}},
             },
             {
-                sessionUpdate: "async_task_spawned",
+                sessionUpdate: version === 1 ? "async_task_spawned" : "_async_task_spawned",
                 asyncTaskId: "command-1",
                 name: "python -m http.server",
                 taskType: "shell",

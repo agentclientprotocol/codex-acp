@@ -71,7 +71,7 @@ describe('_session/async_task/stop on ACP v2', () => {
         await spawnAsyncTask(client);
 
         const spawned = client.transcript.flatMap(entry => "sessionUpdate" in entry ? [entry.sessionUpdate] : [])
-            .filter(update => update.sessionUpdate === "async_task_spawned");
+            .filter(update => update.sessionUpdate === "_async_task_spawned");
         expect(spawned).toEqual([expect.objectContaining({asyncTaskId: "command-1"})]);
 
         const stopRequest = client.request(ASYNC_TASK_STOP_METHOD, {sessionId, asyncTaskId: "command-1"});
@@ -79,8 +79,8 @@ describe('_session/async_task/stop on ACP v2', () => {
         await settle();
 
         const stateUpdates = client.transcript.flatMap(entry => "sessionUpdate" in entry ? [entry.sessionUpdate] : [])
-            .filter(update => update.sessionUpdate === "async_task_state_update");
-        expect(stateUpdates).toEqual([{sessionUpdate: "async_task_state_update", asyncTaskId: "command-1", state: "stopped", toolCallId: "command-1"}]);
+            .filter(update => update.sessionUpdate === "_async_task_state_update");
+        expect(stateUpdates).toEqual([{sessionUpdate: "_async_task_state_update", asyncTaskId: "command-1", state: "stopped", toolCallId: "command-1"}]);
     });
 
     // AIR uses the same lifecycle tags in both versions. The v1 SDK schema omits these extensions,
