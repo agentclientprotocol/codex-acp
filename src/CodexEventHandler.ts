@@ -47,7 +47,7 @@ import {ImageGenerationReporter} from "./tool-calls/reporters/ImageGenerationRep
 import {ImageViewReporter} from "./tool-calls/reporters/ImageViewReporter";
 import {McpToolReporter} from "./tool-calls/reporters/McpToolReporter";
 import {WebSearchReporter} from "./tool-calls/reporters/WebSearchReporter";
-import {CodexPlanStream} from "./CodexPlanStream";
+import {CodexPlanStream, structuredPlanUpdate} from "./CodexPlanStream";
 import {isWorkspaceRoutingUnavailableMessage} from "./CodexThreadErrors";
 import {
     createMessagePhaseMeta,
@@ -1087,10 +1087,7 @@ export class CodexEventHandler {
                 priority: "medium"
             })
         );
-        return {
-            sessionUpdate: "plan",
-            entries: plan,
-        }
+        return structuredPlanUpdate(plan, this.sessionState.clientCapabilities);
     }
 
     private async createErrorEvent(params: ErrorNotification): Promise<UpdateSessionEvent | null> {
