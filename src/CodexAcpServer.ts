@@ -3266,8 +3266,7 @@ export class CodexAcpServer {
                 // steer immediately ("a turn was started") and let prompt() finish the
                 // turn in the background.
                 resolve(true);
-            }, insertion, reservation);
-            void promptDone.finally(() => reservation.release());
+            }, insertion, reservation).finally(() => reservation.release());
             promptDone.then(
                 (response) => {
                     if (!turnStarted && response.stopReason === "cancelled") {

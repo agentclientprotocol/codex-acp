@@ -1,8 +1,10 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
+import {RequestError} from '@agentclientprotocol/sdk/unstable';
 import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import type {ThreadItem} from '../../app-server/v2';
 import {
     connectSession,
+    createTurn,
     dump,
     itemCompleted,
     itemStarted,
@@ -186,6 +188,29 @@ describe.each([1, 2] as const)('async Codex questions over ACP v%i', (protocolVe
         await settle();
         expect(steers).toEqual([]);
         expect(client.turnStartParams).toHaveLength(1);
+    });
+
+    it('reports a rejected continuation and releases the next prompt', async () => {
+        let answer!: (response: acpV2.CreateElicitationResponse) => void;
+        const {client} = await connect(() => new Promise(resolve => { answer = resolve; }));
+        await askDuringTurn(client);
+        await vi.waitFor(() => expect(elicitationRequests(client)).toHaveLength(1));
+        await finishTurn(client);
+        client.setTurnStart(async () => { throw RequestError.internalError(undefined, "Cannot start turn"); });
+        answer({action: "accept", content: {question_1: "After completion"}});
+        await vi.waitFor(() => expect(notices(client)).toHaveLength(1));
+        await client.promptRunFinished(1);
+        await expect(dump(notices(client))).toMatchFileSnapshot(`data/async-questions-v${protocolVersion}-rejected.json`);
+
+        client.setTurnStart(async () => ({turn: createTurn("inProgress", "turn-3")}));
+        const response = client.sendPrompt([{type: "text", text: "Try again"}]);
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(3));
+        const params = client.turnStartParams[2]!;
+        client.emit(turnStarted("turn-3"));
+        client.emit(itemCompleted(userMessageItem(params["clientUserMessageId"] as string), "turn-3"));
+        client.emit(turnCompleted("turn-3"));
+        await response;
+        await client.promptRunFinished(2);
     });
 
     it('reports an answer that Codex rejects while its turn still runs', async () => {
