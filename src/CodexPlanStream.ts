@@ -1,8 +1,26 @@
+import type {PlanEntry} from "@agentclientprotocol/sdk/unstable";
 import type {ACPSessionConnection, UpdateSessionEvent} from "./ACPSessionConnection";
 import {AIR_CONTENT_DELTA_KEY, withAirMeta} from "./AirExtension";
 import {createAgentTextMessageChunk, createMessagePhaseMeta} from "./ContentChunks";
 import {logger} from "./Logger";
 import type {ClientCapabilities} from "./tool-calls/ClientCapabilities";
+
+/**
+ * `planId` of the structured (`update_plan` tool) plan. A session has at most one such plan and
+ * every update replaces it, so a constant id is stable for the whole session.
+ */
+export const STRUCTURED_PLAN_ID = "codex-structured-plan";
+
+/**
+ * Reports the structured plan. A client with plan updates gets an `items` `plan_update`,
+ * so all of its plans come as `plan_update`. Other clients get the legacy `plan` update.
+ */
+export function structuredPlanUpdate(entries: PlanEntry[], capabilities: ClientCapabilities): UpdateSessionEvent {
+    if (capabilities.planUpdates) {
+        return {sessionUpdate: "plan_update", plan: {type: "items", planId: STRUCTURED_PLAN_ID, entries}};
+    }
+    return {sessionUpdate: "plan", entries};
+}
 
 /**
  * Streams the Markdown plan that Codex writes in plan mode.

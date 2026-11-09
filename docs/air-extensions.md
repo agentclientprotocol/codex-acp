@@ -357,7 +357,7 @@ The other clients get the same fields as before the AIR extensions.
 | `webSearch` | `kind: search`, a title that names the query or the page, `rawInput = {query, action}`. | A live report has `rawInput = {type, id, query, action}`. |
 | `imageGeneration` | `kind: other`, `title: "Image generation"`. The revised prompt and the image go to `content`. A saved image without data goes to `content` as a resource link. | The start has `rawInput = {id}`. The end has `rawOutput = {status, revisedPrompt, result, savedPath}`, and no resource link. |
 | `plan` item (the Markdown plan of plan mode) | With `planContentDelta`, appended text in `plan_update`. | `plan_update` snapshots when the client shows plans. Otherwise the whole plan in one `agent_message_chunk` when the plan item completes. |
-| Turn plan (`turn/plan/updated`) | standard `plan` with entries | The same. |
+| Turn plan (`turn/plan/updated`) | `plan_update` with an `items` plan when the client shows plans, otherwise standard `plan` with entries. See [Plans](plans.md). | The same. |
 | `contextCompaction` | `compaction_update` when the client declares `session.compaction`. Otherwise a synthetic tool call with `_meta.jetbrains.air.contextCompaction`. | The same, without `_meta`. |
 | `agentMessage` | `agent_message_chunk` with `_meta.jetbrains.air.phase` when Codex reports a phase. | No `_meta`. |
 | Command, file change, or sandbox permission request | See [Tool call of the request](#tool-call-of-the-request). | `kind`, `status: pending`, and a title, also for a started tool call. Command approvals keep the started title or show the command; other requests use a generic title or a network title. No `_meta`. |

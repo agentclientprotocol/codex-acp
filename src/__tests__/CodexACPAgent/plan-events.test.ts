@@ -152,7 +152,10 @@ describe("CodexEventHandler - plan events", () => {
         );
     });
 
-    it("keeps turn plan updates as ACP checklist updates", async () => {
+    it.each([
+        {name: "a legacy plan update without the plan capability", capabilities: undefined, snapshot: "plan-checklist-update.json"},
+        {name: "an items plan_update with the plan capability", capabilities: {plan: {}}, snapshot: "plan-checklist-items-update.json"},
+    ])("sends turn plan updates as $name", async ({capabilities, snapshot}) => {
         const notifications: ServerNotification[] = [
             {
                 method: "turn/plan/updated",
@@ -174,11 +177,12 @@ describe("CodexEventHandler - plan events", () => {
             },
         ];
 
-        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, notifications);
+        await setupPromptAndSendNotifications(mockFixture, sessionId, {
+            ...sessionState,
+            clientCapabilities: ClientCapabilities.from(capabilities),
+        }, notifications);
 
-        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(
-            "data/plan-checklist-update.json",
-        );
+        await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(`data/${snapshot}`);
     });
 
     describe("plan update coalescing", () => {
