@@ -33,6 +33,7 @@
         "text_elements": []
       }
     ],
+    "cwd": "cwd",
     "approvalPolicy": "on-request",
     "approvalsReviewer": "approvalsReviewer",
     "sandboxPolicy": {
