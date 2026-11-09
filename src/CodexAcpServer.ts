@@ -107,6 +107,7 @@ import type {TokenCount} from "./TokenCount";
 import {PromptTokenUsage, toPromptUsage, ZERO_TOKEN_COUNT} from "./TokenCount";
 import {CodexCommands, type PromptKind} from "./CodexCommands";
 import {SteeringQueue} from "./SteeringQueue";
+import type {TurnStartReservation} from "./TurnStartReservation";
 import type {QuotaMeta} from "./QuotaMeta";
 import {logger} from "./Logger";
 import {settledWithin} from "./StdUtils";
@@ -436,24 +437,6 @@ function isAuthRequiredError(error: unknown): boolean {
 interface PendingTurnStart {
     promise: Promise<string | null>;
     resolve: (turnId: string | null) => void;
-}
-
-/**
- * One session's place in the shared per-session turn-start FIFO (see
- * `CodexAcpServer.acquireTurnStartReservation`). `wait` resolves once every earlier reservation
- * on the session has released; `release` must be called exactly once, by whoever ends up owning
- * the turn this reservation was taken for, so the next queued starter can proceed.
- *
- * `needsWait` is false when there was nothing to wait for (a fresh session, or the previous
- * holder already released). Callers should skip `await wait` in that case: awaiting an
- * already-resolved promise still costs a microtask tick, which is enough to reorder synchronous
- * setup (event-subscription registration, etc.) against a caller that fires a prompt without
- * awaiting it and immediately does other synchronous work.
- */
-interface TurnStartReservation {
-    wait: Promise<void>;
-    needsWait: boolean;
-    release: () => void;
 }
 
 interface ActivePrompt {
@@ -3060,9 +3043,11 @@ export class CodexAcpServer {
      */
     async executeOrQueueSteeringRequest(params: SessionSteerRequest, insertion?: V2SteeringPrompt): Promise<SessionSteeringResponse> {
         this.assertInstructionsReady(params.sessionId);
+        const reservation = insertion === undefined && params._meta?.steering?.idleBehavior !== "promptRequired"
+            ? this.acquireTurnStartReservation(params.sessionId) : undefined;
         const queue = this.getSteeringQueue(params.sessionId);
         try {
-            return await queue.enqueue(params, insertion);
+            return await queue.enqueue(params, insertion, reservation);
         } catch (error) {
             if (error instanceof RequestError) throw error;
             if (insertion !== undefined) {
@@ -3088,7 +3073,7 @@ export class CodexAcpServer {
     private getSteeringQueue(sessionId: string): SteeringQueue {
         let queue = this.steeringQueues.get(sessionId);
         if (!queue) {
-            queue = new SteeringQueue((params, insertion) => this.performSteeringRequest(params, insertion));
+            queue = new SteeringQueue((params, insertion, reservation) => this.performSteeringRequest(params, insertion, reservation));
             this.steeringQueues.set(sessionId, queue);
         }
         return queue;
@@ -3104,20 +3089,35 @@ export class CodexAcpServer {
      *     "promptRequired" when the host requested an owned idle fallback, or
      *     the outcome of starting a legacy fallback turn.
      */
-    private async performSteeringRequest(params: SessionSteerRequest, insertion?: V2SteeringPrompt): Promise<SessionSteeringResponse> {
+    private async performSteeringRequest(
+        params: SessionSteerRequest,
+        insertion?: V2SteeringPrompt,
+        reservation?: TurnStartReservation,
+    ): Promise<SessionSteeringResponse> {
+        const clientUserMessageId = insertion?.messageId ?? randomUUID();
+        try {
+            const result = await this.tryInjectSteeringRequest(params, clientUserMessageId, insertion);
+            if (result !== null) return result;
+            const startReservation = reservation;
+            reservation = undefined;
+            return await this.startNewTurnFromSteering(params, clientUserMessageId, startReservation);
+        } finally {
+            const unusedReservation = reservation;
+            if (unusedReservation !== undefined) {
+                void unusedReservation.wait.then(() => unusedReservation.release());
+            }
+        }
+    }
+
+    private async tryInjectSteeringRequest(
+        params: SessionSteerRequest,
+        clientUserMessageId: string,
+        insertion?: V2SteeringPrompt,
+    ): Promise<SessionSteeringResponse | null> {
         assertPromptContentSupported(params);
-        logger.log("Steering session requested", {
-            sessionId: params.sessionId,
-            prompt: params.prompt,
-        });
+        logger.log("Steering session requested", {sessionId: params.sessionId, prompt: params.prompt});
         const sessionState = this.getSessionState(params.sessionId);
         this.assertSteerInputSupported(params, sessionState);
-
-        // Minted fresh for every steer (both protocol versions), passed to Codex as
-        // `TurnSteerParams.clientUserMessageId`/`TurnStartParams.clientUserMessageId`. It is a
-        // Codex-side param only; on v2 it doubles as the `messageId` of the live `user_message`
-        // shown once the steer lands (the steering response itself carries no id).
-        const clientUserMessageId = insertion?.messageId ?? randomUUID();
         const activePrompt = this.activePrompts.get(params.sessionId);
         const mustWait = activePrompt !== undefined && (activePrompt.cancelRequested
             || activePrompt.inputKind.kind === "codexTurnCommand" && activePrompt.inputKind.name === "compact");
@@ -3130,10 +3130,8 @@ export class CodexAcpServer {
                 return {outcome: "injected"};
             }
         }
-        if (params._meta?.steering?.idleBehavior === "promptRequired") {
-            return {outcome: "promptRequired", reason: "noRunningTurn"};
-        }
-        return await this.startNewTurnFromSteering(params, clientUserMessageId);
+        return params._meta?.steering?.idleBehavior === "promptRequired"
+            ? {outcome: "promptRequired", reason: "noRunningTurn"} : null;
     }
 
     /**
@@ -3223,13 +3221,14 @@ export class CodexAcpServer {
     private async startNewTurnFromSteering(
         params: SessionSteerRequest,
         clientUserMessageId: string,
+        reservation?: TurnStartReservation,
     ): Promise<SessionSteeringResponse> {
         await this.startNewTurnFromExternalPrompt(params, "Steering", undefined, {
             clientUserMessageId,
             onInserted: async () => {
                 await this.emitLiveSteerUserMessage(params.sessionId, clientUserMessageId, params.prompt);
             },
-        });
+        }, reservation);
         return {outcome: "startedNewTurn"};
     }
 
@@ -3238,13 +3237,14 @@ export class CodexAcpServer {
         source: string,
         canStart: () => Promise<boolean> = async () => true,
         insertion?: UserMessageInsertion,
+        turnReservation?: TurnStartReservation,
     ): Promise<boolean> {
         // Takes this session's place in the shared turn-start FIFO before anything else runs, so
         // no other starter can begin between this check and the turn actually starting. This
         // hands the reservation to `prompt()` below rather than letting it self-acquire one, so
         // it releases only once `prompt()` truly finishes (not when this function's own steer
         // promise resolves early, on the "a turn was started" success path).
-        const reservation = this.acquireTurnStartReservation(params.sessionId);
+        const reservation = turnReservation ?? this.acquireTurnStartReservation(params.sessionId);
         if (reservation.needsWait) {
             await reservation.wait;
         }

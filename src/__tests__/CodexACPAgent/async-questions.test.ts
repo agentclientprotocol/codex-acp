@@ -11,6 +11,7 @@ import {
     stateUpdates,
     sessionId,
     turnCompleted,
+    turnFinished,
     turnStarted,
     userMessageItem,
 } from './v2-prompt-harness';
@@ -138,6 +139,36 @@ describe.each([1, 2] as const)('async Codex questions over ACP v%i', (protocolVe
         await expect(dump({input: params["input"], states: stateUpdates(client.transcript)}))
             .toMatchFileSnapshot(`data/async-questions-v${protocolVersion}-continued.json`);
     });
+
+    if (protocolVersion === 2) {
+        it('delivers an async answer queued between cancelled follow-ups', async () => {
+            let answer!: (response: acpV2.CreateElicitationResponse) => void;
+            const {client, steers} = await connect(() => new Promise(resolve => { answer = resolve; }));
+            await askDuringTurn(client);
+            await vi.waitFor(() => expect(elicitationRequests(client)).toHaveLength(1));
+            const pending = client.sendPrompt([{type: "text", text: "Pending"}]);
+            await vi.waitFor(() => expect(steers).toHaveLength(1));
+            const enqueue = vi.spyOn(client.agent, "executeOrQueueSteeringRequest");
+            answer({action: "accept", content: {question_1: "Async answer"}});
+            await vi.waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+            const later = client.sendPrompt([{type: "text", text: "Later"}]);
+            await vi.waitFor(() => expect(enqueue).toHaveBeenCalledTimes(2));
+            await client.cancel();
+            await vi.waitFor(() => expect(client.turnInterruptCalls()).toHaveLength(1));
+            client.emit(turnFinished("interrupted"));
+            await expect(pending).rejects.toMatchObject({code: -32800});
+            await expect(later).rejects.toMatchObject({code: -32800});
+            await client.promptRunFinished();
+            await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(2));
+            const params = client.turnStartParams[1]!;
+            expect(params["input"]).toEqual([expect.objectContaining({text: expect.stringContaining("Async answer")})]);
+            client.emit(turnStarted("turn-2"));
+            client.emit(itemCompleted(userMessageItem(params["clientUserMessageId"] as string), "turn-2"));
+            client.emit(turnCompleted("turn-2"));
+            await client.promptRunFinished(1);
+            expect(notices(client)).toEqual([]);
+        });
+    }
 
     it('cancels an open form when its session closes and drops a stale answer', async () => {
         let cancelled = false;

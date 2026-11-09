@@ -173,6 +173,42 @@ describe('native v2 prompt steering', () => {
         expect(stateUpdates(client.transcript)).toEqual([{state: 'running'}, {state: 'idle', stopReason: 'cancelled'}]);
     });
 
+    it('keeps fallback steering ahead of later prompts after cancellation', async () => {
+        await connect();
+        const pending = client.sendPrompt([{type: 'text', text: 'Pending'}]);
+        await vi.waitFor(() => expect(steers).toHaveLength(1));
+        const enqueue = vi.spyOn(client.agent, 'executeOrQueueSteeringRequest');
+        const steering = client.request(SESSION_STEERING_METHOD, {
+            sessionId, prompt: [{type: 'text', text: 'Fallback'}],
+        });
+        steering.catch(() => {});
+        await vi.waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+        const later = client.sendPrompt([{type: 'text', text: 'Later'}]);
+        await vi.waitFor(() => expect(enqueue).toHaveBeenCalledTimes(2));
+        await client.cancel();
+        await vi.waitFor(() => expect(client.turnInterruptCalls()).toHaveLength(1));
+        client.emit(turnFinished('interrupted'));
+        await expect(pending).rejects.toMatchObject({code: -32800});
+        await expect(later).rejects.toMatchObject({code: -32800});
+        await client.promptRunFinished();
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(2));
+        client.emit(turnStarted('turn-2'));
+        client.emit(itemCompleted(userMessageItem(
+            client.turnStartParams[1]!['clientUserMessageId'] as string, 'Fallback',
+        ), 'turn-2'));
+        await expect(steering).resolves.toEqual({outcome: 'startedNewTurn'});
+        client.emit(turnCompleted('turn-2'));
+        await client.promptRunFinished(1);
+        const next = client.sendPrompt([{type: 'text', text: 'After cancellation'}]);
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(3));
+        const messageId = client.turnStartParams[2]!['clientUserMessageId'] as string;
+        client.emit(turnStarted('turn-3'));
+        client.emit(itemCompleted(userMessageItem(messageId, 'After cancellation'), 'turn-3'));
+        await expect(next).resolves.toEqual({messageId});
+        client.emit(turnCompleted('turn-3'));
+        await client.promptRunFinished(2);
+    });
+
     it('reports a rejected steer without stopping the active turn', async () => {
         await connect();
         client.setCodexResponse('turn/steer', async () => {

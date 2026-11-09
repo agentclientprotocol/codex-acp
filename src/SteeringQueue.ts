@@ -1,9 +1,11 @@
 import type {V2SteeringPrompt} from "./AcpV2Prompt";
 import type {SessionSteerRequest, SessionSteeringResponse} from "./AcpExtensions";
+import type {TurnStartReservation} from "./TurnStartReservation";
 
 interface QueuedSteering {
     params: SessionSteerRequest;
     insertion: V2SteeringPrompt | undefined;
+    reservation: TurnStartReservation | undefined;
     resolve: (response: SessionSteeringResponse) => void;
     reject: (error: unknown) => void;
 }
@@ -18,12 +20,12 @@ export class SteeringQueue {
     private processing = false;
 
     constructor(
-        private readonly handle: (params: SessionSteerRequest, insertion?: V2SteeringPrompt) => Promise<SessionSteeringResponse>,
+        private readonly handle: (params: SessionSteerRequest, insertion?: V2SteeringPrompt, reservation?: TurnStartReservation) => Promise<SessionSteeringResponse>,
     ) {}
 
-    enqueue(params: SessionSteerRequest, insertion?: V2SteeringPrompt): Promise<SessionSteeringResponse> {
+    enqueue(params: SessionSteerRequest, insertion?: V2SteeringPrompt, reservation?: TurnStartReservation): Promise<SessionSteeringResponse> {
         return new Promise<SessionSteeringResponse>((resolve, reject) => {
-            this.pending.push({params, insertion, resolve, reject});
+            this.pending.push({params, insertion, reservation, resolve, reject});
             this.startConsumer();
         });
     }
@@ -46,7 +48,7 @@ export class SteeringQueue {
             while (this.pending.length > 0) {
                 const next = this.pending.shift()!;
                 try {
-                    next.resolve(await this.handle(next.params, next.insertion));
+                    next.resolve(await this.handle(next.params, next.insertion, next.reservation));
                 } catch (error) {
                     next.reject(error); // one failed steer must not stall the rest
                 }
