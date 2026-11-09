@@ -2,7 +2,7 @@
   {
     "sessionId": "session-1",
     "update": {
-      "sessionUpdate": "subagent_spawned",
+      "sessionUpdate": "_subagent_update",
       "subagentSessionId": "child-1",
       "name": "Researcher",
       "task": "Look into flaky tests",
@@ -17,7 +17,7 @@
   {
     "sessionId": "session-1",
     "update": {
-      "sessionUpdate": "subagent_state_update",
+      "sessionUpdate": "_subagent_update",
       "subagentSessionId": "child-1",
       "state": "completed"
     }
@@ -25,7 +25,7 @@
   {
     "sessionId": "session-1",
     "update": {
-      "sessionUpdate": "async_task_spawned",
+      "sessionUpdate": "_async_task_spawned",
       "asyncTaskId": "task-1",
       "name": "npm test",
       "taskType": "shell",
@@ -37,7 +37,7 @@
   {
     "sessionId": "session-1",
     "update": {
-      "sessionUpdate": "async_task_progress",
+      "sessionUpdate": "_async_task_progress",
       "asyncTaskId": "task-1",
       "summary": "Tests are running",
       "toolCallId": "call-1"
@@ -46,7 +46,7 @@
   {
     "sessionId": "session-1",
     "update": {
-      "sessionUpdate": "async_task_state_update",
+      "sessionUpdate": "_async_task_state_update",
       "asyncTaskId": "task-1",
       "state": "completed",
       "toolCallId": "call-1"

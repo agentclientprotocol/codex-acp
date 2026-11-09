@@ -15,9 +15,11 @@ describe("v2 elicitation companions", () => {
         {jetbrains: {air: {customAnswer: true}}},
         {jetbrains: {air: {customAnswer: {label: "Note"}}}},
         {_askUserQuestionCustomAnswer: true},
-    ])("moves companion IDs to request metadata and keeps other namespaces: %j", meta => {
+    ])("copies companion IDs to request metadata and keeps other namespaces: %j", meta => {
         const request = form(meta);
-        expect(toV2CreateElicitationRequest(request)._meta).toEqual({
+        const converted = toV2CreateElicitationRequest(request);
+        expect(converted).toMatchObject({requestedSchema: {properties: {note: {_meta: meta}}}});
+        expect(converted._meta).toEqual({
             codex: {delivery: "async"}, jetbrains: {air: {version: 1, customAnswerFields: ["note"]}},
         });
         expect(request._meta).toEqual({codex: {delivery: "async"}});

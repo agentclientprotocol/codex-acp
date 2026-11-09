@@ -128,10 +128,11 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
         // AIR negotiates the same private lifecycle contract on both protocol versions.
         case "subagent_spawned":
         case "subagent_state_update":
+            return {...update, sessionUpdate: "_subagent_update"};
         case "async_task_spawned":
         case "async_task_progress":
         case "async_task_state_update":
-            return update as unknown as acpV2.SessionUpdate;
+            return {...update, sessionUpdate: `_${update.sessionUpdate}` as const};
     }
 }
 
