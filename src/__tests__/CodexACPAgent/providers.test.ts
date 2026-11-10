@@ -355,6 +355,47 @@ describe("Configurable LLM providers (providers/*)", () => {
         expect(replacementRewind).toHaveBeenCalledOnce();
     });
 
+    it("restarts the app-server for a provider update only after a pending rewind settles", async () => {
+        const replacement = createCodexMockTestFixture().getCodexAcpClient();
+        vi.spyOn(replacement, "initialize").mockResolvedValue();
+        vi.spyOn(replacement, "resumeSession").mockResolvedValue({models: []} as never);
+        const restart = vi.fn().mockResolvedValue(replacement);
+        const fixture = createCodexMockTestFixture(restart);
+        const revert = deferred<{rewound: boolean}>();
+        const revertStarted = deferred<void>();
+        vi.spyOn(fixture.getCodexAcpClient(), "rewindSession").mockImplementation(async () => {
+            revertStarted.resolve();
+            return await revert.promise;
+        });
+        const agent = fixture.getCodexAcpAgent();
+        await agent.initialize({protocolVersion: acp.PROTOCOL_VERSION});
+        const sessions = (agent as unknown as {sessions: Map<string, ReturnType<typeof createTestSessionState>>}).sessions;
+        sessions.set("thread-1", createTestSessionState({sessionId: "thread-1", cwd: "/workspace"}));
+
+        const rewind = agent.extMethod(SESSION_REWIND_METHOD, {
+            sessionId: "thread-1",
+            beforeMessage: {
+                messageId: "user-1",
+                messageFingerprint: `sha256:${"0".repeat(64)}`,
+                messageOccurrence: 1,
+            },
+        });
+        await revertStarted.promise;
+        const providerUpdate = agent.setProvider({
+            providerId: OPENAI_PROVIDER_ID,
+            apiType: "openai",
+            baseUrl: "https://gateway.example/v1",
+        });
+
+        await new Promise(resolve => setTimeout(resolve, 20));
+        expect(restart).not.toHaveBeenCalled();
+
+        revert.resolve({rewound: true});
+        await expect(rewind).resolves.toEqual({rewound: true});
+        await expect(providerUpdate).resolves.toEqual({});
+        expect(restart).toHaveBeenCalledOnce();
+    });
+
     it("leaves the conversation as it is when a turn is running", async () => {
         const fixture = createCodexMockTestFixture();
         const rewind = vi.spyOn(fixture.getCodexAcpClient(), "rewindSession");

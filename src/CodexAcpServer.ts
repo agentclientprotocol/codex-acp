@@ -535,6 +535,8 @@ export class CodexAcpServer {
     private readonly mcpSessionStartup: McpSessionStartup;
     private readonly pendingTurnStarts: Map<string, PendingTurnStart>;
     private readonly activePrompts: Map<string, ActivePrompt>;
+    /** Rewinds that passed the provider update; a provider restart waits for them, as for active prompts. */
+    private readonly activeRewinds = new Set<Promise<unknown>>();
     /** Tail of the per-session turn-start FIFO; see `acquireTurnStartReservation`. */
     private readonly turnStartQueueTail: Map<string, {promise: Promise<void>; settled: boolean}>;
     private readonly steeringQueues: Map<string, SteeringQueue>;
@@ -1157,19 +1159,39 @@ export class CodexAcpServer {
         // instead of starting a turn that `thread/revert` would cancel.
         const reservation = this.acquireTurnStartReservation(sessionId);
         try {
-            if (this.providerUpdate !== null) await this.waitForProviderUpdate();
-            const appServer = this.ensureAppServer();
-            if (appServer) await appServer;
-            const sessionState = this.sessions.get(sessionId);
-            if (!sessionState) throw unknownSession();
-            // A turn that Codex started itself, such as a goal continuation, also writes the history.
-            if (this.isCodexTurnRunning(sessionId)) return {rewound: false};
-            const sessionReady = this.ensureSessionReady(sessionState);
-            if (sessionReady) await sessionReady;
-            return await this.runWithProcessCheck(() => this.codexAcpClient.rewindSession(params));
+            // Every provider update queued so far restarts the app-server before the rewind runs.
+            for (let pending = this.providerUpdate; pending !== null; pending = this.providerUpdate) {
+                await this.waitForProviderUpdate();
+                if (this.providerUpdate === pending) break;
+            }
+            // Registered with no provider update pending, so a later update waits for the revert
+            // and its response instead of restarting the app-server underneath it.
+            const rewind = this.rewindOnCurrentAppServer(params, unknownSession);
+            this.activeRewinds.add(rewind);
+            try {
+                return await rewind;
+            } finally {
+                this.activeRewinds.delete(rewind);
+            }
         } finally {
             reservation.release();
         }
+    }
+
+    private async rewindOnCurrentAppServer(
+        params: SessionRewindRequest,
+        unknownSession: () => RequestError,
+    ): Promise<SessionRewindResponse> {
+        const sessionId = params.sessionId;
+        const appServer = this.ensureAppServer();
+        if (appServer) await appServer;
+        const sessionState = this.sessions.get(sessionId);
+        if (!sessionState) throw unknownSession();
+        // A turn that Codex started itself, such as a goal continuation, also writes the history.
+        if (this.isCodexTurnRunning(sessionId)) return {rewound: false};
+        const sessionReady = this.ensureSessionReady(sessionState);
+        if (sessionReady) await sessionReady;
+        return await this.runWithProcessCheck(() => this.codexAcpClient.rewindSession(params));
     }
 
     private async withSystemPromptUpdate<T>(
@@ -2393,6 +2415,11 @@ export class CodexAcpServer {
             if (activePrompts.length > 0) {
                 logger.log("Waiting for active prompts before provider restart", {count: activePrompts.length});
                 await Promise.all(activePrompts);
+            }
+            const activeRewinds = [...this.activeRewinds];
+            if (activeRewinds.length > 0) {
+                logger.log("Waiting for rewinds before provider restart", {count: activeRewinds.length});
+                await Promise.allSettled(activeRewinds);
             }
 
             logger.log("Restarting Codex app-server for provider update", {sessionCount: this.sessions.size});
