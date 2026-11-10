@@ -140,7 +140,10 @@ export class CommandReporter {
             standard: {
                 kind: "execute",
                 status: "pending",
-                title: network ? `${network.protocol} network access to ${network.host}` : permissionTitle(actions),
+                // Zed uses the title as the command label, including when merging an approval into a started call.
+                title: network
+                    ? `${network.protocol} network access to ${network.host}`
+                    : started ? startedCommandTitle(params, actions) : input.command ?? permissionTitle(actions),
                 locations: [...new Set([
                     ...actionPaths(actions),
                     ...permissionProfilePaths(params.additionalPermissions),

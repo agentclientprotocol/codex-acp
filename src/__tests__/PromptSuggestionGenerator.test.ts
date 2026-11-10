@@ -1,21 +1,22 @@
 import {describe, expect, it, vi} from "vitest";
 import {PromptSuggestionGenerator, promptSuggestionsEnabled} from "../PromptSuggestionGenerator";
-import {TITLE_MODEL} from "../TitleGenerator";
 import type {CodexAppServerClient} from "../CodexAppServerClient";
 import {deferred} from "./acp-test-utils";
 
-type TurnResult = {turn: {items: {type: string; text: string}[]}};
+type SampleResult = {sourceTurnId: string; responseId: string; text: string | null; inputTokens: null; cachedInputTokens: null; outputTokens: null};
 
-function suggestionTurn(text: string): TurnResult {
-    return {turn: {items: [{type: "agentMessage", text: JSON.stringify({suggestion: text})}]}};
+function sample(text: string | null): SampleResult {
+    return {sourceTurnId: "t", responseId: "r", text, inputTokens: null, cachedInputTokens: null, outputTokens: null};
 }
 
-function createGenerator(runTurn: ReturnType<typeof vi.fn>) {
+function suggestionSample(suggestion: string | null): SampleResult {
+    return sample(JSON.stringify({suggestion}));
+}
+
+function createGenerator(threadSample: ReturnType<typeof vi.fn>) {
     const publish = vi.fn().mockResolvedValue(undefined);
-    const threadStart = vi.fn().mockResolvedValue({thread: {id: "ephemeral"}});
-    const threadUnsubscribe = vi.fn().mockResolvedValue({status: "unsubscribed"});
-    const client = {threadStart, runTurn, threadUnsubscribe} as unknown as CodexAppServerClient;
-    return {generator: new PromptSuggestionGenerator(client, "/test/cwd", publish), publish, threadStart, runTurn, threadUnsubscribe};
+    const client = {threadSample} as unknown as CodexAppServerClient;
+    return {generator: new PromptSuggestionGenerator(client, publish), publish, threadSample};
 }
 
 async function flush() {
@@ -23,97 +24,46 @@ async function flush() {
 }
 
 describe("PromptSuggestionGenerator", () => {
-    /** The parsed suggestion is trimmed and published; the model call runs on an ephemeral thread. */
+    /** The parsed suggestion is trimmed and published; the sample targets the finished turn of the session thread. */
     it("publishes the parsed suggestion", async () => {
-        const {generator, publish, threadStart, runTurn} = createGenerator(vi.fn().mockResolvedValue(suggestionTurn("  Run the tests  ")));
+        const {generator, publish, threadSample} = createGenerator(vi.fn().mockResolvedValue(suggestionSample("  Run the tests  ")));
 
-        generator.onTurnCompleted("fix the bug", "Fixed it.");
+        generator.onTurnCompleted("thread-1", "turn-1");
         await vi.waitFor(() => expect(publish).toHaveBeenCalledWith("Run the tests"));
 
-        expect(threadStart).toHaveBeenCalledWith({
-            cwd: "/test/cwd",
-            ephemeral: true,
-            sandbox: "read-only",
-            approvalPolicy: "never",
-            baseInstructions: expect.stringContaining("Never call tools"),
-            config: {project_doc_max_bytes: 0},
-        });
-        expect(runTurn.mock.calls[0]![0]).toMatchObject({threadId: "ephemeral", model: TITLE_MODEL, effort: "low"});
-        expect(runTurn.mock.calls[0]![0].input[0].text).toContain("fix the bug");
-        expect(runTurn.mock.calls[0]![0].input[0].text).toContain("Fixed it.");
+        const params = threadSample.mock.calls[0]![0] as {threadId: string; expectedTurnId: string; prompt: string; effort: string};
+        expect({...params, prompt: undefined}).toEqual({threadId: "thread-1", expectedTurnId: "turn-1", prompt: undefined, effort: "high"});
+        await expect(params.prompt).toMatchFileSnapshot("data/prompt-suggestion-sample-prompt.txt");
     });
 
-    /** The ephemeral thread is released after a successful turn, and a failing unsubscribe keeps the suggestion. */
-    it("unsubscribes the thread after success", async () => {
-        const {generator, publish, threadUnsubscribe} = createGenerator(vi.fn().mockResolvedValue(suggestionTurn("Go")));
-        threadUnsubscribe.mockRejectedValue(new Error("gone"));
+    /** Blank, missing, malformed or non-string output publishes nothing when nothing is held. */
+    it.each([
+        ["blank suggestion", suggestionSample("   ")],
+        ["null suggestion", suggestionSample(null)],
+        ["null text", sample(null)],
+        ["blank text", sample("  ")],
+        ["malformed JSON", sample("not json")],
+        ["non-string suggestion", sample(JSON.stringify({suggestion: 5}))],
+    ])("does not publish for %s when nothing was published", async (_name, result) => {
+        const {generator, publish, threadSample} = createGenerator(vi.fn().mockResolvedValue(result));
 
-        generator.onTurnCompleted("a", "b");
-        await vi.waitFor(() => expect(threadUnsubscribe).toHaveBeenCalled());
-
-        expect(threadUnsubscribe).toHaveBeenCalledWith({threadId: "ephemeral"});
-        expect(publish).toHaveBeenCalledWith("Go");
-    });
-
-    /** The ephemeral thread is released when the turn fails, and a failing unsubscribe does not surface. */
-    it("unsubscribes the thread after a runTurn failure", async () => {
-        const {generator, publish, threadUnsubscribe} = createGenerator(vi.fn().mockRejectedValue(new Error("boom")));
-        threadUnsubscribe.mockRejectedValue(new Error("gone"));
-
-        generator.onTurnCompleted("a", "b");
-        await vi.waitFor(() => expect(threadUnsubscribe).toHaveBeenCalledWith({threadId: "ephemeral"}));
+        generator.onTurnCompleted("thread", "turn");
+        await vi.waitFor(() => expect(threadSample).toHaveBeenCalled());
         await flush();
 
         expect(publish).not.toHaveBeenCalled();
     });
 
-    /** A stale generation is dropped, and its thread is still released. */
-    it("unsubscribes the thread when the generation is stale", async () => {
-        const turn = deferred<TurnResult>();
-        const {generator, publish, runTurn, threadUnsubscribe} = createGenerator(vi.fn().mockReturnValue(turn.promise));
+    /** A null suggestion after a published one clears it. */
+    it("clears the held suggestion when the next prediction is null", async () => {
+        const threadSample = vi.fn()
+            .mockResolvedValueOnce(suggestionSample("Run the tests"))
+            .mockResolvedValueOnce(suggestionSample(null));
+        const {generator, publish} = createGenerator(threadSample);
 
-        generator.onTurnCompleted("a", "b");
-        await vi.waitFor(() => expect(runTurn).toHaveBeenCalled());
-        generator.invalidate();
-        turn.resolve(suggestionTurn("Too late"));
-        await vi.waitFor(() => expect(threadUnsubscribe).toHaveBeenCalledWith({threadId: "ephemeral"}));
-
-        expect(publish).not.toHaveBeenCalled();
-    });
-
-    /** Each side of the exchange is cut to 4000 characters before it reaches the model. */
-    it("truncates long inputs", async () => {
-        const {generator, publish, runTurn} = createGenerator(vi.fn().mockResolvedValue(suggestionTurn("Go on")));
-
-        generator.onTurnCompleted("u".repeat(10_000), "a".repeat(10_000));
-        await vi.waitFor(() => expect(publish).toHaveBeenCalled());
-
-        const text: string = runTurn.mock.calls[0]![0].input[0].text;
-        expect(text.match(/u+/g)!.some(run => run.length === 4_000)).toBe(true);
-        expect(text.match(/a{4000,}/g)![0]).toHaveLength(4_000);
-    });
-
-    /** A blank suggestion publishes nothing when nothing is held. */
-    it("does not publish a blank suggestion when nothing was published", async () => {
-        const {generator, publish, runTurn} = createGenerator(vi.fn().mockResolvedValue(suggestionTurn("   ")));
-
-        generator.onTurnCompleted("hello", "hi");
-        await vi.waitFor(() => expect(runTurn).toHaveBeenCalled());
-        await flush();
-
-        expect(publish).not.toHaveBeenCalled();
-    });
-
-    /** A blank suggestion after a published one clears it. */
-    it("clears the held suggestion when the next prediction is blank", async () => {
-        const runTurn = vi.fn()
-            .mockResolvedValueOnce(suggestionTurn("Run the tests"))
-            .mockResolvedValueOnce(suggestionTurn(""));
-        const {generator, publish} = createGenerator(runTurn);
-
-        generator.onTurnCompleted("hello", "hi");
+        generator.onTurnCompleted("thread", "turn-1");
         await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
-        generator.onTurnCompleted("again", "ok");
+        generator.onTurnCompleted("thread", "turn-2");
         await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(2));
 
         expect(publish.mock.calls).toEqual([["Run the tests"], [null]]);
@@ -121,12 +71,12 @@ describe("PromptSuggestionGenerator", () => {
 
     /** The same suggestion twice in a row is published once. */
     it("does not republish an identical suggestion", async () => {
-        const {generator, publish, runTurn} = createGenerator(vi.fn().mockResolvedValue(suggestionTurn("Run the tests")));
+        const {generator, publish, threadSample} = createGenerator(vi.fn().mockResolvedValue(suggestionSample("Run the tests")));
 
-        generator.onTurnCompleted("a", "b");
+        generator.onTurnCompleted("thread", "turn-1");
         await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
-        generator.onTurnCompleted("c", "d");
-        await vi.waitFor(() => expect(runTurn).toHaveBeenCalledTimes(2));
+        generator.onTurnCompleted("thread", "turn-2");
+        await vi.waitFor(() => expect(threadSample).toHaveBeenCalledTimes(2));
         await flush();
 
         expect(publish).toHaveBeenCalledTimes(1);
@@ -134,13 +84,13 @@ describe("PromptSuggestionGenerator", () => {
 
     /** A result that finishes after invalidate() is dropped. */
     it("drops a stale result after invalidate", async () => {
-        const turn = deferred<TurnResult>();
-        const {generator, publish, runTurn} = createGenerator(vi.fn().mockReturnValue(turn.promise));
+        const result = deferred<SampleResult>();
+        const {generator, publish, threadSample} = createGenerator(vi.fn().mockReturnValue(result.promise));
 
-        generator.onTurnCompleted("hello", "hi");
-        await vi.waitFor(() => expect(runTurn).toHaveBeenCalled());
+        generator.onTurnCompleted("thread", "turn");
+        await vi.waitFor(() => expect(threadSample).toHaveBeenCalled());
         generator.invalidate();
-        turn.resolve(suggestionTurn("Too late"));
+        result.resolve(suggestionSample("Too late"));
         await flush();
 
         expect(publish).not.toHaveBeenCalled();
@@ -148,16 +98,16 @@ describe("PromptSuggestionGenerator", () => {
 
     /** The result of an older turn loses to the one of a newer turn. */
     it("drops the result of an older turn when a newer one started", async () => {
-        const first = deferred<TurnResult>();
-        const second = deferred<TurnResult>();
-        const {generator, publish, runTurn} = createGenerator(vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise));
+        const first = deferred<SampleResult>();
+        const second = deferred<SampleResult>();
+        const {generator, publish, threadSample} = createGenerator(vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise));
 
-        generator.onTurnCompleted("one", "1");
-        await vi.waitFor(() => expect(runTurn).toHaveBeenCalledTimes(1));
-        generator.onTurnCompleted("two", "2");
-        await vi.waitFor(() => expect(runTurn).toHaveBeenCalledTimes(2));
-        second.resolve(suggestionTurn("New"));
-        first.resolve(suggestionTurn("Old"));
+        generator.onTurnCompleted("thread", "turn-1");
+        await vi.waitFor(() => expect(threadSample).toHaveBeenCalledTimes(1));
+        generator.onTurnCompleted("thread", "turn-2");
+        await vi.waitFor(() => expect(threadSample).toHaveBeenCalledTimes(2));
+        second.resolve(suggestionSample("New"));
+        first.resolve(suggestionSample("Old"));
         await flush();
 
         expect(publish.mock.calls).toEqual([["New"]]);
@@ -165,65 +115,50 @@ describe("PromptSuggestionGenerator", () => {
 
     /** clear() sends the clear update only when something is held, and drops a result in flight. */
     it("clears a held suggestion once and drops a result in flight", async () => {
-        const turn = deferred<TurnResult>();
-        const runTurn = vi.fn().mockResolvedValueOnce(suggestionTurn("Run the tests")).mockReturnValueOnce(turn.promise);
-        const {generator, publish} = createGenerator(runTurn);
+        const result = deferred<SampleResult>();
+        const threadSample = vi.fn().mockResolvedValueOnce(suggestionSample("Run the tests")).mockReturnValueOnce(result.promise);
+        const {generator, publish} = createGenerator(threadSample);
 
         await generator.clear();
         expect(publish).not.toHaveBeenCalled();
 
-        generator.onTurnCompleted("a", "b");
+        generator.onTurnCompleted("thread", "turn-1");
         await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
-        generator.onTurnCompleted("c", "d");
-        await vi.waitFor(() => expect(runTurn).toHaveBeenCalledTimes(2));
+        generator.onTurnCompleted("thread", "turn-2");
+        await vi.waitFor(() => expect(threadSample).toHaveBeenCalledTimes(2));
         await generator.clear();
         await generator.clear();
-        turn.resolve(suggestionTurn("Late"));
+        result.resolve(suggestionSample("Late"));
         await flush();
 
         expect(publish.mock.calls).toEqual([["Run the tests"], [null]]);
     });
 
-    /** Errors of the model call, malformed output and a failing publish never surface. */
+    /** A rejected sample (for example a stale source turn) and a failing publish never surface. */
     it("swallows errors", async () => {
-        const failing = createGenerator(vi.fn().mockRejectedValue(new Error("boom")));
-        failing.generator.onTurnCompleted("a", "b");
-        const malformed = createGenerator(vi.fn().mockResolvedValue({turn: {items: [{type: "agentMessage", text: "not json"}]}}));
-        malformed.generator.onTurnCompleted("a", "b");
-        const publishFails = createGenerator(vi.fn().mockResolvedValue(suggestionTurn("Hi")));
+        const failing = createGenerator(vi.fn().mockRejectedValue(new Error("stale turn")));
+        failing.generator.onTurnCompleted("thread", "turn");
+        const publishFails = createGenerator(vi.fn().mockResolvedValue(suggestionSample("Hi")));
         publishFails.publish.mockRejectedValue(new Error("closed"));
-        publishFails.generator.onTurnCompleted("a", "b");
+        publishFails.generator.onTurnCompleted("thread", "turn");
         await flush();
         await vi.waitFor(() => expect(publishFails.publish).toHaveBeenCalled());
         await flush();
 
+        expect(failing.threadSample).toHaveBeenCalled();
         expect(failing.publish).not.toHaveBeenCalled();
-        expect(malformed.publish).not.toHaveBeenCalled();
-    });
-
-    /** Without a user or agent text there is nothing to predict from, so no model call is made. */
-    it("skips generation when either text is blank", async () => {
-        const {generator, threadStart} = createGenerator(vi.fn());
-
-        generator.onTurnCompleted("  ", "answer");
-        generator.onTurnCompleted("question", "");
-        await flush();
-
-        expect(threadStart).not.toHaveBeenCalled();
     });
 
     /** After a rebind, the next generation runs on the new app-server client. */
     it("generates on the rebound client", async () => {
-        const {generator} = createGenerator(vi.fn());
-        const runTurn = vi.fn().mockResolvedValue(suggestionTurn("Go"));
-        const threadStart = vi.fn().mockResolvedValue({thread: {id: "new"}});
-        const threadUnsubscribe = vi.fn().mockResolvedValue({status: "unsubscribed"});
+        const {generator, threadSample: oldSample} = createGenerator(vi.fn());
+        const threadSample = vi.fn().mockResolvedValue(suggestionSample("Go"));
 
-        generator.rebindAppServer({threadStart, runTurn, threadUnsubscribe} as unknown as CodexAppServerClient);
-        generator.onTurnCompleted("a", "b");
-        await vi.waitFor(() => expect(runTurn).toHaveBeenCalled());
+        generator.rebindAppServer({threadSample} as unknown as CodexAppServerClient);
+        generator.onTurnCompleted("thread", "turn");
+        await vi.waitFor(() => expect(threadSample).toHaveBeenCalled());
 
-        expect(threadStart).toHaveBeenCalled();
+        expect(oldSample).not.toHaveBeenCalled();
     });
 });
 

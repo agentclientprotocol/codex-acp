@@ -159,6 +159,7 @@ import {
     FAST_MODE_ON,
     modelSupportsFast,
     resolveFastServiceTier,
+    serviceTierEnablesFast,
 } from "./FastModeConfig";
 import packageJson from "../package.json";
 import {isJetBrains2026_1Client} from "./JBUtils";
@@ -1451,7 +1452,7 @@ export class CodexAcpServer {
             cwd: request.cwd,
             additionalDirectories: sessionMetadata.additionalDirectories,
             mcpServers: requestedMcpServers,
-            fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
+            fastModeEnabled: serviceTierEnablesFast(sessionMetadata.currentServiceTier),
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
             clientCapabilities: this.capabilities,
@@ -3684,7 +3685,7 @@ export class CodexAcpServer {
             cwd: request.cwd,
             additionalDirectories: sessionMetadata.additionalDirectories,
             mcpServers: requestedMcpServers,
-            fastModeEnabled: sessionMetadata.currentServiceTier === "fast",
+            fastModeEnabled: serviceTierEnablesFast(sessionMetadata.currentServiceTier),
             currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
             clientCapabilities: this.capabilities,
@@ -4064,7 +4065,6 @@ export class CodexAcpServer {
         if (!sessionState.clientCapabilities.airClient || !promptSuggestionsEnabled()) return undefined;
         return new PromptSuggestionGenerator(
             this.codexAcpClient.appServerClient,
-            sessionState.cwd,
             async text => {
                 await new ACPSessionConnection(this.connection, sessionState.sessionId).update({
                     sessionUpdate: "session_info_update",
@@ -5406,8 +5406,8 @@ export class CodexAcpServer {
                 .trim();
             sessionState.titleGen?.onTurnCompleted(promptText);
 
-            // Same fire-and-forget rule: a predicted follow-up comes after the answer, never before it.
-            sessionState.promptSuggestions?.onTurnCompleted(promptText, eventHandler.getLastAgentMessageText());
+            // Same fire-and-forget rule: a predicted follow-up comes after the answer, never before it. No prediction in plan mode or after a turn that did not complete.
+            if (turnCompleted.turn.status === "completed" && sessionState.collaborationMode !== PLAN_COLLABORATION_MODE) sessionState.promptSuggestions?.onTurnCompleted(sessionState.sessionId, turnCompleted.turn.id);
 
             // On v2, a prompt whose user message was never recorded (`pendingInsertion` still set)
             // never happened from the client's view, so it must not leave a title behind either.

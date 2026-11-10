@@ -14,6 +14,11 @@ export function modelSupportsFast(model: Model | undefined): boolean {
     return model?.additionalSpeedTiers?.includes("fast") ?? false;
 }
 
+export function serviceTierEnablesFast(serviceTier: string | null | undefined): boolean {
+    // Codex returns the canonical "priority" tier even when configured with "fast".
+    return serviceTier === "fast" || serviceTier === "priority";
+}
+
 export function resolveFastServiceTier(fastModeEnabled: boolean, currentModelSupportsFast: boolean): ServiceTier | null {
     return fastModeEnabled && currentModelSupportsFast ? "fast" : null;
 }

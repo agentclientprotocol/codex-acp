@@ -105,10 +105,15 @@ const DYNAMIC_TOOL_RESULTS: Record<string, Record<string, string>> = {
  * The bug fixes of the compatibility rule that change the messages of the scenarios:
  * - the MCP startup tool call id is unique, so it ends with a random id;
  * - the report that completes a dynamic tool call has the result of the tool in `content`.
+ * - a command approval keeps the command visible in the title.
  */
 function withBugFixes(scenario: string, messages: RecordedMessage[]): RecordedMessage[] {
     const results = {...DYNAMIC_TOOL_RESULTS[scenario]};
     return messages.map(message => {
+        if (scenario === "command-approval" && message.method === "session/request_permission") {
+            const params = message.params as Json;
+            return {...message, params: {...params, toolCall: {...(params["toolCall"] as Json), title: "npm install"}}};
+        }
         const update = sessionUpdate(message);
         if (update === undefined || typeof update["toolCallId"] !== "string") return message;
         const toolCallId = update["toolCallId"];

@@ -47,7 +47,7 @@ import {ImageGenerationReporter} from "./tool-calls/reporters/ImageGenerationRep
 import {ImageViewReporter} from "./tool-calls/reporters/ImageViewReporter";
 import {McpToolReporter} from "./tool-calls/reporters/McpToolReporter";
 import {WebSearchReporter} from "./tool-calls/reporters/WebSearchReporter";
-import {CodexPlanStream} from "./CodexPlanStream";
+import {CodexPlanStream, structuredPlanUpdate} from "./CodexPlanStream";
 import {isWorkspaceRoutingUnavailableMessage} from "./CodexThreadErrors";
 import {
     createMessagePhaseMeta,
@@ -213,7 +213,6 @@ export class CodexEventHandler {
     private readonly itemStreams = new CodexItemStreamState();
     private readonly plans: CodexPlanStream;
     private disposed = false;
-    private lastAgentMessageText = "";
     private readonly turnDiffs = new Map<string, string>();
     private readonly oversizedTurnDiffs = new Set<string>();
     /** Latest diff of each subagent turn, keyed by child thread and turn; `null` marks an oversized diff. */
@@ -248,11 +247,6 @@ export class CodexEventHandler {
         if (sessionState.sessionFailure !== undefined) {
             this.failuresById.set(sessionState.sessionFailure.id, sessionState.sessionFailure);
         }
-    }
-
-    /** The last non-commentary agent message of the main thread, for the prompt suggestion. */
-    getLastAgentMessageText(): string {
-        return this.lastAgentMessageText;
     }
 
     getFailure(): RequestError | null {
@@ -593,7 +587,6 @@ export class CodexEventHandler {
                 return update;
             }
             case "item/completed":
-                this.rememberLastAgentMessage(notification.params.item, notification.params.threadId);
                 this.completeRetryIncidentOnTurnProgress(notification.params.threadId);
                 this.openToolCalls(notification.params.threadId).complete(notification.params.item.id);
                 return await this.completeItemEvent(notification.params);
@@ -1037,12 +1030,6 @@ export class CodexEventHandler {
             ? this.subagents.itemStreams(threadId) ?? this.itemStreams : this.itemStreams;
     }
 
-    private rememberLastAgentMessage(item: ThreadItem, threadId: string): void {
-        if (item.type !== "agentMessage" || threadId !== this.sessionState.sessionId) return;
-        if (item.phase === "commentary" || !item.text.trim()) return;
-        this.lastAgentMessageText = item.text;
-    }
-
     private rememberAgentMessagePhase(item: ThreadItem & { type: "agentMessage" }, threadId: string): void {
         this.streamsFor(threadId).agentMessagePhases.set(item.id, item.phase);
     }
@@ -1100,10 +1087,7 @@ export class CodexEventHandler {
                 priority: "medium"
             })
         );
-        return {
-            sessionUpdate: "plan",
-            entries: plan,
-        }
+        return structuredPlanUpdate(plan, this.sessionState.clientCapabilities);
     }
 
     private async createErrorEvent(params: ErrorNotification): Promise<UpdateSessionEvent | null> {

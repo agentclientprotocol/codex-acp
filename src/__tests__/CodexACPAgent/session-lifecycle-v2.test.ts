@@ -8,6 +8,7 @@ import {CodexAcpClient} from '../../CodexAcpClient';
 import {CodexAppServerClient} from '../../CodexAppServerClient';
 import type {PermissionProfileSummary, SkillsListParams, SkillsListResponse, Thread} from '../../app-server/v2';
 import {MODE_CONFIG_ID} from '../../AgentMode';
+import {FAST_MODE_CONFIG_ID} from '../../FastModeConfig';
 import {createTestModel} from '../acp-test-utils';
 import {createMockConnections} from './test-utils';
 import {checkV2SessionUpdate, expectConformingV2SessionUpdates} from './v2-session-update-guard';
@@ -115,6 +116,7 @@ async function connectV2Client(options?: {
     permissionProfiles?: PermissionProfileSummary[];
     activePermissionProfileId?: string;
     defaultPermissionProfileId?: string;
+    serviceTier?: string | null;
 }) {
     const mocks = createMockConnections();
     const codexRequests: Array<{method: string, params: unknown}> = [];
@@ -136,6 +138,14 @@ async function connectV2Client(options?: {
             return {config: {default_permissions: options.defaultPermissionProfileId}, origins: {}, layers: []};
         }
         const response = codexResponse(method, options?.replayTurns, options?.thread);
+        if (options?.serviceTier !== undefined) {
+            if (["thread/start", "thread/resume", "thread/fork"].includes(method)) {
+                response["serviceTier"] = options.serviceTier;
+            }
+            if (method === "model/list") {
+                response["data"] = [createTestModel({id: "gpt-5", additionalSpeedTiers: ["fast"]})];
+            }
+        }
         if (options?.activePermissionProfileId && ["thread/start", "thread/resume", "thread/fork"].includes(method)) {
             return {...response, activePermissionProfile: {id: options.activePermissionProfileId, extends: null}};
         }
@@ -241,6 +251,31 @@ describe('Session lifecycle over ACP v2', () => {
 
         expect(response.configOptions?.find(option => option.configId === MODE_CONFIG_ID))
             .toMatchObject({type: "select", currentValue: "permission-profile:team-default"});
+    });
+
+    describe.each([
+        {operation: "new", replayFrom: undefined},
+        {operation: "resume", replayFrom: null},
+        {operation: "resume", replayFrom: {type: "start"}},
+        {operation: "fork", replayFrom: undefined},
+    ] as const)('Fast mode over v2 $operation with replayFrom=$replayFrom', ({operation, replayFrom}) => {
+        it.each([
+            {serviceTier: "fast", enabled: true},
+            {serviceTier: "priority", enabled: true},
+            {serviceTier: "flex", enabled: false},
+            {serviceTier: null, enabled: false},
+            {serviceTier: "unknown", enabled: false},
+        ])('restores Fast mode from the app-server tier $serviceTier', async ({serviceTier, enabled}) => {
+            const {connection} = await connectV2Client({serviceTier});
+            closeClient = () => connection.close();
+
+            const response = await connection.agent.request(acpV2.methods.agent.session[operation], {
+                sessionId, cwd, ...(replayFrom === undefined ? {} : {replayFrom}),
+            });
+
+            await expect(dump(response.configOptions?.find(option => option.configId === FAST_MODE_CONFIG_ID)))
+                .toMatchFileSnapshot(`data/session-lifecycle-v2-fast-mode-${enabled ? "on" : "off"}.json`);
+        });
     });
 
     it.each([null, {type: "start"}] as const)(
