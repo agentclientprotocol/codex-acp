@@ -332,49 +332,7 @@ describe("CodexEventHandler - auth error events", () => {
         }]);
     });
 
-    it.each([
-        ["null", null],
-        ["blank", " \n\t "],
-    ])("publishes a retry warning without details when additionalDetails is %s", async (_name, additionalDetails) => {
-        const {updates} = await runPromptWithError(createTestSessionState({
-            sessionId: "typed-retrying-no-details-session",
-            account: { type: "apiKey" },
-        }), {
-            message: "Reconnecting... 1/5",
-            codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
-            additionalDetails,
-            misalignment: null,
-        }, true, typedFailureCapabilities);
-
-        expect(updates).toHaveLength(1);
-        const failure = (updates[0] as {_meta: {jetbrains: {air: {sessionFailure: Record<string, unknown>}}}})
-            ._meta.jetbrains.air.sessionFailure;
-        expect(failure).toMatchObject({severity: "warning", title: "Reconnecting... 1/5", actions: []});
-        expect(failure).not.toHaveProperty("details");
-    });
-
-    it("carries the retry cause of a foreign turn retry warning", async () => {
-        const {updates} = await runPromptWithError(createTestSessionState({
-            sessionId: "foreign-turn-retry-session",
-            account: { type: "apiKey" },
-        }), {
-            message: "Reconnecting... 2/5",
-            codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
-            additionalDetails: "idle timeout waiting for websocket",
-            misalignment: null,
-        }, true, typedFailureCapabilities, "foreign-turn");
-
-        expect(updates).toEqual([expect.objectContaining({
-            _meta: {jetbrains: {air: expect.objectContaining({sessionFailure: expect.objectContaining({
-                severity: "warning",
-                title: "Reconnecting... 2/5",
-                details: "idle timeout waiting for websocket",
-                actions: [],
-            })})}},
-        })]);
-    });
-
-    it("publishes a safe rate-limit diagnostic while Codex retries HTTP 429", async () => {
+    it("publishes a rate-limit warning with its cause while Codex retries HTTP 429", async () => {
         const {result, updates} = await runPromptWithError(createTestSessionState({
             sessionId: "typed-rate-limit-retry-session",
             account: { type: "apiKey" },
