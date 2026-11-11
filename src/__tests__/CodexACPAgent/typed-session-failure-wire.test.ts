@@ -414,6 +414,73 @@ describe("typed session failures over ACP transport", () => {
         expect(next.id).toBe(records[0]!.id);
         expect(next.revision).toBe(4);
     });
+
+    it("carries the retry cause of each revision as details", async () => {
+        const fixture = await createIdleFixture("wire-retry-details");
+
+        for (const [message, additionalDetails] of [
+            ["Reconnecting... 1/5", " idle timeout waiting for websocket "],
+            ["Reconnecting... 2/5", "stream disconnected before completion"],
+            ["Reconnecting... 3/5", null],
+            ["Reconnecting... 4/5", "   "],
+        ] as const) {
+            fixture.sendServerNotification({
+                method: "error",
+                params: {
+                    threadId: fixture.sessionId,
+                    turnId: "turn-id",
+                    willRetry: true,
+                    error: {
+                        message,
+                        codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
+                        additionalDetails,
+                    },
+                },
+            });
+        }
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.wireUpdates).toHaveLength(4));
+
+        const records = fixture.wireUpdates.map(update => (update.params.update["_meta"] as {
+            jetbrains: {air: {sessionFailure: Record<string, unknown>}};
+        }).jetbrains.air.sessionFailure);
+        expect(records).toEqual([
+            {
+                id: "turn-id:error",
+                revision: 1,
+                category: "connection",
+                severity: "warning",
+                title: "Reconnecting... 1/5",
+                details: "idle timeout waiting for websocket",
+                actions: [],
+            },
+            {
+                id: "turn-id:error",
+                revision: 2,
+                category: "connection",
+                severity: "warning",
+                title: "Reconnecting... 2/5",
+                details: "stream disconnected before completion",
+                actions: [],
+            },
+            {
+                id: "turn-id:error",
+                revision: 3,
+                category: "connection",
+                severity: "warning",
+                title: "Reconnecting... 3/5",
+                actions: [],
+            },
+            {
+                id: "turn-id:error",
+                revision: 4,
+                category: "connection",
+                severity: "warning",
+                title: "Reconnecting... 4/5",
+                actions: [],
+            },
+        ]);
+    });
 });
 
 describe("standard session notices over ACP transport", () => {
