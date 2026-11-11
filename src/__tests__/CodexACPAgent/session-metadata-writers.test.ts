@@ -61,9 +61,10 @@ describe.each([1, 2] as const)("ACP v%s owned session metadata", version => {
             else expect(metadata(h)["jetbrains"].air.goal).toBeUndefined();
 
             h.emit({method: "error", params: {threadId: sessionId, turnId: "background-turn", willRetry: true,
-                error: {message: "Retrying", codexErrorInfo: null, additionalDetails: null, misalignment: null}}});
+                error: {message: "Retrying", codexErrorInfo: null, additionalDetails: " idle timeout waiting for websocket\n", misalignment: null}}});
             await flush(h);
-            expect(metadata(h)["jetbrains"].air.sessionFailure).toMatchObject({severity: "warning"});
+            expect(metadata(h)["jetbrains"].air.sessionFailure)
+                .toMatchObject({severity: "warning", details: "idle timeout waiting for websocket"});
             if (version === 2) expect(metadata(h)["jetbrains"].air.agentFileChangeReport).toEqual(report);
             else expect(metadata(h)["jetbrains"].air.agentFileChangeReport).toBeUndefined();
             const failure = metadata(h)["jetbrains"].air.sessionFailure;

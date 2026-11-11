@@ -937,7 +937,7 @@ It does not go out as a `sessionFailure` record. Errors still use `sessionFailur
 | `category` | yes | category | Broad visual group. |
 | `severity` | yes | `warning` or `error` | Inline warning or error presentation. |
 | `title` | yes | string | The complete user-facing text. |
-| `details` | no | string | Long text that does not fit in `title`. |
+| `details` | no | string | Long text that does not fit in `title`, or the cause of a retry. |
 | `actions` | yes | ordered string array | Recovery actions that the adapter recommends. |
 
 ### Identity and revisions
@@ -971,6 +971,7 @@ It does not go out as a `sessionFailure` record. Errors still use `sessionFailur
 | `warning`, `configWarning`, `deprecationNotice` notifications | `unknown` | none |
 
 A retry warning (`willRetry: true`) has `severity: warning` and no actions.
+A terminal failure (`willRetry: false`) of the same turn updates that incident with `severity: error` and its actions.
 A notice has `severity: warning`.
 A `deprecationNotice` is shown only to a client with the capability. Other clients never saw it.
 
@@ -987,6 +988,13 @@ An app-server exit uses `Connection to Codex was lost.`
 An unexpected adapter error uses `Codex encountered an internal error.`
 A notice with details puts `summary — details` in the title when that fits in 240 characters.
 Otherwise the summary goes to `title` and the details go to `details`.
+
+A retry warning puts the trimmed Codex `additionalDetails` in `details`.
+When `additionalDetails` is null or blank, the record has no `details` key.
+Each revision carries only its own details.
+A revision without details does not keep the details of an earlier revision.
+A terminal failure carries no details.
+The adapter does not send the `additionalDetails` of a terminal failure.
 
 ### Recovery
 

@@ -1166,6 +1166,7 @@ export class CodexEventHandler {
         title: string,
         actionsOverride?: SessionFailureAction[],
         attributeToTurn = true,
+        details?: string,
     ): NonNullable<SessionState["sessionFailure"]> {
         const policy = SESSION_FAILURE_POLICY[kind];
         const scope = turnId ?? this.sessionState.sessionId;
@@ -1178,6 +1179,7 @@ export class CodexEventHandler {
             category: policy.category,
             severity,
             title: readableServiceErrorMessage(title),
+            ...(details === undefined ? {} : {details}),
             actions: actionsOverride ?? policy.actions,
         };
         this.failuresById.set(id, failure);
@@ -1217,6 +1219,8 @@ export class CodexEventHandler {
 
     private recordRetryWarning(params: ErrorNotification, attributeToTurn = true): SessionFailure {
         const kind = this.sessionFailureKind(params.error);
+        // Codex puts the cause of the retry here, e.g. "idle timeout waiting for websocket".
+        const details = params.error.additionalDetails?.trim() || undefined;
         return this.recordSessionFailure(
             kind,
             params.turnId,
@@ -1224,6 +1228,7 @@ export class CodexEventHandler {
             params.error.message,
             [],
             attributeToTurn,
+            details,
         );
     }
 
