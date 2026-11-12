@@ -1,3 +1,4 @@
+import {toV1InitialConfigOptions} from "../../AcpV2ConfigOptions";
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import * as acp from '@agentclientprotocol/sdk/unstable';
 import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
@@ -204,4 +205,18 @@ describe('Session config options over ACP v2', () => {
             modeId: AgentMode.ReadOnly.id,
         })).rejects.toMatchObject({code: -32601});
     });
+});
+
+
+it("converts SDK initial option values without changing their typed values", () => {
+    expect(toV1InitialConfigOptions([
+        {configId: "model", type: "id", value: "gpt-5", _meta: {source: "client"}},
+        {configId: "fast", type: "boolean", value: false},
+    ])).toEqual([
+        {configId: "model", value: "gpt-5", _meta: {source: "client"}},
+        {configId: "fast", type: "boolean", value: false},
+    ]);
+    expect(toV1InitialConfigOptions(undefined)).toBeUndefined();
+    expect(() => toV1InitialConfigOptions([{configId: "custom", type: "_custom", value: null}]))
+        .toThrow("Unsupported initial configuration value");
 });
