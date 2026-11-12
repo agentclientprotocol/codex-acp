@@ -52,7 +52,7 @@ function history(h: PromptSession, items: ThreadItem[] = [], parent: string | nu
 it("selects standard and AIR contracts independently", () => {
     const air = {_meta: withAirMeta(undefined, "capabilities", [AIR_NATIVE_SUBAGENT_SESSIONS_KEY])};
     expect([subagentProtocol(null, 1), subagentProtocol({subagents: {}}, 1), subagentProtocol(null, 2),
-        subagentProtocol(air, 1), subagentProtocol(air, 2)]).toEqual(["hidden", "standard", "standard", "air", "air"]);
+        subagentProtocol(air, 1), subagentProtocol(air, 2)]).toEqual(["hidden", "standard", "standard", "air", "standard"]);
 });
 
 describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
@@ -467,7 +467,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         } finally { release(); }
     });
 
-    it.skipIf(version !== 2)("publishes snapshots after the setup response without waiting for unrelated requests", async () => {
+    it.skipIf(version !== 2)("publishes state before the setup response and controls after it without waiting for unrelated requests", async () => {
         await connect();
         h.emit(turnStarted());
         h.emit(itemStarted(activityItem()));
@@ -496,6 +496,11 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
             && (frame.params as {sessionId: string; update: {sessionUpdate: string}}).sessionId === childId
             && (frame.params as {update: {sessionUpdate: string}}).update.sessionUpdate === "state_update");
         expect(response).toBeGreaterThanOrEqual(0);
-        expect(state).toBeGreaterThan(response);
+        expect(state).toBeGreaterThanOrEqual(0);
+        expect(response).toBeGreaterThan(state);
+        const control = frames.findIndex((frame, index) => index > response && "method" in frame
+            && frame.method === "session/update"
+            && (frame.params as {update: {capabilities?: {cancel?: unknown}}}).update.capabilities?.cancel != null);
+        expect(control).toBeGreaterThan(response);
     });
 });

@@ -143,7 +143,7 @@ describe.each([1, 2] as const)("ACP v%s historical child outcomes", version => {
         const before = states().length;
         await h.request("session/resume", {sessionId, cwd, mcpServers: []});
         await flush(h);
-        expect(states().slice(before)).toEqual([]);
+        expect(states().slice(before)).toEqual(version === 2 ? [{state: "unknown", background: []}] : []);
         await h.cancel();
         await flush(h);
         expect(h.turnInterruptCalls()).toEqual([]);

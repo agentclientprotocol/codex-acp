@@ -15,10 +15,10 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 - Shell command, file change, [permission request](docs/air-extensions.md#permission-presentation), MCP tool call, terminal output, reasoning, [plan](docs/plans.md), web search, image generation, image view, token usage, and review events.
 - Compact file changes through the negotiated [AIR diff patch extension](docs/air-extensions.md#diff-patch).
 - For AIR, one tool call shape with each fact in one field, as the [tool call contract](docs/air-extensions.md#tool-call-contract) defines. Other clients keep the earlier fields.
-- [Native ACP subagent sessions](docs/subagent-sessions.md) (after capability negotiation) with separate child histories and root-routed permissions; a legacy tool-call fallback otherwise.
+- [Native ACP subagent sessions](docs/subagent-sessions.md) with separate child histories and permissions. ACP v2 selects the standard route without capability negotiation.
 - Mid-turn input through the [_session/steering extension](docs/steering.md), with an opt-in host-owned fallback when no turn can accept it.
 - [Async Codex questions](docs/async-questions.md) as non-blocking form elicitations, with answers steered into the turn that asked them.
-- [Background terminal tasks](docs/air-extensions.md#async-tasks) in AIR, with task status and targeted stop support after capability negotiation.
+- [Background terminal tasks](docs/background-work.md) with standard ACP v2 state and terminal Stop. ACP v1 retains the Air extension.
 - Session-scoped long-running goals in AIR through the [goal extension](docs/air-extensions.md#goal).
 - Typed warnings and errors through the opt-in [AIR session failure extension](docs/air-extensions.md#session-failure).
 - All AIR extensions, capabilities, and `_meta` keys: [AIR extensions](docs/air-extensions.md).

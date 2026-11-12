@@ -785,9 +785,10 @@ Without the capability, the config options keep their old shape and carry no rec
 ## Async tasks
 
 Codex app-server owns shell commands that keep running after their tool call.
-The adapter exposes them as async tasks when the client declares `asyncTasks`.
-Without the capability, the adapter sends no async task update.
-ACP v1 and v2 use the same `async_task_spawned`, `async_task_progress`, and `async_task_state_update` names and payloads.
+The legacy Air extension exposes them as async tasks when the client declares `asyncTasks`.
+Without the capability, the adapter sends no legacy async task update.
+ACP v1 uses `async_task_spawned`, `async_task_progress`, and `async_task_state_update`.
+ACP v2 uses standard terminals and background snapshots. See [background work](background-work.md).
 
 ### Lifecycle
 

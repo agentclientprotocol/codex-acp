@@ -4114,6 +4114,7 @@ export class CodexAcpServer {
                 }
                 await this.streamStandardHistory(childId, history.items, state, isOpen, childThreadId,
                     new Set([...ancestry, childThreadId]), replayed, gaps);
+                await state.asyncTasks.reconcile(childThreadId, childId);
             } catch (error) {
                 if (error instanceof SessionClosedDuringLoadError) throw error;
                 gaps.add(childThreadId);
