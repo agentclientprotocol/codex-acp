@@ -734,7 +734,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         }
     }
 
-    /** Cancel only the addressed live conversation and its owned descendant work. */
+    /** Cancel the addressed foreground work. ACP v1 also cancels descendant work. */
     async cancelChild(sessionId: string, interrupt: (threadId: string, turnId: string) => Promise<void>): Promise<void> {
         const child = [...this.children.values()].find(child => child.sessionId === sessionId);
         if (!child || !this.cancellationReady || this.deferLive || !child.cancelAdvertised || this.currentTurn(child) === null) return;
