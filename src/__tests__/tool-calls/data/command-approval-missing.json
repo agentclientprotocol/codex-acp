@@ -1,5 +1,6 @@
 {
   "toolCallId": "cmd",
+  "name": "exec_command",
   "kind": "execute",
   "status": "pending",
   "title": "Read file",

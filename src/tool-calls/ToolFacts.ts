@@ -86,7 +86,7 @@ export type CommandEnd = {
 
 /**
  * The tool call of a permission request. The client merges it into the stored tool call.
- * A reporter sets only `toolCallId`, `title`, `input`, and the facts that the client does not have yet.
+ * A reporter repeats the tool identity and input needed for approval, plus any new presentation facts.
  */
 export type PermissionToolFacts = Omit<ToolFacts, "report" | "terminal" | "terminalOutput" | "terminalInput"
     | "terminalExit" | "standard"> & {

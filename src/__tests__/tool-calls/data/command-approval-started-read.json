@@ -1,5 +1,6 @@
 {
   "toolCallId": "cmd",
+  "name": "exec_command",
   "title": "Read file '/w/a.txt'",
   "rawInput": {
     "command": "cat a.txt",

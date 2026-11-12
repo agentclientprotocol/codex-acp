@@ -38,6 +38,8 @@ export class FileChangeReporter {
         return {
             toolCallId: item.id,
             report: "start",
+            name: "apply_patch",
+            input: fileChangeInput(item),
             title: FILE_CHANGE_TITLE,
             kind: "edit",
             status: toToolStatus(item.status),
@@ -55,17 +57,23 @@ export class FileChangeReporter {
 
     /**
      * The tool call of an approval request. A started file change already shows its diff,
-     * so the request adds only the paths.
+     * so the request repeats its identity and paths, not the diff.
      */
     static permission(params: FileChangeRequestApprovalParams, item: FileChangeItem | undefined): PermissionToolFacts {
         return {
             toolCallId: params.itemId,
+            name: "apply_patch",
+            ...(item === undefined ? {} : {input: fileChangeInput(item)}),
             title: FILE_CHANGE_TITLE,
             ...(item === undefined ? {kind: "edit", status: "pending"} : {}),
             locations: [...new Set(item?.changes.map(change => change.path) ?? [])],
             standard: {kind: "edit", status: "pending", title: "Edit files"},
         };
     }
+}
+
+function fileChangeInput(item: FileChangeItem): Record<string, unknown> {
+    return {changes: item.changes.map(({path, kind}) => ({path, kind}))};
 }
 
 function createPatchContent(change: FileUpdateChange, diffPatch: DiffPatchFormat): ToolCallContent[] {

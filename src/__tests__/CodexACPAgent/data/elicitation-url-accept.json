@@ -5,6 +5,7 @@
       "sessionId": "test-session-id",
       "toolCall": {
         "toolCallId": "elicitation-elicit-789",
+        "name": "mcp_url_authorization",
         "kind": "fetch",
         "status": "pending",
         "title": "MCP server requests to open a URL",

@@ -1,6 +1,7 @@
 [
   {
     "toolCallId": "item-multi",
+    "name": "apply_patch",
     "title": "Editing files",
     "kind": "edit",
     "status": "in_progress",
@@ -54,6 +55,29 @@
         "type": "diff"
       }
     ],
+    "rawInput": {
+      "changes": [
+        {
+          "path": "/workspace/multi-edit.ts",
+          "kind": {
+            "type": "update",
+            "move_path": null
+          }
+        },
+        {
+          "path": "/workspace/multi-add.ts",
+          "kind": {
+            "type": "add"
+          }
+        },
+        {
+          "path": "/workspace/multi-delete.ts",
+          "kind": {
+            "type": "delete"
+          }
+        }
+      ]
+    },
     "sessionUpdate": "tool_call_update"
   },
   {

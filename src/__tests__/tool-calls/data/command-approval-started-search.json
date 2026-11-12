@@ -1,5 +1,6 @@
 {
   "toolCallId": "cmd",
+  "name": "exec_command",
   "title": "Search for 'needle' in /w",
   "rawInput": {
     "command": "rg needle /w",

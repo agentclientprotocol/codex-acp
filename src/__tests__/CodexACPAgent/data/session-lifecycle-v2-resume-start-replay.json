@@ -279,6 +279,7 @@
       "sessionId": "thread-1",
       "update": {
         "toolCallId": "item-cmd-1",
+        "name": "exec_command",
         "title": "ls",
         "kind": "execute",
         "status": "completed",

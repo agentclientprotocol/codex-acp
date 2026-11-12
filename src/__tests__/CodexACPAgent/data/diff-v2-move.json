@@ -1,6 +1,7 @@
 [
   {
     "toolCallId": "item-move",
+    "name": "apply_patch",
     "title": "Editing files",
     "kind": "edit",
     "status": "in_progress",
@@ -23,6 +24,17 @@
         "type": "diff"
       }
     ],
+    "rawInput": {
+      "changes": [
+        {
+          "path": "/workspace/old-name.ts",
+          "kind": {
+            "type": "update",
+            "move_path": "/workspace/new-name.ts"
+          }
+        }
+      ]
+    },
     "sessionUpdate": "tool_call_update"
   },
   {

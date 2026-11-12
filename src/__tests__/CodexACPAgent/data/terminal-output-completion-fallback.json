@@ -6,6 +6,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "command-terminal-output-completion",
+        "name": "exec_command",
         "kind": "execute",
         "title": "git status --short",
         "status": "in_progress",

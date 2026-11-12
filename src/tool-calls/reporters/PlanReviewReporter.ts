@@ -21,6 +21,7 @@ export class PlanReviewReporter {
             sessionId,
             toolCall: renderer.renderPermissionToolCall({
                 toolCallId: planReviewToolCallId(plan),
+                name: "plan_review",
                 title: "Implement this plan?",
                 kind: "switch_mode",
                 status: "pending",

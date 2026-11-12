@@ -1,6 +1,7 @@
 import type {SessionState} from "../CodexAcpServer";
 import type {ServerNotification} from "../app-server";
 import type {ThreadItem} from "../app-server/v2";
+import type {McpToolCallItem} from "../tool-calls/reporters/McpToolReporter";
 import {commandToolName} from "../ToolCallName";
 
 type FileChangeItem = ThreadItem & {type: "fileChange"};
@@ -24,9 +25,8 @@ export class PermissionLifecycleContext {
 /** Prompt-scoped permission presentation and MCP correlation state. */
 export class PermissionPromptContext {
     private readonly commandNames = new Map<string, Map<string, string>>();
-    private readonly startedCommands = new Map<string, Set<string>>();
     private readonly fileChanges = new Map<string, Map<string, FileChangeItem>>();
-    private readonly pendingMcpApprovals = new Map<string, Map<string, string[]>>();
+    private readonly pendingMcpApprovals = new Map<string, Map<string, McpToolCallItem[]>>();
 
     constructor(private readonly nextStandaloneId: (serverName: string) => string) {}
 
@@ -59,18 +59,18 @@ export class PermissionPromptContext {
 
     /** Tells whether the client already received the command tool call. */
     commandStarted(threadId: string, itemId: string): boolean {
-        return this.startedCommands.get(threadId)?.has(itemId) ?? false;
+        return this.commandNames.get(threadId)?.has(itemId) ?? false;
     }
 
-    popPendingMcpApproval(threadId: string, serverName: string): string | undefined {
+    popPendingMcpApproval(threadId: string, serverName: string): McpToolCallItem | undefined {
         const byServer = this.pendingMcpApprovals.get(threadId);
         if (!byServer) return undefined;
         const pending = byServer.get(serverName);
         if (pending?.length !== 1) return undefined;
-        const callId = pending[0];
+        const call = pending[0];
         byServer.delete(serverName);
         if (byServer.size === 0) this.pendingMcpApprovals.delete(threadId);
-        return callId;
+        return call;
     }
 
     nextStandaloneMcpToolCallId(serverName: string): string {
@@ -79,15 +79,9 @@ export class PermissionPromptContext {
 
     private handleItemStarted(threadId: string, item: ThreadItem): void {
         if (item.type === "commandExecution") {
-            const started = this.startedCommands.get(threadId) ?? new Set<string>();
-            started.add(item.id);
-            this.startedCommands.set(threadId, started);
-            const name = commandToolName(item.source);
-            if (name !== undefined) {
-                const byItem = this.commandNames.get(threadId) ?? new Map<string, string>();
-                byItem.set(item.id, name);
-                this.commandNames.set(threadId, byItem);
-            }
+            const byItem = this.commandNames.get(threadId) ?? new Map<string, string>();
+            byItem.set(item.id, commandToolName(item.source));
+            this.commandNames.set(threadId, byItem);
             return;
         }
         if (item.type === "fileChange") {
@@ -97,10 +91,10 @@ export class PermissionPromptContext {
             return;
         }
         if (item.type !== "mcpToolCall") return;
-        const byServer = this.pendingMcpApprovals.get(threadId) ?? new Map<string, string[]>();
+        const byServer = this.pendingMcpApprovals.get(threadId) ?? new Map<string, McpToolCallItem[]>();
         const pending = byServer.get(item.server);
-        if (pending) pending.push(item.id);
-        else byServer.set(item.server, [item.id]);
+        if (pending) pending.push(item);
+        else byServer.set(item.server, [item]);
         this.pendingMcpApprovals.set(threadId, byServer);
     }
 
@@ -109,9 +103,6 @@ export class PermissionPromptContext {
             const byItem = this.commandNames.get(threadId);
             byItem?.delete(item.id);
             if (byItem?.size === 0) this.commandNames.delete(threadId);
-            const started = this.startedCommands.get(threadId);
-            started?.delete(item.id);
-            if (started?.size === 0) this.startedCommands.delete(threadId);
             return;
         }
         if (item.type === "fileChange") {
@@ -125,7 +116,7 @@ export class PermissionPromptContext {
         if (!byServer) return;
         const pending = byServer.get(item.server);
         if (!pending) return;
-        const index = pending.indexOf(item.id);
+        const index = pending.findIndex(call => call.id === item.id);
         if (index >= 0) pending.splice(index, 1);
         if (pending.length === 0) byServer.delete(item.server);
         if (byServer.size === 0) this.pendingMcpApprovals.delete(threadId);
@@ -133,7 +124,6 @@ export class PermissionPromptContext {
 
     private clearTransientState(threadId: string): void {
         this.commandNames.delete(threadId);
-        this.startedCommands.delete(threadId);
         this.fileChanges.delete(threadId);
         this.pendingMcpApprovals.delete(threadId);
     }
