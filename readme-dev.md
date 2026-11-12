@@ -226,7 +226,7 @@ schema alone:
 - Custom session updates are renamed on v2: `subagent_spawned`/`subagent_state_update` become a
   single `_subagent_update` (gated on the AIR `nativeSubagentSessions` capability; this contract is
   retained independently of standard subagent sessions), and
-  `async_task_spawned`/`async_task_state_update` become `_async_task_spawned`/`_async_task_state_update`
+  `async_task_spawned`/`async_task_progress`/`async_task_state_update` gain the `_` prefix
   (gated on the AIR `asyncTasks` capability). Payload shapes are unchanged.
 - Foreground state is independent of prompt acceptance. `running` can precede the user-message
   echo, including while Codex runs hooks. A successful prompt response still waits for insertion.

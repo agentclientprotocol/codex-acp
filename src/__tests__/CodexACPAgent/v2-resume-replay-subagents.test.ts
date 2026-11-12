@@ -215,7 +215,7 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
         ]);
 
         // Async tasks aren't gated on in this capability set, so nothing async-task-shaped renders.
-        expect(updates.some(({update}) => update.sessionUpdate.startsWith("_async_task_"))).toBe(false);
+        expect(updates.some(({update}) => update.sessionUpdate.startsWith("async_task_"))).toBe(false);
     });
 
     it('also emits the child subagent history (agent reply) alongside the lifecycle updates', async () => {

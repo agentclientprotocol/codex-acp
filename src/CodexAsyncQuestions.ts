@@ -7,20 +7,18 @@
  *     [{"answer":"Staging","question":"Which environment?","questionItemId":"[\"request_user_input_async\",\"call_1\",0]"}]
  *     </send_user_message_question_reply>
  *
- * The adapter shows the questions as a form elicitation while their turn runs and steers the answers into that
- * turn in the same envelope. An answer that arrives after the turn ended is dropped, as in the Codex TUI. On
- * replay, a user message that holds an envelope is shown as the questions and their answers.
+ * The adapter keeps the form open until the user answers or the session closes. The answer steers the running
+ * turn, or starts a new turn when the session is idle. On replay, the reply envelope shows the questions and answers.
  *
  * The envelope follows Codex's `codex-rs/context-fragments/src/answered_question.rs`, and its parsing follows
  * `codex-rs/tui/src/async_question_reply.rs`.
  */
 import * as acp from "@agentclientprotocol/sdk/unstable";
-import {randomUUID} from "node:crypto";
 import {type AcpClientConnection, AcpV2Connection} from "./ACPSessionConnection";
 import type {ServerNotification} from "./app-server";
 import type {ThreadItem, ToolRequestUserInputQuestion} from "./app-server/v2";
 import {buildUserInputSchema, userInputAnswers, userInputAnswerText} from "./CodexElicitationHandler";
-import type {CodexAcpClient} from "./CodexAcpClient";
+import type {CodexAcpServer} from "./CodexAcpServer";
 import {clientSupportsFormElicitation} from "./ElicitationCapabilities";
 import {logger} from "./Logger";
 import {clientSupportsNotices, createSessionNotice} from "./SessionNotice";
@@ -96,13 +94,13 @@ export class AsyncQuestionClient {
      * @param sessionId The session that the questions belong to.
      * @param connection The connection to the ACP client.
      * @param clientCapabilities The capabilities that the ACP client declared.
-     * @param codexAcpClient Returns the current Codex client, which changes when the app-server restarts.
+     * @param server Owns steering and the queue for starting turns.
      */
     constructor(
         private readonly sessionId: string,
         private readonly connection: AcpClientConnection,
         private readonly clientCapabilities: acp.ClientCapabilities | null,
-        private readonly codexAcpClient: () => CodexAcpClient,
+        private readonly server: CodexAcpServer,
     ) {}
 
     /** Sends the elicitation without marking the session as waiting for the user. */
@@ -113,14 +111,13 @@ export class AsyncQuestionClient {
             : this.connection.request(acp.methods.client.elicitation.create, request, {cancellationSignal: signal});
     }
 
-    /** Steers the text into the turn; rejects if that turn is no longer running. */
-    async steer(turnId: string, text: string): Promise<void> {
-        await this.codexAcpClient().steerTurn({
-            threadId: this.sessionId,
-            turnId,
+    /** Sends the reply through the session's shared steering and turn-start queue. */
+    async sendReply(text: string): Promise<void> {
+        const response = await this.server.executeOrQueueSteeringRequest({
+            sessionId: this.sessionId,
             prompt: [{type: "text", text}],
-            clientUserMessageId: randomUUID(),
         });
+        if (response.outcome === "failed") throw new Error("Codex did not accept the answer");
     }
 
     /** Tells the user that an answer was not sent, if the client supports notices. */
@@ -131,16 +128,15 @@ export class AsyncQuestionClient {
             update: createSessionNotice(
                 "warning",
                 "Answer not sent",
-                "Codex finished before your answer arrived. Send it as a new message if it still matters.",
+                "The answer could not be sent. Send it as a new message to continue.",
             ),
         });
     }
 }
 
-/** Shows the async questions of one session as elicitations, for as long as the turn that asked them runs. */
+/** Keeps the session's async questions answerable between turns. */
 export class AsyncQuestionElicitations {
-    // The running turns that asked a question, each with the signal that cancels its questions.
-    private readonly turns = new Map<string, AbortController>();
+    private readonly requests = new Map<string, AbortController>();
 
     constructor(
         private readonly sessionId: string,
@@ -148,22 +144,17 @@ export class AsyncQuestionElicitations {
         private readonly client: AsyncQuestionClient,
     ) {}
 
-    /** Asks the questions of a completed async message and cancels them when their turn ends; never waits. */
+    /** Opens the questions of a completed async message without waiting for an answer. */
     handleNotification(notification: ServerNotification): void {
         switch (notification.method) {
             case "item/completed": {
-                const {threadId, turnId, item} = notification.params;
+                const {threadId, item} = notification.params;
                 if (threadId === this.sessionId && item.type === "agentMessage" && item.delivery === "async"
                     && (item.questions?.length ?? 0) > 0) {
-                    this.ask(turnId, item);
+                    this.ask(item);
                 }
                 return;
             }
-            case "turn/completed":
-                if (notification.params.threadId === this.sessionId) {
-                    this.endTurn(notification.params.turn.id);
-                }
-                return;
             default:
                 return;
         }
@@ -171,41 +162,33 @@ export class AsyncQuestionElicitations {
 
     /** Cancels every open question, when the session closes or its app-server is gone. */
     dispose(): void {
-        for (const turnId of [...this.turns.keys()]) {
-            this.endTurn(turnId);
-        }
+        for (const request of this.requests.values()) request.abort();
+        this.requests.clear();
     }
 
-    private endTurn(turnId: string): void {
-        this.turns.get(turnId)?.abort();
-        this.turns.delete(turnId);
-    }
-
-    private ask(turnId: string, message: AsyncQuestionMessage): void {
-        if (!clientSupportsFormElicitation(this.clientCapabilities)) return;
-        let turn = this.turns.get(turnId);
-        if (turn === undefined) {
-            turn = new AbortController();
-            this.turns.set(turnId, turn);
-        }
+    private ask(message: AsyncQuestionMessage): void {
+        if (!clientSupportsFormElicitation(this.clientCapabilities) || this.requests.has(message.id)) return;
+        const pending = new AbortController();
+        this.requests.set(message.id, pending);
         const questions = formQuestions(message);
         const request: acp.CreateElicitationRequest = {
             sessionId: this.sessionId,
             mode: "form",
-            message: "Codex keeps working while you answer. An answer sent after it finishes is not delivered.",
+            message: "Codex keeps working while you answer. Your answer continues the conversation.",
             // Questions are answered independently, as in Codex.
             requestedSchema: buildUserInputSchema(questions, this.clientCapabilities, false),
             _meta: {codex: {delivery: "async"}},
         };
-        void this.client.createElicitation(request, turn.signal).then(
-            response => this.answer(turnId, message, questions, response)
+        void this.client.createElicitation(request, pending.signal).then(
+            response => this.answer(message, questions, response)
                 .catch(error => logger.error("Failed to deliver an async question answer", error)),
-            error => logger.log("Async question closed without an answer", {sessionId: this.sessionId, turnId, error}),
-        );
+            error => logger.log("Async question closed without an answer", {sessionId: this.sessionId, error}),
+        ).finally(() => {
+            if (this.requests.get(message.id) === pending) this.requests.delete(message.id);
+        });
     }
 
     private async answer(
-        turnId: string,
         message: AsyncQuestionMessage,
         questions: readonly ToolRequestUserInputQuestion[],
         response: acp.CreateElicitationResponse,
@@ -220,15 +203,15 @@ export class AsyncQuestionElicitations {
             }];
         });
         if (replies.length === 0) return;
-        if (this.turns.has(turnId)) {
+        if (this.requests.has(message.id)) {
             try {
-                await this.client.steer(turnId, formatAsyncQuestionReply(replies));
+                await this.client.sendReply(formatAsyncQuestionReply(replies));
                 return;
             } catch (error) {
-                logger.log("Async question answer was not steered into its turn", {sessionId: this.sessionId, turnId, error});
+                logger.log("Async question answer was not delivered", {sessionId: this.sessionId, error});
             }
         }
-        logger.log("Dropped an async question answer: its turn has ended", {sessionId: this.sessionId, turnId});
+        logger.log("Dropped an async question answer", {sessionId: this.sessionId});
         await this.client.reportDroppedAnswer();
     }
 }

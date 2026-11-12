@@ -876,7 +876,7 @@ describe("_session/list/subscribe", () => {
 
             expect(listChanges(fixture).flatMap(changes => changes.sessions.map((row: acp.SessionInfo) => row.cwd))).toEqual([dir]);
             agent.sessionIndex.dispose();
-            fs.rmSync(link);
+            fs.unlinkSync(link);
         } finally {
             fs.rmSync(dir, {recursive: true, force: true});
         }

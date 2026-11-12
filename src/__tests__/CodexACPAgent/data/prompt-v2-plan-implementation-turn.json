@@ -6,7 +6,7 @@
       "input": [
         {
           "type": "text",
-          "text": "Hello",
+          "text": "Implement the approved plan.",
           "text_elements": []
         }
       ],
@@ -45,7 +45,7 @@
     "sessionUpdate": {
       "messageId": "<messageId>",
       "content": {
-        "text": "Hello",
+        "text": "Implement the approved plan.",
         "type": "text"
       },
       "sessionUpdate": "user_message_chunk"
@@ -192,24 +192,17 @@
     "codexNotification": "turn/started"
   },
   {
-    "codexNotification": "item/completed"
+    "codexNotification": "item/started"
   },
   {
-    "sessionUpdate": {
-      "messageId": "<implementationId>",
-      "content": {
-        "text": "Implement the approved plan.",
-        "type": "text"
-      },
-      "sessionUpdate": "user_message_chunk"
-    }
+    "codexNotification": "item/completed"
   },
   {
     "codexNotification": "turn/completed"
   },
   {
     "sessionUpdate": {
-      "title": "Hello",
+      "title": "Implement the approved plan.",
       "sessionUpdate": "session_info_update"
     }
   },

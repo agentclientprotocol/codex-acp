@@ -190,7 +190,7 @@ describe('tool calls and messages over ACP v2', () => {
     it('flags unknown unprefixed session update tags and v1-only shapes', () => {
         const violations = [
             {sessionUpdate: "_vendor/custom", value: 1},
-            {sessionUpdate: "subagent_spawned", subagentSessionId: "child"},
+            {sessionUpdate: "vendor_unknown", value: 1},
             {sessionUpdate: "tool_call", toolCallId: "call-1", title: "Run tests"},
             {sessionUpdate: "agent_message_chunk", content: {type: "text", text: "no id"}},
             {sessionUpdate: "agent_message_chunk", messageId: "", content: {type: "text", text: "empty id"}},
@@ -204,7 +204,7 @@ describe('tool calls and messages over ACP v2', () => {
 
         expect(violations).toEqual([
             ["_vendor/custom", null],
-            ["subagent_spawned", "unknown unprefixed sessionUpdate 'subagent_spawned'"],
+            ["vendor_unknown", "unknown unprefixed sessionUpdate 'vendor_unknown'"],
             ["tool_call", "unknown unprefixed sessionUpdate 'tool_call'"],
             ["agent_message_chunk", expect.stringContaining("'agent_message_chunk' does not match its v2 schema")],
             ["agent_message_chunk", "'agent_message_chunk' has an empty messageId"],

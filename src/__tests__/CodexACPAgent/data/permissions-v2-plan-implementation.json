@@ -248,16 +248,6 @@
   },
   {
     "sessionUpdate": {
-      "messageId": "<implementationId>",
-      "content": {
-        "text": "Implement the approved plan.",
-        "type": "text"
-      },
-      "sessionUpdate": "user_message_chunk"
-    }
-  },
-  {
-    "sessionUpdate": {
       "title": "Hello",
       "sessionUpdate": "session_info_update"
     }

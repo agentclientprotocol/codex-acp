@@ -1,0 +1,10 @@
+{
+  "input": [
+    {
+      "type": "text",
+      "text": "<send_user_message_question_reply>\n[{\"answer\":\"After completion\",\"question\":\"Anything else?\",\"questionItemId\":\"[\\\"request_user_input_async\\\",\\\"call-question\\\",1]\"}]\n</send_user_message_question_reply>",
+      "text_elements": []
+    }
+  ],
+  "states": []
+}
