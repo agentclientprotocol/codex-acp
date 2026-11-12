@@ -3,7 +3,7 @@ import type {ServerNotification} from "../../app-server";
 import type {ThreadItem} from "../../app-server/v2";
 import {
     agentMessageDelta, commandExecutionItem, connectSession, codexResponse, createThread, createTurn, cwd,
-    itemStarted, sessionId, turnStarted, turnCompleted, userMessageItem, type PromptSession,
+    itemCompleted, itemStarted, sessionId, turnStarted, turnCompleted, userMessageItem, type PromptSession,
 } from "./v2-prompt-harness";
 import {expectConformingV2SessionUpdates} from "./v2-session-update-guard";
 import {subagentProtocol} from "../../subagents/AcpSubagents";
@@ -17,6 +17,12 @@ const childId = `${sessionId}:subagent:${worker}`;
 const activityItem = (id = worker, path = "/root/worker"): Extract<ThreadItem, {type: "subAgentActivity"}> =>
     ({type: "subAgentActivity", model: null, reasoningEffort: null, id: `activity-${id}`,
         agentThreadId: id, agentPath: path, kind: "started"});
+const collab = (tool: Extract<ThreadItem, {type: "collabAgentToolCall"}>["tool"], id: string, prompt: string | null,
+    status: "inProgress" | "completed" | "failed" = "completed"): ThreadItem =>
+    ({type: "collabAgentToolCall", id, tool, status, senderThreadId: sessionId,
+        receiverThreadIds: tool === "spawnAgent" && status === "inProgress" ? [] : [worker],
+        prompt, model: null, reasoningEffort: null, agentsStates: {}});
+const task = (id: string, text: string): ThreadItem => ({...userMessageItem(null, text), id});
 const onWorker = (event: ServerNotification, id = worker): ServerNotification =>
     ({...event, params: {...event.params, threadId: id}} as ServerNotification);
 
@@ -86,6 +92,38 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         expect(childUpdates().filter(entry => entry.update.sessionUpdate === "subagent_update"
             && entry.update.capabilities != null && Object.keys(entry.update.capabilities).length === 0)).toHaveLength(1);
         expect(childUpdates().some(entry => entry.update.sessionUpdate === "user_message_chunk")).toBe(false);
+        // No sender was observed, so the incoming view names only its recipient.
+        expect(childUpdates().filter(entry => entry.update.sessionUpdate === "session_message").map(entry => entry.update))
+            .toEqual([{sessionUpdate: "session_message", messageId: "item-user", recipientSessionId: childId,
+                content: [{type: "text", text: "Agent delegation"}]}]);
+    });
+
+    it("reports delegated tasks as linked session messages and references the child from visible collaboration calls", async () => {
+        await connect();
+        h.emit({method: "thread/started", params: {thread: {...createThread(), id: worker, parentThreadId: sessionId, agentRole: "explorer"}}});
+        h.emit(itemStarted(collab("spawnAgent", "spawn", "Find the bug", "inProgress")));
+        h.emit(itemCompleted(collab("spawnAgent", "spawn", "Find the bug")));
+        h.emit(onWorker(turnStarted("child-turn")));
+        h.emit(onWorker(itemStarted(task("task-1", "Find the bug"), "child-turn")));
+        h.emit(onWorker(itemCompleted(task("task-1", "Find the bug"), "child-turn")));
+        h.emit(onWorker(agentMessageDelta("First answer", "child-turn", "first")));
+        h.emit(onWorker(turnCompleted("child-turn")));
+        // The child can observe a later instruction before the parent's call completes.
+        h.emit(itemStarted(collab("sendInput", "send", "Also check Windows", "inProgress")));
+        h.emit(onWorker(turnStarted("next-turn")));
+        h.emit(onWorker(itemStarted(task("task-2", "Also check Windows"), "next-turn")));
+        h.emit(itemCompleted(collab("sendInput", "send", "Also check Windows")));
+        h.emit(itemCompleted(collab("wait", "wait", null)));
+        h.emit(itemCompleted(collab("sendInput", "failed-send", "Never sent", "failed")));
+        await flush(h);
+        const kinds = ["session_message", "tool_call", "tool_call_update", "agent_message_chunk"];
+        const updates = h.scopedUpdates.filter(entry => kinds.includes(entry.update.sessionUpdate)
+            || (entry.update.sessionUpdate === "subagent_update" && "description" in entry.update));
+        await expect(JSON.stringify(updates, null, 2) + "\n").toMatchFileSnapshot(`data/live-core-v${version}-delegation.json`);
+        expect(h.scopedUpdates.some(entry => entry.update.sessionUpdate === "user_message_chunk"
+            || (entry.update as {sessionUpdate: string}).sessionUpdate === "user_message")).toBe(false);
+        expect(h.scopedUpdates.some(entry => "toolCallId" in entry.update && entry.update.toolCallId === "spawn")).toBe(false);
+        expect(JSON.stringify(h.scopedUpdates.filter(entry => entry.update.sessionUpdate === "session_message"))).not.toContain("Never sent");
     });
 
     it("waits for immediate parentage and announces ancestors before child traffic", async () => {

@@ -142,6 +142,7 @@ const MCP_COMMAND = {
  * The feature changes of the compatibility rule that change the messages of the scenarios:
  * the `/mcp` command has a new description and an input hint.
  * Initialize also advertises text-only append system prompts and client-set titles.
+ * It no longer advertises `sessionCapabilities.subagents`, which the subagent RFD does not define for an Agent.
  * Only a command that equals the baseline `/mcp` command changes.
  */
 export function withFeatureChanges(messages: RecordedMessage[]): RecordedMessage[] {
@@ -152,8 +153,9 @@ export function withFeatureChanges(messages: RecordedMessage[]): RecordedMessage
             const capabilities = params["agentCapabilities"] as Json | undefined;
             const session = capabilities?.["sessionCapabilities"] as Json | undefined;
             if (session) {
+                const {subagents: _subagents, ...kept} = session;
                 return {...message, params: {...params, agentCapabilities: {
-                    ...capabilities, sessionCapabilities: {...session, systemPrompt: {}, title: {}},
+                    ...capabilities, sessionCapabilities: {...kept, systemPrompt: {}, title: {}},
                 }}};
             }
         }

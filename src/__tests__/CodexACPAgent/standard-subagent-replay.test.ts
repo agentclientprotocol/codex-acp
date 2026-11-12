@@ -130,7 +130,30 @@ describe.each([1, 2] as const)("ACP v%s recorded child replay", version => {
         }
         expect(text("Nested answer")).toBe(true);
         expect(childUpdates().some(entry => entry.update.sessionUpdate === "user_message_chunk")).toBe(false);
-        expect(gap()).toHaveLength(1);
+        // The spawn record holds no prompt, so no sender view exists to name or link.
+        expect(childUpdates().filter(entry => entry.update.sessionUpdate === "session_message").map(entry => entry.update))
+            .toEqual([{sessionUpdate: "session_message", messageId: "item-user", recipientSessionId: childId,
+                content: [{type: "text", text: "Agent-owned input"}]}]);
+        expect(gap()).toEqual([]);
+    });
+
+    it("replays delegated tasks as linked session messages before the child's responses", async () => {
+        await connect();
+        const send = (tool: "sendInput" | "wait", prompt: string | null): ThreadItem => ({...spawn(), id: tool, tool, prompt});
+        history(h, {
+            [sessionId]: {items: [{...spawn(), id: "spawn", prompt: "Find the bug"}, send("sendInput", "Also check Windows"), send("wait", null)]},
+            [worker]: {parent: sessionId, items: [
+                {...userMessageItem(null, "Find the bug"), id: "task-1"}, message("first", "First answer"),
+                {...userMessageItem(null, "Also check Windows"), id: "task-2"}, message("second", "Second answer"),
+            ]},
+        });
+        await load();
+        await flush(h);
+        const kinds = ["session_message", "tool_call", "tool_call_update", "agent_message_chunk", "agent_message"];
+        const updates = h.scopedUpdates.filter(entry => kinds.includes(entry.update.sessionUpdate)
+            || (entry.update.sessionUpdate === "subagent_update" && !("state" in entry.update)));
+        await expect(JSON.stringify(updates, null, 2) + "\n").toMatchFileSnapshot(`data/subagent-replay-v${version}-delegation.json`);
+        expect(gap()).toEqual([]);
     });
 
     it.each([false, true])("enriches an existing pathless parent before replaying a newly recorded descendant (cold: %s)", async cold => {

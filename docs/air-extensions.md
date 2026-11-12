@@ -1005,15 +1005,14 @@ Recovery never removes the transcript record.
 
 ## Native subagent sessions
 
-The adapter implements the draft [ACP subagent RFD](https://github.com/agentclientprotocol/agent-client-protocol/pull/1992).
-[Subagent sessions](subagent-sessions.md) describes the lifecycle.
+AIR keeps the private subagent contract that predates the ACP Subagent Sessions RFD.
+[Subagent sessions](subagent-sessions.md#air-legacy-contract) describes its lifecycle and the standard contract of other clients.
 This section covers only the AIR bridge.
 
-- The canonical client field is `clientCapabilities.subagents: {}`.
-- Released ACP SDKs can strip that draft field.
-  AIR can instead declare `nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`.
-- Either signal enables native subagent sessions. New clients must prefer the canonical field.
-- The agent always advertises `agentCapabilities.sessionCapabilities.subagents`. It advertises `nativeSubagentSessions` to AIR.
+- AIR declares `nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`, or on v1 `clientCapabilities.subagents: {}`.
+- Either signal enables native subagent sessions for AIR.
+- The agent advertises `agentCapabilities.sessionCapabilities.subagents` and `nativeSubagentSessions` to AIR only.
+  A client that is not AIR gets neither, because the RFD defines no Agent-side capability.
 - Without either signal, a Codex subagent stays an ordinary tool call.
   AIR gets `_meta.jetbrains.air.subagent: true` on a spawn. Another client gets the tool call without `_meta`.
 

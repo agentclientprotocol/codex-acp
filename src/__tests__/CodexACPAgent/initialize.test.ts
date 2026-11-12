@@ -55,7 +55,6 @@ describe('CodexACPAgent - initialize', () => {
                     fork: {},
                     title: {},
                     additionalDirectories: {},
-                    subagents: {},
                     systemPrompt: {},
                 },
                 mcpCapabilities: {
@@ -97,6 +96,14 @@ describe('CodexACPAgent - initialize', () => {
                 },
             },
         });
+    });
+
+    it.each([
+        ["a standard client", {subagents: {}}, undefined],
+        ["AIR", {subagents: {}, _meta: {jetbrains: {air: {version: 1, capabilities: []}}}}, {}],
+    ])('answers %s with the subagent session capability that only the AIR contract negotiates', async (_name, clientCapabilities, expected) => {
+        const result = await agent.initialize({protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities});
+        expect((result.agentCapabilities?.sessionCapabilities as {subagents?: unknown}).subagents).toEqual(expected);
     });
 
     it('should advertise gateway auth when the client opts into gateway auth metadata', async () => {
