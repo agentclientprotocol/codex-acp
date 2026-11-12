@@ -445,7 +445,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
     ): Promise<acp.CreateElicitationResponse | null> {
         const request = buildUserInputRequest(params, this.clientCapabilities);
         const signal = subagentInteractionSignal(params.threadId, this.cancellationSignal);
-        if (params.autoResolutionMs === null) {
+        if (params.autoResolutionMs == null) {
             return await withSubagentUserAction(params.threadId, () => this.connection.request(
                 acp.methods.client.elicitation.create,
                 request,
