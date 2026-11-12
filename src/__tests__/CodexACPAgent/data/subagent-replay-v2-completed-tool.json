@@ -81,6 +81,14 @@
   {
     "sessionId": "thread-1:subagent:worker",
     "update": {
+      "background": [],
+      "state": "running",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
       "messageId": "new",
       "content": {
         "text": "New answer",

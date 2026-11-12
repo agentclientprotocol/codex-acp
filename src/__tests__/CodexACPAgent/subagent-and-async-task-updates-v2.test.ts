@@ -181,7 +181,7 @@ describe.each([1, 2] as const)('AIR subagent and async task updates on ACP v%s',
         return {tasks, list, updates};
     }
 
-    it('preserves the AIR async task lifecycle when async tasks are enabled', async () => {
+    it('publishes the enabled tracker through the selected protocol', async () => {
         const {tasks, list, updates} = createAsyncTasks(true);
         list.mockResolvedValue({data: [{itemId: "command-1", processId: "42", command: "python -m http.server"}], nextCursor: null});
 
@@ -210,7 +210,10 @@ describe.each([1, 2] as const)('AIR subagent and async task updates on ACP v%s',
         }, "root");
         await tasks.sync("root", "root");
 
-        expect(updates).toEqual([
+        expect(updates).toEqual(version === 2 ? [{
+            sessionUpdate: "terminal_update", terminalId: "command-1", command: "python -m http.server",
+            capabilities: {cancel: {}},
+        }] : [
             {
                 sessionUpdate: "tool_call_update",
                 toolCallId: "command-1",

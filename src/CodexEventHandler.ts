@@ -477,6 +477,13 @@ export class CodexEventHandler {
             for (const event of this.subagents.takeBufferedNotifications()) await this.handleNotification(event);
             return;
         }
+        const command = notification.params as {threadId?: string; itemId?: string; item?: {id: string}};
+        const commandId = command.itemId ?? command.item?.id;
+        if (command.threadId !== undefined && commandId !== undefined
+            && this.session.forSession(this.subagents.notificationSessionId(notification))
+                .hasBackgroundItem({type: "terminal", terminalId: commandId})) {
+            this.streamsFor(command.threadId).commands.restoreTerminal(commandId);
+        }
         await this.flushPendingErrors();
         await this.finishCompactionsForNotification(notification);
         const closingChildren = this.subagents.closingChildSessions(notification);
@@ -517,7 +524,12 @@ export class CodexEventHandler {
                 toolCallTitle(updateEvent),
             );
         }
-        if (handledBySubagents) return;
+        if (handledBySubagents) {
+            if (notification.method === "item/completed") {
+                await this.sessionState.asyncTasks.handleNotification(notification, this.subagents.notificationSessionId(notification));
+            }
+            return;
+        }
         if (ignoredBySubagents) return;
         if (updateEvent === undefined) updateEvent = await this.createUpdateEvent(notification);
         if (updateEvent) {
