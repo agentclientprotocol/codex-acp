@@ -4,6 +4,7 @@ import {CommandExecutionApprovalRequest, FileChangeApprovalRequest} from '../../
 import type {
     CommandExecutionRequestApprovalParams,
     FileChangeRequestApprovalParams,
+    McpServerElicitationRequestParams,
 } from '../../app-server/v2';
 import {
     sessionId,
@@ -24,6 +25,7 @@ import {
     type PromptSession,
 } from './v2-prompt-harness';
 import {expectConformingV2SessionUpdates} from './v2-session-update-guard';
+import {McpApprovalOptionId} from '../../permissions/option-ids';
 
 /**
  * Starts a prompt and lets its turn actually start (`turn/started` emitted) before returning, so
@@ -81,6 +83,61 @@ describe('session/request_permission over ACP v2', () => {
         closeClient = null;
         vi.clearAllMocks();
         expectConformingV2SessionUpdates();
+    });
+
+    it.each([
+        [McpApprovalOptionId.AllowOnce, "accept", "Allow tool call?", "Allow tool call?"],
+        [McpApprovalOptionId.Cancel, "cancel", "Allow tool call?", "Allow tool call?"],
+        [McpApprovalOptionId.AllowOnce, "accept", "  ", "Allow tool-server tool call?"],
+    ] as const)('sends a correlated MCP approval with a title and maps %s to %s', async (optionId, action, message, title) => {
+        const requests: acpV2.RequestPermissionRequest[] = [];
+        const client = await connectSession(2, {
+            onRequestPermission: async request => {
+                requests.push(request);
+                return {outcome: {outcome: "selected", optionId}};
+            },
+        });
+        closeClient = () => client.connection.close();
+        const {finishTurn} = await startRunningPrompt(client);
+        client.emit(itemStarted({
+            type: "mcpToolCall",
+            id: "mcp-call-1",
+            server: "tool-server",
+            tool: "tool-name",
+            status: "inProgress",
+            arguments: {},
+            appContext: null,
+            mcpAppUi: null,
+            readOnlyHint: null,
+            pluginId: null,
+            result: null,
+            error: null,
+            durationMs: null,
+        }));
+        await settle();
+
+        const params: McpServerElicitationRequestParams = {
+            threadId: sessionId,
+            turnId,
+            serverName: "tool-server",
+            mode: "form",
+            message,
+            requestedSchema: {type: "object", properties: {}},
+            _meta: {codex_approval_kind: "mcp_tool_call"},
+        };
+        const response = await client.triggerApproval('mcpServer/elicitation/request', params);
+
+        expect(response).toEqual({action, content: null, _meta: null});
+        expect(requests).toHaveLength(1);
+        expect(requests[0]).toMatchObject({
+            sessionId,
+            title,
+            subject: {type: "tool_call", toolCall: {toolCallId: "mcp-call-1", status: "pending"}},
+        });
+        expect(requests[0]?.options.map(option => option.name)).toEqual(["Allow", "Cancel"]);
+        expect(requests[0]?._meta).toEqual({is_mcp_tool_approval: true});
+
+        await finishTurn();
     });
 
     it('sends a command approval request in the v2 shape and applies the allowed decision', async () => {
