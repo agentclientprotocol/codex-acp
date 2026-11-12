@@ -85,6 +85,7 @@
       "subject": {
         "toolCall": {
           "toolCallId": "plan-review:plan-item",
+          "name": "plan_review",
           "kind": "switch_mode",
           "status": "pending",
           "rawInput": {

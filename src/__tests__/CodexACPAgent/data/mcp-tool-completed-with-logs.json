@@ -6,6 +6,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "call-id",
+        "name": "mcp_tool_call",
         "kind": "execute",
         "title": "mcp.ijproxy.read_file",
         "status": "in_progress",

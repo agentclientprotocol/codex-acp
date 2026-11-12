@@ -530,15 +530,17 @@ The adapter does not copy action payloads into the metadata.
 
 The `toolCall` is an ACP `ToolCallUpdate`. The client merges it into the stored tool call.
 
-- The request always carries `toolCallId`, `title`, and `rawInput`.
-- `rawInput` holds the structured command, working directory, URL, or permission profile.
+- The request always carries `toolCallId` and `name`, even when the client already received the tool call.
+- `title` is display text; clients should use `name` for policy decisions.
+- `rawInput` holds the structured command, file-change paths and operations, MCP tool input, URL, or permission profile when Codex supplies it.
 - `locations` holds the affected paths when Codex supplies them.
 - `content` holds details that do not fit a location, such as a network host, a filesystem glob, or a special Codex scope.
 - When the client already has the command or file-change tool call, the request omits `status` and `kind`.
   The title is then the title that the tool call already shows.
   The request does not reset a started tool call to `pending`.
 - A network approval has its network title.
-- An approval of an MCP tool call that already started carries only `toolCallId` and `status: pending`.
+- A correlated MCP tool approval repeats `name: mcp_tool_call`, `rawInput = {server, tool, arguments}`,
+  and `_meta.is_mcp_tool_call: true` from the original call, with `kind: execute` and `status: pending`.
 - The question of a standalone MCP elicitation is in `rawInput.description`.
   A client without `rawInputRendering` also gets it as text in `content`.
 
@@ -553,6 +555,27 @@ Command approvals use `kind: execute`. File changes use `kind: edit`.
 Additional sandbox permissions use `kind: other`. A URL authorization fallback uses `kind: fetch`.
 For a file change, the locations come from the matching Codex `fileChange` item.
 The adapter does not present `grantRoot` as though every file below it changes.
+
+#### Tool identity
+
+These names are shared by ACP v1 and v2, including the original `tool_call` when there is one.
+They describe the operation; they do not depend on the display title or require AIR capabilities.
+
+| Operation | `toolCall.name` | Structured input |
+| --- | --- | --- |
+| Command execution (including `agent` and `userShell` sources) | `exec_command` | Command and working directory when supplied |
+| Unified-exec interaction or an approval with `kind: writeStdin` | `write_stdin` | Available command context; the current Codex approval request does not expose stdin bytes |
+| File change | `apply_patch` | `changes: [{path, kind}]` from the matching item; `kind` includes the operation and any `move_path`. File text remains in the diff, not duplicated here. |
+| MCP tool approval | `mcp_tool_call` | `server`, `tool`, and `arguments` from the uniquely correlated call |
+| Standalone MCP question | `mcp_elicitation` | `serverName`, `description`, and `schema` |
+| MCP URL authorization | `mcp_url_authorization` | `serverName`, `description`, and `url` |
+| Plan review | `plan_review` | `plan` |
+| Additional sandbox permissions | `request_permissions` | Requested permission profile and working directory |
+
+A file-change approval without a matching item omits `rawInput`; it does not claim there are no edits.
+An MCP approval without a unique matching call keeps the standalone `serverName`, `description`, and `schema`
+input. It still names the operation `mcp_tool_call`, but has no specific tool identity or arguments.
+In particular, concurrent calls to the same MCP server are not guessed from their display text or order.
 
 ### Command and network decisions
 

@@ -4,6 +4,7 @@
     "update": {
       "toolCallId": "command",
       "title": "sleep 12",
+      "name": "exec_command",
       "kind": "execute",
       "status": "in_progress",
       "content": [

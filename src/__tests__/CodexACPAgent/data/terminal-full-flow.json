@@ -6,6 +6,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "command-flow",
+        "name": "exec_command",
         "kind": "execute",
         "title": "echo hello",
         "status": "in_progress",

@@ -12,6 +12,7 @@
       "subject": {
         "toolCall": {
           "toolCallId": "cmd-item-1",
+          "name": "exec_command",
           "title": "ls -la",
           "kind": "execute",
           "status": "pending",

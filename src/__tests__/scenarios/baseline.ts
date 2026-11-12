@@ -101,6 +101,40 @@ const DYNAMIC_TOOL_RESULTS: Record<string, Record<string, string>> = {
     "history-replay": {"h-dyn": "No apps"},
 };
 
+/** Explicit identities added to the frozen pre-contract recordings. */
+const TOOL_IDENTITIES: Record<string, Json> = {
+    ...Object.fromEntries([
+        "bg-1", "cmd-a", "cmd-1", "cmd-2", "cmd-3", "cmd-net", "h-cmd", "h-read", "read-1", "search-1", "list-1",
+    ].map(id => [id, {name: "exec_command"}])),
+    ...Object.fromEntries(["mcp-1", "mcp-2", "mcp-3", "h-mcp"].map(id => [id, {name: "mcp_tool_call"}])),
+    ...Object.fromEntries(["fc-a", "fc-update", "h-fc"].map(id => [id, {
+        name: "apply_patch", rawInput: {changes: [{path: "/workspace/src/app.ts", kind: {type: "update", move_path: null}}]},
+    }])),
+    "fc-add": {name: "apply_patch", rawInput: {changes: [{path: "/workspace/new.txt", kind: {type: "add"}}]}},
+    "fc-delete": {name: "apply_patch", rawInput: {changes: [{path: "/workspace/old.txt", kind: {type: "delete"}}]}},
+    "fc-rename": {name: "apply_patch", rawInput: {changes: [{
+        path: "/workspace/before.ts", kind: {type: "update", move_path: "/workspace/after.ts"},
+    }]}},
+    "elicitation-el-1": {name: "mcp_url_authorization"},
+    "plan-review:plan-2": {name: "plan_review"},
+};
+
+function withToolIdentities(messages: RecordedMessage[]): RecordedMessage[] {
+    return messages.map(message => {
+        const params = message.params as Json;
+        const permission = message.method === "session/request_permission";
+        const call = permission ? params["toolCall"] as Json : sessionUpdate(message);
+        if (call === undefined || (!permission && call["sessionUpdate"] !== "tool_call")) return message;
+        const identity = TOOL_IDENTITIES[String(call["toolCallId"])];
+        if (identity === undefined) return message;
+        const mcpApproval = permission && call["toolCallId"] === "mcp-3" ? {
+            rawInput: {server: "docs", tool: "write", arguments: {query: "acp"}},
+            _meta: {is_mcp_tool_call: true},
+        } : {};
+        return {...message, params: {...params, [permission ? "toolCall" : "update"]: {...call, ...identity, ...mcpApproval}}};
+    });
+}
+
 /**
  * The bug fixes of the compatibility rule that change the messages of the scenarios:
  * - the MCP startup tool call id is unique, so it ends with a random id;
@@ -229,7 +263,7 @@ export function withOutputOnce(messages: RecordedMessage[]): RecordedMessage[] {
 
 /** The baseline messages with the allowed differences applied, except the merge of the tool call reports. */
 export function expectedFromBaseline(scenario: string, baseline: RecordedMessage[]): RecordedMessage[] {
-    return withFeatureChanges(withBugFixes(scenario, withoutAirOnlyMessages(baseline)));
+    return withFeatureChanges(withBugFixes(scenario, withToolIdentities(withoutAirOnlyMessages(baseline))));
 }
 
 /**

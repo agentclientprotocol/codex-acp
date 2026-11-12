@@ -12,6 +12,7 @@
       "subject": {
         "toolCall": {
           "toolCallId": "edit-item-1",
+          "name": "apply_patch",
           "title": "Edit files",
           "kind": "edit",
           "status": "pending"

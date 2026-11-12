@@ -6,6 +6,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "command-search-query-only",
+        "name": "exec_command",
         "kind": "search",
         "title": "Search for 'Service'",
         "status": "in_progress"

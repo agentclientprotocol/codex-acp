@@ -296,6 +296,7 @@ describe("clients that are not AIR", () => {
             expect(permissionRequests(profile, "command-approval")[0]).toEqual(expect.objectContaining({
                 toolCall: {
                     toolCallId: "cmd-a",
+                    name: "exec_command",
                     kind: "execute",
                     status: "pending",
                     title: "npm install",
@@ -631,6 +632,7 @@ describe("Zed", () => {
         expect(updates("zed", "command-output-stdin", "cmd-1")[0]).toEqual({
             sessionUpdate: "tool_call",
             toolCallId: "cmd-1",
+            name: "exec_command",
             kind: "execute",
             title: "npm test",
             status: "in_progress",

@@ -126,7 +126,7 @@ export class CommandReporter {
         ];
         return {
             toolCallId: params.itemId,
-            ...(name === undefined ? {} : {name}),
+            name: params.kind === "writeStdin" ? "write_stdin" : name ?? "exec_command",
             ...(started ? {} : {kind: "execute" as const, status: "pending" as const}),
             title: network
                 ? `${network.protocol} network access to ${network.host}`
@@ -179,11 +179,10 @@ export function commandUsesTerminal(item: CommandItem): boolean {
 
 
 function startFacts(item: CommandItem): ToolFacts {
-    const name = commandToolName(item.source);
     const action = singleAction(item.commandActions);
     return {
         ...commandActionFacts(item.id, item.status, item.cwd, action ?? {type: "unknown", command: item.command}),
-        ...(name === undefined ? {} : {name}),
+        name: commandToolName(item.source),
     };
 }
 

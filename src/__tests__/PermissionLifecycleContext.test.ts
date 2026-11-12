@@ -127,7 +127,7 @@ describe("PermissionLifecycleContext", () => {
         });
         prompt.handleNotification(mcpStarted("current-call", "turn-2"));
 
-        expect(prompt.popPendingMcpApproval("thread", "server")).toBe("current-call");
+        expect(prompt.popPendingMcpApproval("thread", "server")).toMatchObject({id: "current-call", server: "server", tool: "tool", arguments: {}});
     });
 
     it("keeps synthetic IDs session-scoped across prompt contexts", () => {
@@ -145,7 +145,7 @@ describe("PermissionLifecycleContext", () => {
         currentPrompt.handleNotification(mcpStarted("current-call", "turn-2"));
 
         expect(stalePrompt.popPendingMcpApproval("thread", "server")).toBeUndefined();
-        expect(currentPrompt.popPendingMcpApproval("thread", "server")).toBe("current-call");
+        expect(currentPrompt.popPendingMcpApproval("thread", "server")).toMatchObject({id: "current-call", server: "server", tool: "tool", arguments: {}});
     });
 
     it("clears only the completed thread's permission correlation", () => {
@@ -159,7 +159,7 @@ describe("PermissionLifecycleContext", () => {
 
         prompt.handleNotification(turnCompleted("child-b"));
 
-        expect(prompt.popPendingMcpApproval("child-a", "server")).toBe("call-a");
+        expect(prompt.popPendingMcpApproval("child-a", "server")).toMatchObject({id: "call-a", server: "server", tool: "tool", arguments: {}});
         expect(prompt.popPendingMcpApproval("child-b", "server")).toBeUndefined();
         expect(prompt.fileChange("child-a", "shared-file-change")?.changes[0]?.path).toBe("/child-a.txt");
         expect(prompt.fileChange("child-b", "shared-file-change")).toBeUndefined();

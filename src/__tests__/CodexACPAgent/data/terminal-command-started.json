@@ -6,6 +6,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "command-123",
+        "name": "exec_command",
         "kind": "execute",
         "title": "ls -la",
         "status": "in_progress",

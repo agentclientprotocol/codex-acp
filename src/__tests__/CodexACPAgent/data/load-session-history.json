@@ -190,6 +190,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-cmd-1",
+        "name": "exec_command",
         "kind": "execute",
         "title": "ls",
         "status": "completed",
@@ -244,6 +245,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-file-1",
+        "name": "apply_patch",
         "kind": "edit",
         "title": "Editing files",
         "status": "completed",
@@ -257,7 +259,17 @@
               "kind": "add"
             }
           }
-        ]
+        ],
+        "rawInput": {
+          "changes": [
+            {
+              "path": "/test/project/Added.txt",
+              "kind": {
+                "type": "add"
+              }
+            }
+          ]
+        }
       }
     }
   ]
@@ -270,6 +282,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "item-mcp-1",
+        "name": "mcp_tool_call",
         "kind": "execute",
         "title": "mcp.github.search",
         "status": "completed",

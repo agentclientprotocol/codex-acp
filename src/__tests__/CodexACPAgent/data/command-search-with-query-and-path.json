@@ -6,6 +6,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "command-search-query-path",
+        "name": "exec_command",
         "kind": "search",
         "title": "Search for 'Service' in src",
         "status": "in_progress"
