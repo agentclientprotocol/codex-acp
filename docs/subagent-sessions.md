@@ -21,7 +21,8 @@ Without either contract, a subagent stays an ordinary tool call on the root sess
 - It uses the child session ID for later messages, thoughts, plans, tools, permissions, and elicitations.
 - It mirrors each child state snapshot on the immediate parent.
 - The adapter advertises `capabilities.cancel: {}` only while that child has cancellable work.
-- `session/cancel` addresses the selected child and its descendants. It preserves the parent and sibling work.
+- On ACP v2, `session/cancel` stops only the selected child's foreground work. It preserves descendant work and requests.
+- On ACP v1, child `session/cancel` also stops descendant work. Both versions preserve parent and sibling work.
 - Child permissions and elicitations use the owning child session ID.
 - On ACP v2, root `session/cancel` stops foreground work and preserves child work and requests.
 - Root `session/close` stops child work and withdraws child requests. ACP v1 retains recursive root cancellation.

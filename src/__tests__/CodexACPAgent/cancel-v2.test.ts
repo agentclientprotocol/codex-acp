@@ -93,11 +93,17 @@ describe('session/cancel and session/close over ACP v2', () => {
             .toMatchFileSnapshot('data/cancel-v2-running-prompt.json');
     });
 
-    it('preserves a child approval across foreground Stop and ends child work on Close', async () => {
+    it('preserves child approvals across foreground Stop and ends descendant work on Close', async () => {
         const permission = deferred<acpV2.RequestPermissionResponse>();
+        const descendantPermission = deferred<acpV2.RequestPermissionResponse>();
         let permissionSignal: AbortSignal | undefined;
+        let descendantSignal: AbortSignal | undefined;
         let optionId = "";
         const client = await connectSession(2, {onRequestPermission: (request, signal) => {
+            if (request.sessionId === `${sessionId}:subagent:descendant`) {
+                descendantSignal = signal;
+                return descendantPermission.promise;
+            }
             optionId = request.options[0]!.optionId;
             permissionSignal = signal;
             return permission.promise;
@@ -109,21 +115,34 @@ describe('session/cancel and session/close over ACP v2', () => {
         client.emit(itemStarted({type: "subAgentActivity", id: "spawn-worker", kind: "started", agentThreadId: "worker",
             agentPath: "/root/worker", model: null, reasoningEffort: null}));
         client.emit({method: "turn/started", params: {threadId: "worker", turn: createTurn("inProgress", "worker-turn")}});
+        client.emit(itemStarted({type: "subAgentActivity", id: "spawn-descendant", kind: "started", agentThreadId: "descendant",
+            agentPath: "/root/worker/descendant", model: null, reasoningEffort: null}));
+        client.emit({method: "turn/started", params: {threadId: "descendant", turn: createTurn("inProgress", "descendant-turn")}});
         const approval = client.triggerApproval(CommandExecutionApprovalRequest.method, {
             ...commandApprovalParams(), threadId: "worker", turnId: "worker-turn",
         });
+        const descendantApproval = client.triggerApproval(CommandExecutionApprovalRequest.method, {
+            ...commandApprovalParams(), threadId: "descendant", turnId: "descendant-turn",
+        });
         try {
             await vi.waitFor(() => expect(permissionSignal).toBeDefined());
+            await vi.waitFor(() => expect(descendantSignal).toBeDefined());
             await client.cancel();
             await vi.waitFor(() => expect(client.turnInterruptCalls()).toEqual([{threadId: sessionId, turnId}]));
             client.emit(turnFinished("interrupted"));
             await client.promptRunFinished();
             expect(permissionSignal!.aborted).toBe(false);
+            expect(descendantSignal!.aborted).toBe(false);
             permission.resolve({outcome: {outcome: "selected", optionId}});
             await expect(approval).resolves.toEqual({decision: "accept"});
             await client.request("session/close", {sessionId});
             expect(client.turnInterruptCalls()).toContainEqual({threadId: "worker", turnId: "worker-turn"});
-        } finally { permission.resolve({outcome: {outcome: "cancelled"}}); }
+            expect(client.turnInterruptCalls()).toContainEqual({threadId: "descendant", turnId: "descendant-turn"});
+            await expect(descendantApproval).resolves.toEqual({decision: "cancel"});
+        } finally {
+            permission.resolve({outcome: {outcome: "cancelled"}});
+            descendantPermission.resolve({outcome: {outcome: "cancelled"}});
+        }
     });
 
     it('drops queued prompts with -32800 on cancel, and lets a later prompt run normally', async () => {
