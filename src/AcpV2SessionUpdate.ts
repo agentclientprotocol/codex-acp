@@ -143,6 +143,7 @@ export function toV2ToolCallContent(content: acp.ToolCallContent): acpV2.ToolCal
             return content;
         // Same shape on v2; the terminal itself is sent by `toV2SessionUpdates`.
         case "terminal":
+        case "session":
             return content;
         case "session":
             return content;

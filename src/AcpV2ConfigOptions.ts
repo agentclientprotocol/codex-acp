@@ -60,3 +60,15 @@ export function toV1SetSessionConfigOptionRequest(
 ): acp.SetSessionConfigOptionRequest {
     return {sessionId: params.sessionId, ...toV1ConfigValue(params)};
 }
+
+/** Converts supported initial option values to the shared request shape. */
+export function toV1InitialConfigOptions(
+    options: acpV2.InitialSessionConfigOption[] | undefined,
+): acp.InitialSessionConfigOption[] | undefined {
+    return options?.map(option => {
+        const {type, value, ...base} = option;
+        if (type === "id" && typeof value === "string") return {...base, value};
+        if (type === "boolean" && typeof value === "boolean") return {...base, type, value};
+        throw acp.RequestError.invalidParams(undefined, "Unsupported initial configuration value");
+    });
+}
