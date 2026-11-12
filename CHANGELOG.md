@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.7.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.6.0...v2.7.0) (2026-11-12)
+
+
+### Features
+
+* report delegated tasks as session messages and reference children from tool calls ([#760](https://github.com/agentclientprotocol/codex-acp/issues/760)) ([6567651](https://github.com/agentclientprotocol/codex-acp/commit/656765115f82253c79f87918abb77189c114a799))
+* send structured plans as items plan_update when the client supports it ([#752](https://github.com/agentclientprotocol/codex-acp/issues/752)) ([ab7a968](https://github.com/agentclientprotocol/codex-acp/commit/ab7a968e982a95d8a765c1e6c6682a520d4f7638))
+* show the retry cause as details of the AIR retry warning ([#755](https://github.com/agentclientprotocol/codex-acp/issues/755)) ([e981b3c](https://github.com/agentclientprotocol/codex-acp/commit/e981b3c8c5236e715311964b1cb0044cc6fd54c3))
+
+
+### Bug Fixes
+
+* Map priority mode to fast ([#327](https://github.com/agentclientprotocol/codex-acp/issues/327)) ([52cc518](https://github.com/agentclientprotocol/codex-acp/commit/52cc518a371eb0a23d4d23ebe1dd1c657461b25c))
+
 ## [2.6.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.5.0...v2.6.0) (2026-11-06)
 
 
