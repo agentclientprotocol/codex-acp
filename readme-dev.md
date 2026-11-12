@@ -259,7 +259,10 @@ schema alone:
 
 Non-AIR v1 clients opt in with `clientCapabilities.subagents: {}`. Non-AIR v2 clients use
 standard `subagent_update` associations automatically. AIR keeps its existing opt-in, updates,
-and generation-based identities; clients do not receive both contracts.
+and generation-based identities; clients do not receive both contracts. Only AIR gets the
+Agent-side `sessionCapabilities.subagents` in the `initialize` response.
+See [docs/subagent-sessions.md](docs/subagent-sessions.md) for delegated task messages and session
+references on collaboration tool calls.
 
 A standard child keeps one opaque conversation ID across assignments and parent handler changes.
 Its ancestors are announced before its output, tool updates, or interactions. Permissions and
@@ -294,8 +297,8 @@ including nested children, using legacy or paginated history. Announcements and 
 precede the response. Completed snapshots reconcile tool and rendering state before duplicate live
 payloads are suppressed; live bookkeeping still runs. In-progress commands retain classification without
 resetting streamed output. Incomplete text has no safe delta cursor; it and other records without a safe
-partial representation are omitted rather than replayed over newer content. Agent-owned input is not
-rendered as human input. Missing, omitted, or incomplete child history produces a parent advisory;
+partial representation are omitted rather than replayed over newer content. Agent-owned input is replayed as
+`session_message`, not as human input. Missing, omitted, or incomplete child history produces a parent advisory;
 an empty transcript alone does not invent a gap.
 
 Replay reports the latest recorded child turn's known success, cancellation, or failure as historical

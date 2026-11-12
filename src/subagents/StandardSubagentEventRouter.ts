@@ -1,3 +1,4 @@
+import type {ContentBlock} from "@agentclientprotocol/sdk/unstable";
 import type {ReasoningEffort, ServerNotification} from "../app-server";
 import type {StateUpdate} from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import type {Thread, ThreadItem, Turn} from "../app-server/v2";
@@ -11,6 +12,7 @@ import {readableServiceErrorMessage} from "../ServiceErrorMessage";
 import {toV2IdleState} from "../AcpV2Prompt";
 import {normalizeSessionTitle} from "../SessionTitle";
 import {CollabAgentReporter} from "../tool-calls/reporters/CollabAgentReporter";
+import type {ToolFacts} from "../tool-calls/ToolFacts";
 import {SubagentActivityReporter} from "../tool-calls/reporters/SubagentActivityReporter";
 import type {SubagentState} from "./AcpSubagents";
 import {
@@ -22,6 +24,7 @@ import {PendingNotificationBuffer} from "./PendingNotificationBuffer";
 import {SubagentAssociations, type SubagentAssociation} from "./SubagentAssociations";
 import type {SubagentEventRouter} from "./SubagentEventRouter";
 import {runSubagentInteraction} from "./SubagentInteraction";
+import {outgoingMessageId, sendsMessage, SubagentMessages, userMessageText} from "./SubagentMessages";
 import {logger} from "../Logger";
 import {isAbsoluteProtocolPath} from "../PathUtils";
 
@@ -80,6 +83,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
     private snapshotting = false;
     private readonly snapshots = new Map<string, {child: Child; state: StateUpdate}>();
     private interactionObserver?: (event: ServerNotification, sessionId: string) => Promise<void>;
+    private readonly messages = new SubagentMessages((update, sessionId) => this.session.update(update, sessionId));
 
     constructor(
         private readonly rootSessionId: string,
@@ -95,6 +99,8 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
             read(threadId: string, parentThreadId: string): Promise<ObservedSubagentConfiguration | null>;
             enqueuePublication(publish: () => Promise<void>): Promise<void>;
         },
+        private readonly userMessageContent: (item: ThreadItem & {type: "userMessage"}) => ContentBlock[]
+            = item => [{type: "text", text: userMessageText(item)}],
     ) {
         this.deferredLive = new PendingNotificationBuffer(rootSessionId);
     }
@@ -133,6 +139,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
             if (thread.parentThreadId === this.rootSessionId || parent?.live || child?.live
                 || (!child && this.spawnsInFlight.size > 0)) {
                 await this.observeConfiguration(thread.id, {model: thread.model, effort: thread.reasoningEffort}, "threadStarted");
+                await this.observeRole(thread.id, thread.agentRole);
             }
             return false;
         }
@@ -150,11 +157,12 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
                     if (!id.trim() || id === item.senderThreadId || id === this.rootSessionId || this.children.has(id)) continue;
                     const pending = this.pendingFor(id);
                     pending.parentThreadId = item.senderThreadId;
-                    if (item.prompt) pending.description = item.prompt;
                 }
                 await this.materializePending();
+                await this.reportOutgoingMessages(item);
                 return true;
             }
+            if (item.type === "collabAgentToolCall") await this.reportOutgoingMessages(item);
             if (item.type === "subAgentActivity") {
                 if (isRootAgentPath(item.agentPath)) return true;
                 const child = this.children.get(item.agentThreadId);
@@ -254,7 +262,10 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
                 return true;
             case "item/started":
                 if (replayed === true) return true;
-                if (notification.params.item.type === "userMessage") return true;
+                if (notification.params.item.type === "userMessage") {
+                    await this.reportIncomingMessage(threadId, notification.params.item);
+                    return true;
+                }
                 if (child.turnId !== null && child.foregroundTurnId === notification.params.turnId) {
                     await child.foreground.startItem(notification.params.item.id);
                 }
@@ -270,7 +281,10 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
                     if (item.type === "commandExecution") child.streams.commands.restore(item);
                     return true;
                 }
-                if (item.type === "userMessage") return true;
+                if (item.type === "userMessage") {
+                    await this.reportIncomingMessage(threadId, item);
+                    return true;
+                }
                 if (item.type === "plan") {
                     const plans = new CodexPlanStream(this.session.forSession(child.sessionId), this.capabilities);
                     const plan = await plans.completed(item.id, item.text);
@@ -384,6 +398,44 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         const parent = this.parentFor({path: normalizeAgentPath(path), notifications: new PendingNotificationBuffer(threadId)});
         return parent === undefined ? null : this.announce(threadId, parent, path);
     }
+
+    /** The role Codex assigned describes the child. The task it was given is a message, not a description. */
+    async observeRole(threadId: string, role: string | null): Promise<void> {
+        const description = role?.trim();
+        if (!description || this.retired) return;
+        const child = this.children.get(threadId);
+        if (!child) { this.pendingFor(threadId).description = description; return; }
+        if (child.description === description) return;
+        child.description = description;
+        if (!this.announced.has(threadId)) return;
+        await this.session.update({sessionUpdate: "subagent_update", sessionId: child.sessionId, description}, child.parentSessionId);
+    }
+
+    /** The sender's view of a prompt it sent to announced children. A failed or unfinished call sent nothing. */
+    async reportOutgoingMessages(item: ThreadItem & {type: "collabAgentToolCall"}): Promise<void> {
+        if (this.retired || !sendsMessage(item)) return;
+        const sender = item.senderThreadId === this.rootSessionId ? this.rootSessionId : this.children.get(item.senderThreadId)?.sessionId;
+        if (sender === undefined) return;
+        for (const id of new Set(item.receiverThreadIds)) {
+            const receiver = this.children.get(id);
+            if (!receiver || receiver.sessionId === sender) continue;
+            await this.ensureAnnounced(receiver);
+            if (!this.announced.has(id)) continue;
+            await this.messages.outgoing(sender, receiver.sessionId, outgoingMessageId(item, id), item.prompt);
+        }
+    }
+
+    /** What the child received. The sender is named only when its outgoing view was observed. */
+    async reportIncomingMessage(threadId: string, item: ThreadItem & {type: "userMessage"}): Promise<void> {
+        const child = this.children.get(threadId);
+        if (!child || this.retired) return;
+        await this.ensureAnnounced(child);
+        if (!this.announced.has(threadId)) return;
+        await this.messages.incoming(child.sessionId, item.id, userMessageText(item), this.userMessageContent(item));
+    }
+
+    /** A replay reports the recorded messages again. */
+    beginHistoryReplay(): void { this.messages.reset(); }
 
     private async observeConfiguration(threadId: string, observed: ObservedSubagentConfiguration, source: ChildModel["source"]): Promise<void> {
         const previous = this.configurations.get(threadId);
@@ -679,6 +731,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         if (!child || this.retired) return;
         child.live = true;
         await this.observeConfiguration(thread.id, {model: thread.model, effort: thread.reasoningEffort}, "threadStarted");
+        await this.observeRole(thread.id, thread.agentRole);
         if (thread.status.type === "idle") {
             child.turnId = null;
             child.foregroundTurnId = null;
@@ -734,8 +787,17 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
     legacyActivityCompleted(item: ThreadItem & {type: "subAgentActivity"}) {
         return SubagentActivityReporter.activity(item, "completed", this.legacyActivities.delete(item.id) ? "update" : "start");
     }
-    legacyCollaborationStarted(item: ThreadItem & {type: "collabAgentToolCall"}) { return CollabAgentReporter.started(item); }
-    legacyCollaborationCompleted(item: ThreadItem & {type: "collabAgentToolCall"}) { return CollabAgentReporter.completed(item); }
+    legacyCollaborationStarted(item: ThreadItem & {type: "collabAgentToolCall"}) { return this.withSessionReferences(item, CollabAgentReporter.started(item)); }
+    legacyCollaborationCompleted(item: ThreadItem & {type: "collabAgentToolCall"}) { return this.withSessionReferences(item, CollabAgentReporter.completed(item)); }
+
+    /** A visible collaboration call links to the announced children it operates on. */
+    private withSessionReferences(item: ThreadItem & {type: "collabAgentToolCall"}, facts: ToolFacts): ToolFacts {
+        const content = [...new Set(item.receiverThreadIds)].flatMap(id => {
+            const child = this.children.get(id);
+            return child && this.announced.has(id) ? [{type: "session" as const, sessionId: child.sessionId}] : [];
+        });
+        return content.length === 0 ? facts : {...facts, standard: {...facts.standard, content}};
+    }
 }
 
 function turnEndState(turn: Turn): StateUpdate | undefined {

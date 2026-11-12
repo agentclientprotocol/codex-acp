@@ -96,9 +96,11 @@ See [readme-dev.md](readme-dev.md) for local client configuration, binary packag
 
 ### Subagent sessions
 
-Subagent sessions follow the draft [ACP subagent RFD](https://github.com/agentclientprotocol/agent-client-protocol/pull/1992) and are enabled only after bilateral capability negotiation during `initialize`. Without native negotiation, the subagent lifecycle stays an ordinary ACP tool call.
+Codex subagents are reported as ACP child sessions that follow the ACP [Subagent Sessions RFD](https://agentclientprotocol.com/rfds/subagents). A v1 client opts in with `clientCapabilities.subagents: {}` during `initialize`. A v2 client gets them without negotiation. The adapter announces each child with `subagent_update`, reports delegated tasks as `session_message`, and references children from collaboration tool calls with `session` content. A client can cancel a child's current work with `session/cancel`.
 
-See [docs/subagent-sessions.md](docs/subagent-sessions.md) for the negotiation, lifecycle events, `session/load` reconstruction, and legacy fallback details.
+JetBrains AIR clients keep an older private contract instead. Without either contract, the subagent lifecycle stays an ordinary ACP tool call.
+
+See [docs/subagent-sessions.md](docs/subagent-sessions.md) for both contracts, `session/load` replay, and the fallback.
 
 ### Background terminal tasks
 
