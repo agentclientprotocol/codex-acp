@@ -9,6 +9,7 @@ import {
     userMessageItem,
     itemStarted,
     itemCompleted,
+    itemStarted,
     turnStarted,
     turnCompleted,
     turnFinished,
@@ -90,6 +91,39 @@ describe('session/cancel and session/close over ACP v2', () => {
         expect(idle).toBeGreaterThan(failedTool);
         await expect(dump(client.transcript, client.turnStartParams[0]!["clientUserMessageId"] as string))
             .toMatchFileSnapshot('data/cancel-v2-running-prompt.json');
+    });
+
+    it('preserves a child approval across foreground Stop and ends child work on Close', async () => {
+        const permission = deferred<acpV2.RequestPermissionResponse>();
+        let permissionSignal: AbortSignal | undefined;
+        let optionId = "";
+        const client = await connectSession(2, {onRequestPermission: (request, signal) => {
+            optionId = request.options[0]!.optionId;
+            permissionSignal = signal;
+            return permission.promise;
+        }});
+        closeClient = () => client.connection.close();
+        const {response, clientUserMessageId} = await startRunningPrompt(client);
+        client.emit(itemCompleted(userMessageItem(clientUserMessageId)));
+        await response;
+        client.emit(itemStarted({type: "subAgentActivity", id: "spawn-worker", kind: "started", agentThreadId: "worker",
+            agentPath: "/root/worker", model: null, reasoningEffort: null}));
+        client.emit({method: "turn/started", params: {threadId: "worker", turn: createTurn("inProgress", "worker-turn")}});
+        const approval = client.triggerApproval(CommandExecutionApprovalRequest.method, {
+            ...commandApprovalParams(), threadId: "worker", turnId: "worker-turn",
+        });
+        try {
+            await vi.waitFor(() => expect(permissionSignal).toBeDefined());
+            await client.cancel();
+            await vi.waitFor(() => expect(client.turnInterruptCalls()).toEqual([{threadId: sessionId, turnId}]));
+            client.emit(turnFinished("interrupted"));
+            await client.promptRunFinished();
+            expect(permissionSignal!.aborted).toBe(false);
+            permission.resolve({outcome: {outcome: "selected", optionId}});
+            await expect(approval).resolves.toEqual({decision: "accept"});
+            await client.request("session/close", {sessionId});
+            expect(client.turnInterruptCalls()).toContainEqual({threadId: "worker", turnId: "worker-turn"});
+        } finally { permission.resolve({outcome: {outcome: "cancelled"}}); }
     });
 
     it('drops queued prompts with -32800 on cancel, and lets a later prompt run normally', async () => {

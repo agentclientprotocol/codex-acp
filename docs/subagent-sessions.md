@@ -15,6 +15,17 @@ Without either contract, a subagent stays an ordinary tool call on the root sess
 - A v2 Client needs no capability. Subagent updates are part of the v2 session model.
 - There is no Agent-side capability. The `initialize` response to a standard Client does not contain `agentCapabilities.sessionCapabilities.subagents`.
 
+### Lifecycle controls
+
+- The adapter sends `subagent_update` before any child output.
+- It uses the child session ID for later messages, thoughts, plans, tools, permissions, and elicitations.
+- It mirrors each child state snapshot on the immediate parent.
+- The adapter advertises `capabilities.cancel: {}` only while that child has cancellable work.
+- `session/cancel` addresses the selected child and its descendants. It preserves the parent and sibling work.
+- Child permissions and elicitations use the owning child session ID.
+- On ACP v2, root `session/cancel` stops foreground work and preserves child work and requests.
+- Root `session/close` stops child work and withdraws child requests. ACP v1 retains recursive root cancellation.
+
 ### Association updates
 
 - The adapter sends `subagent_update` on the immediate parent before any update, permission request, or elicitation that bears the child's session ID. Ancestors are announced before descendants.
