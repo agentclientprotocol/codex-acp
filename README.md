@@ -100,7 +100,8 @@ See [readme-dev.md](readme-dev.md) for local client configuration, binary packag
 
 Codex subagents are reported as [ACP child sessions](https://agentclientprotocol.com/protocol/v2/subagents). A v1 client opts in with `clientCapabilities.subagents: {}` during `initialize`. A v2 client gets them without negotiation. The adapter announces each child with `subagent_update`, reports delegated tasks as `session_message`, and references children from collaboration tool calls with `session` content. A client can cancel a child's current work with `session/cancel`.
 
-JetBrains AIR clients keep an older private contract instead. Without either contract, the subagent lifecycle stays an ordinary ACP tool call.
+Air v1 clients can use an older private contract. ACP v2 always uses the standard contract.
+Without either contract, the subagent lifecycle stays an ordinary ACP tool call.
 
 See [docs/subagent-sessions.md](docs/subagent-sessions.md) for both contracts, `session/load` replay, and the fallback.
 
