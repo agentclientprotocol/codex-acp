@@ -354,7 +354,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         await flush(h);
     });
 
-    it("cascades parent cancellation without inventing a child ending", async () => {
+    it("applies parent cancellation to the protocol scope without inventing a child ending", async () => {
         await connect();
         h.emit(turnStarted());
         h.emit(itemStarted(activityItem()));
@@ -362,8 +362,13 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         await flush(h);
         const before = childUpdates().length;
         await h.cancel();
-        await vi.waitFor(() => expect(h.turnInterruptCalls()).toContainEqual({threadId: worker, turnId: "child-turn"}));
         await flush(h);
+        const childInterrupt = {threadId: worker, turnId: "child-turn"};
+        if (version === 1) {
+            await vi.waitFor(() => expect(h.turnInterruptCalls()).toContainEqual(childInterrupt));
+        } else {
+            expect(h.turnInterruptCalls()).not.toContainEqual(childInterrupt);
+        }
         expect(childUpdates().slice(before)).toEqual([]);
         h.emit(onWorker(turnCompleted("child-turn")));
         await snapshot("cancel");
