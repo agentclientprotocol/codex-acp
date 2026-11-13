@@ -1385,16 +1385,20 @@ export class CodexAcpServer {
             sessionMetadata.permissionProfiles,
             sessionMetadata.approvalPolicy,
             sessionMetadata.approvalsReviewer,
+            sessionMetadata.resolvedPermissions,
         );
+        const previousMode = sessionMetadata.unmaterialized ? this.sessions.get(sessionId)?.agentMode : undefined;
+        if (previousMode && !availableAgentModes.some(mode => mode.id === previousMode.id)) availableAgentModes.push(previousMode);
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
             availableModels: models,
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
-            agentMode: AgentMode.getInitialAgentMode(
+            agentMode: previousMode ?? AgentMode.getInitialAgentMode(
                 availableAgentModes,
                 sessionMetadata.activePermissionProfileId,
+                sessionMetadata.resolvedPermissions,
             ),
             availableAgentModes,
             collaborationMode: sessionMetadata.collaborationMode,
@@ -3620,16 +3624,20 @@ export class CodexAcpServer {
             sessionMetadata.permissionProfiles,
             sessionMetadata.approvalPolicy,
             sessionMetadata.approvalsReviewer,
+            sessionMetadata.resolvedPermissions,
         );
+        const previousMode = sessionMetadata.unmaterialized ? this.sessions.get(sessionId)?.agentMode : undefined;
+        if (previousMode && !availableAgentModes.some(mode => mode.id === previousMode.id)) availableAgentModes.push(previousMode);
         const sessionState: SessionState = {
             sessionId: sessionId,
             currentModelId: currentModelId,
             availableModels: models,
             supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
             supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
-            agentMode: AgentMode.getInitialAgentMode(
+            agentMode: previousMode ?? AgentMode.getInitialAgentMode(
                 availableAgentModes,
                 sessionMetadata.activePermissionProfileId,
+                sessionMetadata.resolvedPermissions,
             ),
             availableAgentModes,
             collaborationMode: sessionMetadata.collaborationMode,
