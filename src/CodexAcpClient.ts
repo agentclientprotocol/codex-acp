@@ -141,6 +141,8 @@ export interface AuthRequirement {
     required: boolean;
     /** The account read that gave the answer, or `null` when the adapter did not read the account. */
     account: GetAccountResponse | null;
+    /** Why the stored login does not work, from the failed account read. Absent for a missing login. */
+    reason?: string;
 }
 
 export interface UrlElicitationRequester {
@@ -438,8 +440,15 @@ export class CodexAcpClient {
             return {required: false, account: null};
         }
 
-        const response = await this.codexClient.accountRead({refreshToken: false});
-        return {required: response.requiresOpenaiAuth && !response.account, account: response};
+        try {
+            const response = await this.codexClient.accountRead({refreshToken: false});
+            return {required: response.requiresOpenaiAuth && !response.account, account: response};
+        } catch (error) {
+            if (isAccountReadAuthFailureError(error)) {
+                return {required: true, account: null, reason: (error as Error).message};
+            }
+            throw error;
+        }
     }
 
     /**

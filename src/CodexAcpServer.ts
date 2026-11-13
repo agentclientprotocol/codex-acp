@@ -1106,7 +1106,7 @@ export class CodexAcpServer {
                 logger.log("Authentication completed");
             } else {
                 logger.log("Authentication required but no default auth request provided, return to IDE");
-                throw RequestError.authRequired();
+                throw RequestError.authRequired(undefined, requirement.reason);
             }
             return null;
         }
