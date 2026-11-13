@@ -1,7 +1,7 @@
-import {afterEach, describe, expect, it, vi} from "vitest";
+import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import * as acp from "@agentclientprotocol/sdk/unstable";
 import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
-import {AgentMode, MODE_CONFIG_ID} from "../../AgentMode";
+import {AgentMode, MODE_CONFIG_ID, type ResolvedPermissions} from "../../AgentMode";
 import {
     MODEL_CONFIG_ID,
     REASONING_EFFORT_CONFIG_ID,
@@ -47,6 +47,7 @@ async function createSession(
         activePermissionProfileId?: string | null;
         approvalPolicy?: "on-request" | "never";
         approvalsReviewer?: "user" | "auto_review";
+        resolvedPermissions?: ResolvedPermissions;
     } = {},
 ) {
     const {
@@ -56,6 +57,7 @@ async function createSession(
         activePermissionProfileId = null,
         approvalPolicy = "on-request",
         approvalsReviewer = "user",
+        resolvedPermissions,
     } = options;
     const fixture = createCodexMockTestFixture();
     const codexAcpAgent = fixture.getCodexAcpAgent();
@@ -73,6 +75,7 @@ async function createSession(
         approvalPolicy,
         approvalsReviewer,
         permissionProfiles,
+        ...(resolvedPermissions ? {resolvedPermissions} : {}),
     });
 
     if (clientCapabilities) {
@@ -297,6 +300,97 @@ describe("Session config options", () => {
                 .toBe(AgentMode.DEFAULT_AGENT_MODE.id);
         },
     );
+
+    describe("initial mode from the permissions Codex resolved", () => {
+        beforeEach(() => {
+            vi.stubEnv("INITIAL_AGENT_MODE", undefined);
+        });
+
+        it.each<{
+            case: string;
+            resolvedPermissions: ResolvedPermissions;
+            expectedModeId: string;
+        }>([
+            {
+                case: "danger-full-access with no approvals",
+                resolvedPermissions: {
+                    approvalPolicy: "never",
+                    sandboxPolicy: {type: "dangerFullAccess"},
+                },
+                expectedModeId: AgentMode.AgentFullAccess.id,
+            },
+            {
+                case: "read-only with on-request approvals",
+                resolvedPermissions: {
+                    approvalPolicy: "on-request",
+                    sandboxPolicy: {type: "readOnly", networkAccess: false},
+                },
+                expectedModeId: AgentMode.ReadOnly.id,
+            },
+            {
+                case: "workspace-write with on-request approvals",
+                resolvedPermissions: {
+                    approvalPolicy: "on-request",
+                    sandboxPolicy: {
+                        type: "workspaceWrite",
+                        writableRoots: [],
+                        networkAccess: false,
+                        excludeTmpdirEnvVar: false,
+                        excludeSlashTmp: false,
+                    },
+                },
+                expectedModeId: AgentMode.Agent.id,
+            },
+            {
+                case: "a pair no built-in mode represents",
+                resolvedPermissions: {
+                    approvalPolicy: "never",
+                    sandboxPolicy: {
+                        type: "workspaceWrite",
+                        writableRoots: [],
+                        networkAccess: false,
+                        excludeTmpdirEnvVar: false,
+                        excludeSlashTmp: false,
+                    },
+                },
+                expectedModeId: AgentMode.DEFAULT_AGENT_MODE.id,
+            },
+        ])("starts a session from $case", async ({resolvedPermissions, expectedModeId}) => {
+            const {fast} = buildModels();
+            const {response} = await createSession("fast-model[medium]", [fast], {resolvedPermissions});
+
+            expect(response.modes?.currentModeId).toBe(expectedModeId);
+            expect(response.configOptions?.find(option => option.id === MODE_CONFIG_ID)?.currentValue)
+                .toBe(expectedModeId);
+        });
+
+        it("keeps INITIAL_AGENT_MODE ahead of the resolved permissions", async () => {
+            vi.stubEnv("INITIAL_AGENT_MODE", AgentMode.ReadOnly.id);
+            const {fast} = buildModels();
+            const {response} = await createSession("fast-model[medium]", [fast], {
+                resolvedPermissions: {
+                    approvalPolicy: "never",
+                    sandboxPolicy: {type: "dangerFullAccess"},
+                },
+            });
+
+            expect(response.modes?.currentModeId).toBe(AgentMode.ReadOnly.id);
+        });
+
+        it("keeps the active permission profile ahead of the resolved permissions", async () => {
+            const {fast} = buildModels();
+            const {response} = await createSession("fast-model[medium]", [fast], {
+                activePermissionProfileId: "team-default",
+                permissionProfiles: [{id: "team-default", description: null, allowed: true}],
+                resolvedPermissions: {
+                    approvalPolicy: "never",
+                    sandboxPolicy: {type: "dangerFullAccess"},
+                },
+            });
+
+            expect(response.modes?.currentModeId).toBe("permission-profile:team-default");
+        });
+    });
 
     it.each([
         {initialMode: "permission-profile:team-default", expectedMode: "permission-profile:team-default"},
