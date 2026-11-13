@@ -3595,7 +3595,11 @@ export class CodexAcpServer {
             availableModels: metadata.models,
             supportedReasoningEfforts: model?.supportedReasoningEfforts ?? [],
             supportedInputModalities: model?.inputModalities ?? ["text", "image"],
-            agentMode: AgentMode.getInitialAgentMode(availableAgentModes, metadata.activePermissionProfileId),
+            agentMode: AgentMode.getInitialAgentMode(
+                availableAgentModes,
+                metadata.activePermissionProfileId,
+                metadata.resolvedPermissions ?? null,
+            ),
             availableAgentModes,
             collaborationMode: metadata.collaborationMode,
             fastModeEnabled: serviceTierEnablesFast(metadata.currentServiceTier),

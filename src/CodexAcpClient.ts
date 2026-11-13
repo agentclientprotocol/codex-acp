@@ -27,7 +27,7 @@ import type {
 import type {ServiceTier} from "./app-server/ServiceTier";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import {ModelId} from "./ModelId";
-import {AgentMode} from "./AgentMode";
+import {AgentMode, type ResolvedPermissions} from "./AgentMode";
 import path from "node:path";
 import {isDeepStrictEqual} from "node:util";
 import {logger} from "./Logger";
@@ -119,6 +119,8 @@ type ResumedThread = {
     reasoningEffort: ReasoningEffort | null;
     /** Only thread/resume supplies settings and a cursor into durable history. */
     rollout: {settings: LiveSessionOptions; itemsBackwardsCursor: string | null} | null;
+    /** The permissions the resume response reports. Null when `thread/read` answered instead. */
+    resolvedPermissions: ResolvedPermissions | null;
 };
 
 /**
@@ -685,6 +687,10 @@ export class CodexAcpClient {
                     },
                     itemsBackwardsCursor: response.itemsBackwardsCursor ?? null,
                 },
+                resolvedPermissions: {
+                    approvalPolicy: response.approvalPolicy ?? null,
+                    sandboxPolicy: response.sandbox ?? null,
+                },
             };
         } catch (err) {
             if (isThreadActiveWriterError(err)) throw threadActiveWriterRequestError(params.threadId, err);
@@ -704,6 +710,7 @@ export class CodexAcpClient {
                 modelProvider: response.thread.modelProvider,
                 reasoningEffort: response.thread.reasoningEffort,
                 rollout: null,
+                resolvedPermissions: null,
             };
         }
     }
@@ -742,6 +749,7 @@ export class CodexAcpClient {
             additionalDirectories,
             skippedMcpServers,
             ...(instructions ? {instructions} : {}),
+            ...(response.resolvedPermissions ? {resolvedPermissions: response.resolvedPermissions} : {}),
             ...permissionProfileMetadata,
         }
     }
@@ -826,6 +834,7 @@ export class CodexAcpClient {
             additionalDirectories,
             skippedMcpServers,
             ...(instructions ? {instructions} : {}),
+            ...(response.resolvedPermissions ? {resolvedPermissions: response.resolvedPermissions} : {}),
             ...permissionProfileMetadata,
         };
     }
@@ -1007,6 +1016,10 @@ export class CodexAcpClient {
             skippedMcpServers,
             ...(instructions ? {instructions} : {}),
             activePermissionProfileId: response.activePermissionProfile?.id ?? null,
+            resolvedPermissions: {
+                approvalPolicy: response.approvalPolicy ?? null,
+                sandboxPolicy: response.sandbox ?? null,
+            },
             ...permissionProfileMetadata,
         };
     }
