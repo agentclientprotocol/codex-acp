@@ -3,10 +3,19 @@ import {
     arePathBasenamesEqual,
     arePathsEqual,
     isAbsolutePathLike,
+    isAbsoluteProtocolPath,
     normalizePathForComparison,
 } from "../PathUtils";
 
 describe("PathUtils", () => {
+    it.each([
+        ["/workspace", true], ["C:\\repo", true], ["C:/repo", true], ["\\\\server\\share\\repo", true],
+        ["", false], ["repo", false], [" /workspace", false], ["file:///workspace", false],
+        ["C:repo", false], ["\\repo", false], ["/workspace\0", false],
+    ] as const)("checks the ACP absolute-path syntax: %j", (value, expected) => {
+        expect(isAbsoluteProtocolPath(value)).toBe(expected);
+    });
+
     it("normalizes Windows paths for comparison", () => {
         expect(arePathsEqual(
             "D:\\workspace\\sample-project\\",

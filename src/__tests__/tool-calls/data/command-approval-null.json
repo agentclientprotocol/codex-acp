@@ -1,0 +1,9 @@
+{
+  "toolCallId": "cmd",
+  "kind": "execute",
+  "status": "pending",
+  "title": "Run command",
+  "rawInput": {
+    "cwd": "/w"
+  }
+}

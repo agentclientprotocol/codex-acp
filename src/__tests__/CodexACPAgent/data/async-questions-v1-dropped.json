@@ -1,0 +1,8 @@
+[
+  {
+    "severity": "warning",
+    "title": "Answer not sent",
+    "description": "Codex finished before your answer arrived. Send it as a new message if it still matters.",
+    "sessionUpdate": "notice"
+  }
+]

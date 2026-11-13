@@ -1,0 +1,34 @@
+[
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "title": "Worker",
+      "capabilities": {},
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "configOptions": [
+        {
+          "currentValue": "actual-child-model",
+          "options": [
+            {
+              "value": "actual-child-model",
+              "name": "actual-child-model",
+              "description": null
+            }
+          ],
+          "type": "select",
+          "configId": "model",
+          "name": "Model",
+          "description": "Model Codex uses for the subagent",
+          "category": "model"
+        }
+      ],
+      "sessionUpdate": "config_option_update"
+    }
+  }
+]

@@ -1,0 +1,68 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-mixed",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "sessionFailure": {
+                "id": "turn-id:error",
+                "revision": 1,
+                "category": "service",
+                "severity": "error",
+                "title": "provider blew up",
+                "actions": [
+                  "retry"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-mixed",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Unrelated advisory"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-mixed",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "sessionFailure": {
+                "id": "turn-id:error",
+                "revision": 2,
+                "category": "service",
+                "severity": "error",
+                "title": "provider blew up",
+                "actions": [
+                  "retry"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+]

@@ -38,10 +38,6 @@
         "sessionUpdate": "tool_call_update",
         "toolCallId": "command-terminal-output-completion",
         "status": "completed",
-        "rawOutput": {
-          "formatted_output": "M src/CodexEventHandler.ts\n",
-          "exit_code": 0
-        },
         "_meta": {
           "terminal_output": {
             "data": "M src/CodexEventHandler.ts\n",

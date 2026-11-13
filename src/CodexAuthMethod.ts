@@ -1,5 +1,6 @@
 
-import type {AuthenticateRequest, AuthMethod, ClientCapabilities} from "@agentclientprotocol/sdk";
+import type {AuthenticateRequest, AuthMethod, ClientCapabilities} from "@agentclientprotocol/sdk/unstable";
+import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import {clientSupportsUrlElicitation} from "./ElicitationCapabilities";
 
 export const CODEX_API_KEY_ENV_VAR = "CODEX_API_KEY";
@@ -81,6 +82,20 @@ export function getCodexAuthMethods(clientCapabilities?: ClientCapabilities | nu
         authMethods.push(GatewayAuthMethod);
     }
     return authMethods;
+}
+
+/**
+ * The same selection as {@link getCodexAuthMethods}, in the v2 descriptor shape. Every Codex
+ * method is an agent-handled login. Takes client capabilities already mapped to the v1 shape.
+ */
+export function getCodexAuthMethodsV2(clientCapabilities?: ClientCapabilities | null, env: NodeJS.ProcessEnv = process.env): acpV2.AuthMethod[] {
+    return getCodexAuthMethods(clientCapabilities, env).map(({id, name, description, _meta}) => ({
+        methodId: id,
+        type: "agent" as const,
+        name,
+        ...(description != null ? {description} : {}),
+        ...(_meta != null ? {_meta} : {}),
+    }));
 }
 
 export type CodexAuthRequest = ApiKeyAuthRequest | ChatGPTAuthRequest | ChatGPTDeviceCodeAuthRequest | GatewayAuthRequest;

@@ -1,4 +1,4 @@
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {describe, expect, it, vi} from "vitest";
 import {CodexAcpClient} from "../../CodexAcpClient";
 import {CodexAcpServer} from "../../CodexAcpServer";
@@ -131,7 +131,11 @@ describe("session compaction", () => {
         const compactStart = vi.spyOn(fixture.getCodexAppServerClient(), "threadCompactStart");
         const prompt = fixture.getCodexAcpAgent().prompt({sessionId, prompt: [{type: "text", text: "/compact"}]});
         await vi.waitFor(() => expect(compactStart).toHaveBeenCalledWith({threadId: sessionId}));
-        await sendNotifications(fixture, [compactionStarted(), compactionCompleted()]);
+        await sendNotifications(fixture, [
+            compactionStarted(),
+            compactionCompleted(),
+            {method: "turn/completed", params: {threadId: sessionId, turn: createTurn("completed")}},
+        ]);
         await expect(prompt).resolves.toMatchObject({stopReason: "end_turn"});
 
         await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
@@ -346,7 +350,7 @@ describe("session compaction", () => {
         const client = fixture.getCodexAcpClient();
         const appServer = fixture.getCodexAppServerClient();
         const model = createTestModel();
-        vi.spyOn(client, "authRequired").mockResolvedValue(false);
+        vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
         vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
         vi.spyOn(appServer, "listModels").mockResolvedValue({data: [model], nextCursor: null});
@@ -366,6 +370,8 @@ describe("session compaction", () => {
             approvalsReviewer: "user",
             sandbox: {type: "dangerFullAccess"},
             reasoningEffort: model.defaultReasoningEffort,
+            disabledPluginIds: [],
+            collaborationMode: null,
             turnsBackwardsCursor: null,
             itemsBackwardsCursor: null,
         });
@@ -397,23 +403,18 @@ describe("session compaction", () => {
         const agentToClient = new TransformStream<Uint8Array, Uint8Array>();
         const updates: acp.SessionNotification[] = [];
         let server!: CodexAcpServer;
-        const client = new acp.ClientSideConnection(
-            () => ({
-                requestPermission: () => ({outcome: {outcome: "cancelled" as const}}),
-                sessionUpdate: (notification) => { updates.push(notification); },
-            }),
-            acp.ndJsonStream(clientToAgent.writable, agentToClient.readable),
-        );
-        new acp.AgentSideConnection(
-            connection => {
-                server = new CodexAcpServer(connection, codexClient, undefined, () => null);
-                return server;
-            },
-            acp.ndJsonStream(agentToClient.writable, clientToAgent.readable),
-        );
-        await client.initialize({protocolVersion: 1, clientCapabilities: compactionCapabilities});
+        const client = acp.client()
+            .onRequest(acp.methods.client.session.requestPermission, () => ({outcome: {outcome: "cancelled"}}))
+            .onNotification(acp.methods.client.session.update, ctx => { updates.push(ctx.params); })
+            .connect(acp.ndJsonStream(clientToAgent.writable, agentToClient.readable)).agent;
+        const agentConnection = acp.agent()
+            .onRequest(acp.methods.agent.initialize, ctx => server.initialize(ctx.params))
+            .onRequest(acp.methods.agent.session.prompt, ctx => server.prompt(ctx.params, ctx.signal))
+            .connect(acp.ndJsonStream(agentToClient.writable, clientToAgent.readable));
+        server = new CodexAcpServer(agentConnection.client, codexClient, undefined, () => null);
+        await client.request(acp.methods.agent.initialize, {protocolVersion: 1, clientCapabilities: compactionCapabilities});
         vi.spyOn(server, "getSessionState").mockReturnValue(createTestSessionState({sessionId}));
-        await client.prompt({sessionId, prompt: [{type: "text", text: "Continue."}]});
+        await client.request(acp.methods.agent.session.prompt, {sessionId, prompt: [{type: "text", text: "Continue."}]});
         updates.splice(0);
         mocks.getUnhandledNotificationHandler()!(compactionStarted());
         mocks.getUnhandledNotificationHandler()!(compactionCompleted());
@@ -441,10 +442,18 @@ async function createFixture(clientCapabilities: acp.ClientCapabilities = compac
             sessionId,
             true,
             new ACPSessionConnection(fixture.getAcpConnection(), sessionId),
+            () => {},
+            () => ({currentModel: null, availableModels: []}),
         );
     }
     vi.spyOn(agent, "getSessionState").mockReturnValue(sessionState);
-    await agent.initialize({protocolVersion: 1, clientCapabilities});
+    // The test session state renders for AIR, so the client declares AIR too.
+    await agent.initialize({
+        protocolVersion: 1,
+        clientCapabilities: clientCapabilities._meta == null
+            ? {...clientCapabilities, _meta: {jetbrains: {air: {version: 1, capabilities: []}}}}
+            : clientCapabilities,
+    });
     await agent.prompt({sessionId, prompt: [{type: "text", text: "Continue."}]});
     fixture.clearAcpConnectionDump();
     return fixture;
@@ -484,6 +493,8 @@ async function createNativeChildFixture() {
                 startedAtMs: 0,
                 item: {
                     type: "subAgentActivity",
+                    model: null,
+                    reasoningEffort: null,
                     id: "activity-compaction-child",
                     kind: "started",
                     agentThreadId: childSessionId,
@@ -518,6 +529,8 @@ function nativeChildActivityStarted(threadId: string): ServerNotification {
             startedAtMs: 0,
             item: {
                 type: "subAgentActivity",
+                model: null,
+                reasoningEffort: null,
                 id: `activity-${threadId}`,
                 kind: "started",
                 agentThreadId: threadId,
@@ -570,6 +583,7 @@ function createTurn(status: Turn["status"]): Turn {
     return {
         id: turnId,
         items: [],
+        rootTurnId: null,
         itemsView: "full",
         status,
         error: null,

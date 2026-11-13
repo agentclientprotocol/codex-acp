@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { CodexAcpServer } from '../../CodexAcpServer';
-import * as acp from '@agentclientprotocol/sdk';
+import * as acp from '@agentclientprotocol/sdk/unstable';
 import { createMockConnections } from './test-utils';
 import {getCodexAuthMethods} from "../../CodexAuthMethod";
 import {CodexAcpClient} from "../../CodexAcpClient";
@@ -53,8 +53,9 @@ describe('CodexACPAgent - initialize', () => {
                     close: {},
                     delete: {},
                     fork: {},
+                    title: {},
                     additionalDirectories: {},
-                    subagents: {},
+                    systemPrompt: {},
                 },
                 mcpCapabilities: {
                     acp: false,
@@ -70,19 +71,39 @@ describe('CodexACPAgent - initialize', () => {
                 steering: {
                     supported: true,
                 },
-                goal: {
+            },
+        });
+    });
+
+    it('should advertise the AIR extension only to AIR', async () => {
+        const result = await agent.initialize({
+            protocolVersion: acp.PROTOCOL_VERSION,
+            clientCapabilities: {_meta: {jetbrains: {air: {version: 1, capabilities: []}}}},
+        });
+        expect(result._meta).toEqual({
+            steering: {
+                supported: true,
+            },
+            jetbrains: {
+                air: {
                     version: 1,
-                    controlMethod: "_session/goal",
-                    actions: ["set", "pause", "resume", "clear"],
-                },
-                jetbrains: {
-                    air: {
+                    goal: {
                         version: 1,
-                        capabilities: ["sessionFailure", "agentFileChangeReport", "nativeSubagentSessions", "asyncTasks", "recommendedValue"],
+                        controlMethod: "_session/goal",
+                        actions: ["set", "pause", "resume", "clear"],
                     },
+                    capabilities: ["sessionFailure", "diffPatch", "agentFileChangeReport", "customInstructions", "nativeSubagentSessions", "asyncTasks", "recommendedValue", "rawInputRendering", "planContentDelta", "codexHooks"],
                 },
             },
         });
+    });
+
+    it.each([
+        ["a standard client", {subagents: {}}, undefined],
+        ["AIR", {subagents: {}, _meta: {jetbrains: {air: {version: 1, capabilities: []}}}}, {}],
+    ])('answers %s with the subagent session capability that only the AIR contract negotiates', async (_name, clientCapabilities, expected) => {
+        const result = await agent.initialize({protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities});
+        expect((result.agentCapabilities?.sessionCapabilities as {subagents?: unknown}).subagents).toEqual(expected);
     });
 
     it('should advertise gateway auth when the client opts into gateway auth metadata', async () => {

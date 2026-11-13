@@ -6,8 +6,8 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "file-change-raw",
-        "title": "Editing files",
         "kind": "edit",
+        "title": "Editing files",
         "status": "completed",
         "content": [
           {
@@ -16,17 +16,7 @@
             "newText": "fun main() {\n    println(\"Hello, World!\")\n}\n",
             "path": "/test/project/RawFile.kt",
             "_meta": {
-              "kind": "add",
-              "jetbrains": {
-                "air": {
-                  "version": 1,
-                  "diffStats": {
-                    "version": 1,
-                    "added": 3,
-                    "removed": 0
-                  }
-                }
-              }
+              "kind": "add"
             }
           }
         ]

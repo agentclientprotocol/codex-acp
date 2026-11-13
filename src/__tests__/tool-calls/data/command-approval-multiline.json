@@ -1,0 +1,10 @@
+{
+  "toolCallId": "cmd",
+  "kind": "execute",
+  "status": "pending",
+  "title": "printf 'first\\n'\nprintf 'second\\n'",
+  "rawInput": {
+    "command": "printf 'first\\n'\nprintf 'second\\n'",
+    "cwd": "/w"
+  }
+}

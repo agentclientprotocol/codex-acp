@@ -1,0 +1,40 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-notices",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Heads up: Long threads and multiple compactions can cause the model to be less accurate."
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-notices",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Unknown key `foo`",
+        "description": "in ~/.codex/config.toml"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-notices",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "`--legacy-flag` is deprecated",
+        "description": "Use `--flag` instead."
+      }
+    }
+  }
+]

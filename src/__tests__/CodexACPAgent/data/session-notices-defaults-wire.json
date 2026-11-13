@@ -1,0 +1,64 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-notice-defaults",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Codex warning"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-notice-defaults",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Configuration warning"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-notice-defaults",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Deprecated configuration"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-notice-defaults",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Configuration details",
+        "description": ""
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "wire-notice-defaults",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "Deprecated option",
+        "description": ""
+      }
+    }
+  }
+]

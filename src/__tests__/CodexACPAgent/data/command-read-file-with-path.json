@@ -6,9 +6,9 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "command-read-file",
-        "status": "in_progress",
         "kind": "read",
         "title": "Read file '/test/project/src/index.ts'",
+        "status": "in_progress",
         "locations": [
           {
             "path": "/test/project/src/index.ts"

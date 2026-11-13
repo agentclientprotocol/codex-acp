@@ -1,0 +1,9 @@
+[
+  {
+    "state": "requires_action"
+  },
+  {
+    "state": "idle",
+    "stopReason": "end_turn"
+  }
+]

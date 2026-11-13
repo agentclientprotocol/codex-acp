@@ -1,4 +1,4 @@
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {type ChildProcessWithoutNullStreams, spawn} from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -9,7 +9,7 @@ import {removeDirectoryWithRetry, writeCodexHomeConfig} from "../../acp-test-uti
 import type {PermissionResponder} from "./permission-responders";
 import type {LegacyNewSessionResponse} from "../../../AcpExtensions";
 
-export const DEFAULT_TEST_MODEL_ID = ModelId.create("gpt-5.2", "none");
+export const DEFAULT_TEST_MODEL_ID = ModelId.create("gpt-6-luna", "low");
 export const OTHER_TEST_MODEL_ID = ModelId.create("gpt-5.5", "low");
 
 export interface TestSkill {
@@ -19,7 +19,7 @@ export interface TestSkill {
 }
 
 export interface SpawnedAgentFixture {
-    readonly connection: acp.ClientSideConnection;
+    readonly connection: acp.ClientContext;
     readonly workspaceDir: string;
     createSession(mcpServers?: acp.McpServer[]): Promise<LegacyNewSessionResponse>;
     restart(): Promise<SpawnedAgentFixture>;
@@ -38,10 +38,12 @@ export interface SpawnedAgentFixture {
         sessionId: string,
         toolCallKind: acp.ToolKind,
     ): acp.RequestPermissionRequest[];
+    readSessionUpdates(sessionId: string): acp.SessionUpdate[];
+    readToolCalls(sessionId: string, toolCallKind: acp.ToolKind): acp.ToolCall[];
     dispose(): Promise<void>;
 }
 
-type ConnectionInitializer = (connection: acp.ClientSideConnection) => Promise<void>;
+type ConnectionInitializer = (connection: acp.ClientContext) => Promise<void>;
 
 export async function createSpawnedAgentFixture(
     initializeConnection: ConnectionInitializer,
@@ -103,10 +105,12 @@ class RuntimePaths {
     }
 }
 
-class RecordingClient implements acp.Client {
+class RecordingClient {
     private readonly textBySessionId = new Map<string, string>();
     private readonly availableCommandsBySessionId = new Map<string, acp.AvailableCommand[]>();
     private readonly permissionRequestsBySessionId = new Map<string, acp.RequestPermissionRequest[]>();
+    private readonly updatesBySessionId = new Map<string, acp.SessionUpdate[]>();
+    private readonly toolCallsBySessionId = new Map<string, acp.ToolCall[]>();
     private permissionResponder: PermissionResponder = () => ({
         outcome: {outcome: "cancelled"},
     });
@@ -126,8 +130,22 @@ class RecordingClient implements acp.Client {
     }
 
     async sessionUpdate(params: acp.SessionNotification): Promise<void> {
+        let updates = this.updatesBySessionId.get(params.sessionId);
+        if (!updates) {
+            updates = [];
+            this.updatesBySessionId.set(params.sessionId, updates);
+        }
+        updates.push(params.update);
+
         if (params.update.sessionUpdate === "available_commands_update") {
             this.availableCommandsBySessionId.set(params.sessionId, params.update.availableCommands);
+            return;
+        }
+
+        if (params.update.sessionUpdate === "tool_call") {
+            const toolCalls = this.toolCallsBySessionId.get(params.sessionId) ?? [];
+            toolCalls.push(params.update);
+            this.toolCallsBySessionId.set(params.sessionId, toolCalls);
             return;
         }
 
@@ -147,6 +165,10 @@ class RecordingClient implements acp.Client {
         return this.availableCommandsBySessionId.get(sessionId) ?? [];
     }
 
+    readSessionUpdates(sessionId: string): acp.SessionUpdate[] {
+        return this.updatesBySessionId.get(sessionId) ?? [];
+    }
+
     readPermissionRequests(
         sessionId: string,
         toolCallKind: acp.ToolKind,
@@ -154,10 +176,15 @@ class RecordingClient implements acp.Client {
         const requests = this.permissionRequestsBySessionId.get(sessionId) ?? [];
         return requests.filter((request) => request.toolCall.kind === toolCallKind);
     }
+
+    readToolCalls(sessionId: string, toolCallKind: acp.ToolKind): acp.ToolCall[] {
+        const toolCalls = this.toolCallsBySessionId.get(sessionId) ?? [];
+        return toolCalls.filter((toolCall) => toolCall.kind === toolCallKind);
+    }
 }
 
 class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
-    readonly connection: acp.ClientSideConnection;
+    readonly connection: acp.ClientContext;
     private disposed = false;
 
     constructor(
@@ -169,10 +196,11 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
         private readonly mcpServers: acp.McpServerStdio[],
     ) {
         const output = Readable.toWeb(agentProcess.stdout) as ReadableStream<Uint8Array>;
-        this.connection = new acp.ClientSideConnection(
-            () => client,
-            acp.ndJsonStream(Writable.toWeb(agentProcess.stdin), output)
-        );
+        this.connection = acp.client()
+            .onRequest(acp.methods.client.session.requestPermission, ctx => client.requestPermission(ctx.params))
+            .onNotification(acp.methods.client.session.update, ctx => client.sessionUpdate(ctx.params))
+            .connect(acp.ndJsonStream(Writable.toWeb(agentProcess.stdin), output))
+            .agent;
     }
 
     get workspaceDir(): string {
@@ -180,7 +208,7 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
     }
 
     async createSession(mcpServers: acp.McpServer[] = []): Promise<LegacyNewSessionResponse> {
-        return await this.connection.newSession({
+        return await this.connection.request(acp.methods.agent.session.new, {
             cwd: this.workspaceDir,
             mcpServers,
         }) as LegacyNewSessionResponse;
@@ -230,7 +258,7 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
         timeoutMs = 30_000,
     ): Promise<void> {
         const previousText = this.client.readText(sessionId);
-        const promptResponse = await this.connection.prompt({
+        const promptResponse = await this.connection.request(acp.methods.agent.session.prompt, {
             sessionId,
             prompt: [{type: "text", text: promptText}],
         });
@@ -259,6 +287,14 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
         toolCallKind: acp.ToolKind,
     ): acp.RequestPermissionRequest[] {
         return this.client.readPermissionRequests(sessionId, toolCallKind);
+    }
+
+    readSessionUpdates(sessionId: string): acp.SessionUpdate[] {
+        return this.client.readSessionUpdates(sessionId);
+    }
+
+    readToolCalls(sessionId: string, toolCallKind: acp.ToolKind): acp.ToolCall[] {
+        return this.client.readToolCalls(sessionId, toolCallKind);
     }
 
     async dispose(): Promise<void> {

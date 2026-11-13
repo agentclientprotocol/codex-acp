@@ -24,6 +24,7 @@ export class PermissionLifecycleContext {
 /** Prompt-scoped permission presentation and MCP correlation state. */
 export class PermissionPromptContext {
     private readonly commandNames = new Map<string, Map<string, string>>();
+    private readonly startedCommands = new Map<string, Set<string>>();
     private readonly fileChanges = new Map<string, Map<string, FileChangeItem>>();
     private readonly pendingMcpApprovals = new Map<string, Map<string, string[]>>();
 
@@ -56,6 +57,11 @@ export class PermissionPromptContext {
         return this.commandNames.get(threadId)?.get(itemId);
     }
 
+    /** Tells whether the client already received the command tool call. */
+    commandStarted(threadId: string, itemId: string): boolean {
+        return this.startedCommands.get(threadId)?.has(itemId) ?? false;
+    }
+
     popPendingMcpApproval(threadId: string, serverName: string): string | undefined {
         const byServer = this.pendingMcpApprovals.get(threadId);
         if (!byServer) return undefined;
@@ -73,6 +79,9 @@ export class PermissionPromptContext {
 
     private handleItemStarted(threadId: string, item: ThreadItem): void {
         if (item.type === "commandExecution") {
+            const started = this.startedCommands.get(threadId) ?? new Set<string>();
+            started.add(item.id);
+            this.startedCommands.set(threadId, started);
             const name = commandToolName(item.source);
             if (name !== undefined) {
                 const byItem = this.commandNames.get(threadId) ?? new Map<string, string>();
@@ -100,6 +109,9 @@ export class PermissionPromptContext {
             const byItem = this.commandNames.get(threadId);
             byItem?.delete(item.id);
             if (byItem?.size === 0) this.commandNames.delete(threadId);
+            const started = this.startedCommands.get(threadId);
+            started?.delete(item.id);
+            if (started?.size === 0) this.startedCommands.delete(threadId);
             return;
         }
         if (item.type === "fileChange") {
@@ -121,6 +133,7 @@ export class PermissionPromptContext {
 
     private clearTransientState(threadId: string): void {
         this.commandNames.delete(threadId);
+        this.startedCommands.delete(threadId);
         this.fileChanges.delete(threadId);
         this.pendingMcpApprovals.delete(threadId);
     }

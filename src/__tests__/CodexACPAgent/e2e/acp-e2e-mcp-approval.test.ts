@@ -1,4 +1,4 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import fs from "node:fs";
 import path from "node:path";
 import {afterEach, beforeEach, expect, it} from "vitest";
@@ -94,7 +94,7 @@ describeE2E("E2E MCP approval tests (configured in session)", () => {
         fixture.setPermissionResponder(createMcpPermissionResponder(McpApprovalOptionId.Cancel));
         const {sessionId, invocationMarkerPath} = await createMcpSession();
 
-        expectEndTurn(await fixture.connection.prompt({
+        expectEndTurn(await fixture.connection.request(acp.methods.agent.session.prompt, {
             sessionId,
             prompt: [{
                 type: "text",
@@ -124,7 +124,7 @@ describeE2E("E2E MCP approval tests (configured in session)", () => {
         expectMcpPermissionRequestCount(fixture, sessionId, 1);
 
         fixture = await fixture.restart();
-        await fixture.connection.loadSession({
+        await fixture.connection.request(acp.methods.agent.session.load, {
             sessionId,
             cwd: fixture.workspaceDir,
             mcpServers: [createMcpServer(invocationMarkerPath)],

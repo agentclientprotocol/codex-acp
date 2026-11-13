@@ -1,0 +1,24 @@
+[
+  {
+    "type": "function_call",
+    "id": "fc_shell",
+    "call_id": "shell",
+    "name": "exec_command",
+    "arguments": "{\"cmd\":\"echo hello\"}"
+  },
+  {
+    "type": "function_call",
+    "id": "fc_lookup",
+    "call_id": "lookup",
+    "name": "lookup",
+    "arguments": "{\"query\":\"example\"}"
+  },
+  {
+    "type": "function_call",
+    "id": "fc_lookup-namespaced",
+    "call_id": "lookup-namespaced",
+    "name": "lookup",
+    "namespace": "helpers",
+    "arguments": "{\"query\":\"example\"}"
+  }
+]

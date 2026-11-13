@@ -28,7 +28,7 @@ describe("CodexEventHandler - image events", () => {
                     turnId: "turn-1",
                     startedAtMs: 0,
                     item: {
-                        type: "imageGeneration",
+                        type: "imageGeneration", generationId: null,
                         id: "image-generation-1",
                         status: "generating",
                         revisedPrompt: null,
@@ -44,7 +44,7 @@ describe("CodexEventHandler - image events", () => {
                     turnId: "turn-1",
                     completedAtMs: 0,
                     item: {
-                        type: "imageGeneration",
+                        type: "imageGeneration", generationId: null,
                         id: "image-generation-1",
                         status: "generating",
                         revisedPrompt: "A tiny blue square",
@@ -71,7 +71,7 @@ describe("CodexEventHandler - image events", () => {
                 turnId: "turn-1",
                 completedAtMs: 0,
                 item: {
-                    type: "imageGeneration",
+                    type: "imageGeneration", generationId: null,
                     id: "image-generation-completed-only",
                     status: "generating",
                     revisedPrompt: null,

@@ -1,10 +1,14 @@
 import {describe, expect, it, vi} from "vitest";
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import {CodexAppServerClient} from "../../CodexAppServerClient";
 import {CodexAcpClient} from "../../CodexAcpClient";
 import {CodexAcpServer} from "../../CodexAcpServer";
 import {createTestSessionState} from "../acp-test-utils";
 import {createMockConnections} from "./test-utils";
+
+const noticeCapabilities: acp.ClientCapabilities = {
+    session: {notices: {}},
+};
 
 const typedFailureCapabilities: acp.ClientCapabilities = {
     _meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}},
@@ -13,7 +17,7 @@ const typedFailureCapabilities: acp.ClientCapabilities = {
 describe("typed session failures over ACP transport", () => {
     it("negotiates native subagents through AIR metadata across the SDK boundary", async () => {
         const fixture = createWireFixture();
-        const response = await fixture.client.initialize({
+        const response = await fixture.client.request(acp.methods.agent.initialize, {
             protocolVersion: acp.PROTOCOL_VERSION,
             clientCapabilities: {
                 _meta: {
@@ -51,7 +55,7 @@ describe("typed session failures over ACP transport", () => {
             new Error("raw transport rejection must not cross ACP"),
         );
 
-        const response = await fixture.client.prompt({
+        const response = await fixture.client.request(acp.methods.agent.session.prompt, {
             sessionId: sessionState.sessionId,
             prompt: [{type: "text", text: "trigger process failure"}],
         });
@@ -90,7 +94,7 @@ describe("typed session failures over ACP transport", () => {
         vi.spyOn(fixture.server, "getSessionState").mockReturnValue(sessionState);
         vi.spyOn(fixture.appServer, "turnStart").mockRejectedValue(new Error("transport closed"));
 
-        await expect(fixture.client.prompt({
+        await expect(fixture.client.request(acp.methods.agent.session.prompt, {
             sessionId: sessionState.sessionId,
             prompt: [{type: "text", text: "keep legacy rejection"}],
         })).rejects.toThrow("Codex process has exited with code 1:\nlegacy process stderr");
@@ -113,7 +117,7 @@ describe("typed session failures over ACP transport", () => {
             turn: createTurn("completed"),
         });
 
-        await fixture.client.prompt({
+        await fixture.client.request(acp.methods.agent.session.prompt, {
             sessionId: sessionState.sessionId,
             prompt: [{type: "text", text: "complete before late error"}],
         });
@@ -410,6 +414,256 @@ describe("typed session failures over ACP transport", () => {
         expect(next.id).toBe(records[0]!.id);
         expect(next.revision).toBe(4);
     });
+
+    it("carries the retry cause of each revision as details and none on the terminal revision", async () => {
+        const fixture = await createIdleFixture("wire-retry-details");
+
+        for (const [willRetry, message, additionalDetails] of [
+            [true, "Reconnecting... 1/5", " idle timeout waiting for websocket "],
+            [true, "Reconnecting... 2/5", "stream disconnected before completion"],
+            [true, "Reconnecting... 3/5", null],
+            [true, "Reconnecting... 4/5", "   "],
+            [false, "Connection to Codex was lost.", "stream disconnected after 5 attempts"],
+        ] as const) {
+            fixture.sendServerNotification({
+                method: "error",
+                params: {
+                    threadId: fixture.sessionId,
+                    turnId: "turn-id",
+                    willRetry,
+                    error: {
+                        message,
+                        codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
+                        additionalDetails,
+                    },
+                },
+            });
+        }
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.wireUpdates).toHaveLength(5));
+
+        const records = fixture.wireUpdates.map(update => (update.params.update["_meta"] as {
+            jetbrains: {air: {sessionFailure: Record<string, unknown>}};
+        }).jetbrains.air.sessionFailure);
+        expect(records).toStrictEqual([
+            {
+                id: "turn-id:error",
+                revision: 1,
+                category: "connection",
+                severity: "warning",
+                title: "Reconnecting... 1/5",
+                details: "idle timeout waiting for websocket",
+                actions: [],
+            },
+            {
+                id: "turn-id:error",
+                revision: 2,
+                category: "connection",
+                severity: "warning",
+                title: "Reconnecting... 2/5",
+                details: "stream disconnected before completion",
+                actions: [],
+            },
+            {
+                id: "turn-id:error",
+                revision: 3,
+                category: "connection",
+                severity: "warning",
+                title: "Reconnecting... 3/5",
+                actions: [],
+            },
+            {
+                id: "turn-id:error",
+                revision: 4,
+                category: "connection",
+                severity: "warning",
+                title: "Reconnecting... 4/5",
+                actions: [],
+            },
+            {
+                id: "turn-id:error",
+                revision: 5,
+                category: "connection",
+                severity: "error",
+                title: "Connection to Codex was lost.",
+                actions: ["retry", "new_session"],
+            },
+        ]);
+    });
+});
+
+describe("standard session notices over ACP transport", () => {
+    it.each([
+        ["without AIR session failures", noticeCapabilities],
+        ["with AIR session failures", {...typedFailureCapabilities, ...noticeCapabilities}],
+    ])("serializes standard notices %s", async (_name, clientCapabilities) => {
+        const fixture = await createNegotiatedNoticeFixture("wire-notices", clientCapabilities);
+
+        for (const notification of [
+            {
+                method: "warning",
+                params: {
+                    threadId: fixture.sessionId,
+                    message: "Heads up: Long threads and multiple compactions can cause the model to be less accurate.",
+                },
+            },
+            {
+                method: "configWarning",
+                params: {summary: "Unknown key `foo`", details: "in ~/.codex/config.toml"},
+            },
+            {
+                method: "deprecationNotice",
+                params: {summary: "`--legacy-flag` is deprecated", details: "Use `--flag` instead."},
+            },
+        ]) {
+            fixture.sendServerNotification(notification);
+        }
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(3));
+        expect(fixture.updates).toEqual(fixture.wireUpdates.map(({params}) => params));
+
+        await expect(`${JSON.stringify(fixture.wireUpdates, null, 2)}\n`).toMatchFileSnapshot(
+            "data/session-notices-wire.json",
+        );
+    });
+
+    it("preserves absent and empty descriptions and supplies nonempty titles", async () => {
+        const fixture = await createNegotiatedNoticeFixture("wire-notice-defaults");
+
+        for (const notification of [
+            {method: "warning", params: {threadId: fixture.sessionId, message: ""}},
+            {method: "configWarning", params: {summary: "", details: null}},
+            {method: "deprecationNotice", params: {summary: "", details: null}},
+            {method: "configWarning", params: {summary: "Configuration details", details: ""}},
+            {method: "deprecationNotice", params: {summary: "Deprecated option", details: ""}},
+        ]) {
+            fixture.sendServerNotification(notification);
+        }
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(5));
+        expect(fixture.updates).toEqual(fixture.wireUpdates.map(({params}) => params));
+
+        await expect(`${JSON.stringify(fixture.wireUpdates, null, 2)}\n`).toMatchFileSnapshot(
+            "data/session-notices-defaults-wire.json",
+        );
+    });
+
+    it("emits each repeated warning as an independent notice", async () => {
+        const fixture = await createNegotiatedNoticeFixture("wire-repeated-notice");
+
+        for (const message of ["Repeated warning", "Repeated warning", "Different warning", "Repeated warning"]) {
+            fixture.sendServerNotification({
+                method: "warning",
+                params: {threadId: fixture.sessionId, message},
+            });
+        }
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(4));
+        expect(fixture.updates).toEqual(fixture.wireUpdates.map(({params}) => params));
+
+        await expect(`${JSON.stringify(fixture.wireUpdates, null, 2)}\n`).toMatchFileSnapshot(
+            "data/session-notices-repeated-wire.json",
+        );
+    });
+
+    it("keeps notices separate from the revision sequence of a typed failure", async () => {
+        const fixture = await createNegotiatedNoticeFixture("wire-mixed", {
+            ...typedFailureCapabilities,
+            ...noticeCapabilities,
+        });
+        const failure = {
+            method: "error",
+            params: {
+                threadId: fixture.sessionId,
+                turnId: "turn-id",
+                willRetry: false,
+                error: {message: "provider blew up", codexErrorInfo: "serverOverloaded", additionalDetails: null},
+            },
+        };
+
+        fixture.sendServerNotification(failure);
+        fixture.sendServerNotification({
+            method: "warning",
+            params: {threadId: fixture.sessionId, message: "Unrelated advisory"},
+        });
+        fixture.sendServerNotification(failure);
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(3));
+        expect(fixture.updates).toEqual(fixture.wireUpdates.map(({params}) => params));
+
+        await expect(`${JSON.stringify(fixture.wireUpdates, null, 2)}\n`).toMatchFileSnapshot(
+            "data/session-notices-with-failure-wire.json",
+        );
+    });
+
+    it.each<{name: string; capabilities?: unknown}>([
+        {name: "omitted capabilities"},
+        {name: "empty capabilities", capabilities: {}},
+        {name: "null session capabilities", capabilities: {session: null}},
+        {name: "empty session capabilities", capabilities: {session: {}}},
+        {name: "null notice capability", capabilities: {session: {notices: null}}},
+        {name: "array notice capability", capabilities: {session: {notices: []}}},
+        {name: "true notice capability", capabilities: {session: {notices: true}}},
+        {name: "false notice capability", capabilities: {session: {notices: false}}},
+        {name: "string notice capability", capabilities: {session: {notices: "supported"}}},
+        {name: "numeric notice capability", capabilities: {session: {notices: 1}}},
+    ])("retains legacy behavior without notice support: $name", async ({capabilities}) => {
+        const wireFixture = createWireFixture();
+        const initialize = vi.spyOn(wireFixture.server, "initialize");
+        await wireFixture.client.request(acp.methods.agent.initialize, {
+            protocolVersion: acp.PROTOCOL_VERSION,
+            // Intentionally send malformed values through the real SDK capability parser.
+            ...(capabilities === undefined ? {} : {clientCapabilities: capabilities as acp.ClientCapabilities}),
+        });
+        expect(initialize.mock.calls[0]![0].clientCapabilities?.session?.notices ?? null).toBeNull();
+        const fixture = await settleSession(wireFixture, "wire-legacy-notices");
+
+        fixture.sendServerNotification({
+            method: "warning",
+            params: {threadId: fixture.sessionId, message: "Legacy warning"},
+        });
+        fixture.sendServerNotification({
+            method: "configWarning",
+            params: {summary: "Legacy configuration warning", details: "Configuration details"},
+        });
+        fixture.sendServerNotification({
+            method: "deprecationNotice",
+            params: {summary: "Legacy deprecation", details: "Deprecated configuration details"},
+        });
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(2));
+        expect(fixture.updates).toEqual(fixture.wireUpdates.map(({params}) => params));
+
+        await expect(`${JSON.stringify(fixture.wireUpdates, null, 2)}\n`).toMatchFileSnapshot(
+            "data/session-notices-legacy-wire.json",
+        );
+    });
+
+    it("delivers notices to the SDK client and allows it to continue prompting", async () => {
+        const fixture = await createNegotiatedNoticeFixture("wire-notice-client");
+
+        fixture.sendServerNotification({
+            method: "warning",
+            params: {threadId: fixture.sessionId, message: "A warning before the next prompt"},
+        });
+        await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+        await vi.waitFor(() => expect(fixture.updates).toHaveLength(1));
+        expect(fixture.updates).toEqual(fixture.wireUpdates.map(({params}) => params));
+        expect(fixture.updates[0]!.update).toEqual({
+            sessionUpdate: "notice",
+            severity: "warning",
+            title: "A warning before the next prompt",
+        });
+
+        const response = await fixture.client.request(acp.methods.agent.session.prompt, {
+            sessionId: fixture.sessionId,
+            prompt: [{type: "text", text: "continue after the notice"}],
+        });
+
+        expect(response.stopReason).toBe("end_turn");
+        expect(fixture.updates).toHaveLength(1);
+        expect(fixture.appServer.turnStart).toHaveBeenCalledTimes(2);
+    });
 });
 
 /** A fixture whose session already completed a turn, so notifications route to a live event handler. */
@@ -419,6 +673,21 @@ async function createIdleFixture(
 ) {
     const fixture = createWireFixture();
     await fixture.initialize(clientCapabilities);
+    return settleSession(fixture, sessionId);
+}
+
+async function createNegotiatedNoticeFixture(
+    sessionId: string,
+    clientCapabilities: acp.ClientCapabilities = noticeCapabilities,
+) {
+    const fixture = createWireFixture();
+    const initialize = vi.spyOn(fixture.server, "initialize");
+    await fixture.initialize(clientCapabilities);
+    expect(initialize.mock.calls[0]![0].clientCapabilities?.session?.notices).toEqual({});
+    return settleSession(fixture, sessionId);
+}
+
+async function settleSession(fixture: ReturnType<typeof createWireFixture>, sessionId: string) {
     const sessionState = createTestSessionState({sessionId, account: {type: "apiKey"}});
     vi.spyOn(fixture.server, "getSessionState").mockReturnValue(sessionState);
     vi.spyOn(fixture.appServer, "turnStart").mockResolvedValue({turn: createTurn("inProgress")});
@@ -427,11 +696,12 @@ async function createIdleFixture(
         turn: createTurn("completed"),
     });
 
-    await fixture.client.prompt({
+    await fixture.client.request(acp.methods.agent.session.prompt, {
         sessionId,
         prompt: [{type: "text", text: "settle the session"}],
     });
     fixture.updates.splice(0);
+    fixture.wireUpdates.splice(0);
 
     return {...fixture, sessionId};
 }
@@ -443,30 +713,41 @@ function createWireFixture(options: {exitCode?: number | null; stderr?: string} 
     vi.spyOn(appServer, "initialize").mockResolvedValue({codexHome: null} as never);
 
     const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
-    const agentToClient = new TransformStream<Uint8Array, Uint8Array>();
+    const wireUpdates: Array<{
+        jsonrpc: "2.0";
+        method: "session/update";
+        params: {sessionId: string; update: Record<string, unknown>};
+    }> = [];
+    const decoder = new TextDecoder();
+    let pending = "";
+    const agentToClient = new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+            pending += decoder.decode(chunk, {stream: true});
+            let newline: number;
+            while ((newline = pending.indexOf("\n")) !== -1) {
+                const message = JSON.parse(pending.slice(0, newline));
+                pending = pending.slice(newline + 1);
+                if (message.method === "session/update") wireUpdates.push(message);
+            }
+            controller.enqueue(chunk);
+        },
+    });
     const updates: acp.SessionNotification[] = [];
     let server!: CodexAcpServer;
-    const client = new acp.ClientSideConnection(
-        () => ({
-            requestPermission: () => ({outcome: {outcome: "cancelled" as const}}),
-            sessionUpdate: (params: acp.SessionNotification) => {
-                updates.push(params);
-            },
-        }),
-        acp.ndJsonStream(clientToAgent.writable, agentToClient.readable),
-    );
-    new acp.AgentSideConnection(
-        (connection) => {
-            server = new CodexAcpServer(
-                connection,
-                codexClient,
-                undefined,
-                () => options.exitCode ?? null,
-                () => options.stderr ?? "",
-            );
-            return server;
-        },
-        acp.ndJsonStream(agentToClient.writable, clientToAgent.readable),
+    const client = acp.client()
+        .onRequest(acp.methods.client.session.requestPermission, () => ({outcome: {outcome: "cancelled"}}))
+        .onNotification(acp.methods.client.session.update, ctx => { updates.push(ctx.params); })
+        .connect(acp.ndJsonStream(clientToAgent.writable, agentToClient.readable)).agent;
+    const agentConnection = acp.agent()
+        .onRequest(acp.methods.agent.initialize, ctx => server.initialize(ctx.params))
+        .onRequest(acp.methods.agent.session.prompt, ctx => server.prompt(ctx.params, ctx.signal))
+        .connect(acp.ndJsonStream(agentToClient.writable, clientToAgent.readable));
+    server = new CodexAcpServer(
+        agentConnection.client,
+        codexClient,
+        undefined,
+        () => options.exitCode ?? null,
+        () => options.stderr ?? "",
     );
 
     return {
@@ -474,11 +755,12 @@ function createWireFixture(options: {exitCode?: number | null; stderr?: string} 
         codexClient,
         appServer,
         updates,
+        wireUpdates,
         get server(): CodexAcpServer {
             return server;
         },
         async initialize(clientCapabilities: acp.ClientCapabilities = typedFailureCapabilities): Promise<void> {
-            await client.initialize({
+            await client.request(acp.methods.agent.initialize, {
                 protocolVersion: acp.PROTOCOL_VERSION,
                 clientCapabilities,
             });
@@ -495,6 +777,7 @@ function createTurn(status: "inProgress" | "completed") {
     return {
         id: "turn-id",
         items: [],
+        rootTurnId: null,
         itemsView: "notLoaded" as const,
         status,
         error: null,

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {describe, expect, it} from "vitest";
+import {describe, expect, it, vi} from "vitest";
 import {
     AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES,
     AGENT_FILE_CHANGE_REPORT_MAX_PATH_LENGTH,
@@ -18,6 +18,23 @@ function modified(pathname: string): string {
 
 function capturedWorkspace(cwd: string, additionalDirectories: string[] = []) {
     return captureAgentFileChangeWorkspace(cwd, additionalDirectories);
+}
+
+function hideTemporaryDirectoryAncestorGitMarkers() {
+    const markers = new Set<string>();
+    let directory = path.resolve(os.tmpdir());
+    while (true) {
+        markers.add(path.join(directory, ".git"));
+        const parent = path.dirname(directory);
+        if (parent === directory) break;
+        directory = parent;
+    }
+    const existsSync = fs.existsSync;
+    // These fixtures need lexical ancestor discovery to stop without finding a
+    // repository outside the fixture, even when the host temp directory has one.
+    return vi.spyOn(fs, "existsSync").mockImplementation(filename =>
+        typeof filename === "string" && markers.has(filename) ? false : existsSync(filename),
+    );
 }
 
 describe("agent file-change report", () => {
@@ -228,6 +245,7 @@ describe("agent file-change report", () => {
         const realRoot = fs.mkdtempSync(path.join(os.tmpdir(), "file-report-real-"));
         const linkedRoot = `${realRoot}-link`;
         fs.symlinkSync(realRoot, linkedRoot, "dir");
+        const ancestorMarkers = hideTemporaryDirectoryAncestorGitMarkers();
         try {
             const report = createReportedAgentFileChangeReport(
                 "request-symlink-root",
@@ -236,6 +254,7 @@ describe("agent file-change report", () => {
             );
             expect(report.paths).toEqual([path.join(fs.realpathSync.native(realRoot), "generated.ts")]);
         } finally {
+            ancestorMarkers.mockRestore();
             fs.unlinkSync(linkedRoot);
             fs.rmSync(realRoot, {recursive: true, force: true});
         }
@@ -250,6 +269,7 @@ describe("agent file-change report", () => {
         fs.mkdirSync(path.join(repository, ".git"));
         fs.mkdirSync(realCwd, {recursive: true});
         fs.symlinkSync(realCwd, linkedCwd, "dir");
+        const ancestorMarkers = hideTemporaryDirectoryAncestorGitMarkers();
         try {
             const report = createReportedAgentFileChangeReport(
                 "request-symlink-nested-cwd",
@@ -259,6 +279,7 @@ describe("agent file-change report", () => {
 
             expect(report.paths).toEqual([path.join(fs.realpathSync.native(realCwd), "src", "Main.ts")]);
         } finally {
+            ancestorMarkers.mockRestore();
             fs.unlinkSync(linkedCwd);
             fs.rmSync(repository, {recursive: true, force: true});
         }

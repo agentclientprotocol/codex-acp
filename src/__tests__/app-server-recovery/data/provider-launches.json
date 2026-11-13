@@ -1,0 +1,27 @@
+[
+  {
+    "args": [
+      "app-server",
+      "-c",
+      "model_provider=\"custom-gateway\"",
+      "-c",
+      "model_providers.custom-gateway={ \"name\" = \"User-provided gateway\", \"base_url\" = \"https://gateway.example/v1\", \"wire_api\" = \"responses\", \"env_http_headers\" = { \"X-Client-Feature-ID\" = \"CODEX_ACP_PROVIDER_HEADER_0\", \"X-Key\" = \"CODEX_ACP_PROVIDER_HEADER_1\" } }"
+    ],
+    "env": {
+      "CODEX_ACP_PROVIDER_HEADER_0": "codex",
+      "CODEX_ACP_PROVIDER_HEADER_1": "secret"
+    }
+  },
+  {
+    "args": [
+      "app-server"
+    ],
+    "env": {}
+  },
+  {
+    "args": [
+      "app-server"
+    ],
+    "env": {}
+  }
+]

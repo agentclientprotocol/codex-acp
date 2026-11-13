@@ -2,7 +2,7 @@ import {describe, expect, it, vi} from "vitest";
 import {EventEmitter} from "node:events";
 import type {ThreadItem} from "../../app-server/v2";
 import {ACPSessionConnection, type UpdateSessionEvent} from "../../ACPSessionConnection";
-import type {CodexAppServerClient} from "../../CodexAppServerClient";
+import {CodexAppServerClient} from "../../CodexAppServerClient";
 import type {CodexConnection} from "../../CodexJsonRpcConnection";
 import {CodexBackgroundTerminalTasks} from "../../async-tasks/CodexBackgroundTerminalTasks";
 import {ASYNC_TASK_STOP_METHOD} from "../../async-tasks/AsyncTaskExtension";
@@ -15,6 +15,7 @@ import {
     createCodexMockTestFixture,
     createTestSessionState,
     setupPromptAndSendNotifications,
+    deferred,
 } from "../acp-test-utils";
 
 type CommandExecutionItem = Extract<ThreadItem, {type: "commandExecution"}>;
@@ -91,6 +92,38 @@ describe("Codex background terminal tasks", () => {
 
         await fixture.tasks.handleNotification(started(item), "thread-1");
         await fixture.tasks.handleNotification(completed({...item, status: "completed", exitCode: 0}), "thread-1");
+        await fixture.tasks.sync();
+
+        expect(fixture.updates).toEqual([]);
+    });
+
+    it("lists the background terminals only while a command of the thread runs", async () => {
+        const fixture = createFixture();
+        fixture.list.mockResolvedValue(page([]));
+        const reasoning = started({type: "reasoning", id: "reasoning-1", summary: [], content: []});
+        const item = command();
+
+        await fixture.tasks.handleNotification(reasoning, "thread-1");
+        await vi.waitFor(() => expect(fixture.list).not.toHaveBeenCalled());
+
+        await fixture.tasks.handleNotification(started(item), "thread-1");
+        await fixture.tasks.handleNotification(reasoning, "thread-1");
+        await vi.waitFor(() => expect(fixture.list).toHaveBeenCalledTimes(1));
+
+        await fixture.tasks.handleNotification(completed({...item, status: "completed", exitCode: 0}), "thread-1");
+        fixture.list.mockClear();
+        await fixture.tasks.handleNotification(reasoning, "thread-1");
+        expect(fixture.list).not.toHaveBeenCalled();
+    });
+
+    it("does not bring back an ended task from a list that still names it", async () => {
+        const fixture = createFixture();
+        const item = command();
+        await fixture.tasks.handleNotification(started(item), "thread-1");
+        await fixture.tasks.handleNotification(completed({...item, status: "completed", exitCode: 0}), "thread-1");
+
+        // A list that started before the command ended still names its process.
+        fixture.list.mockResolvedValue(page([terminal()]));
         await fixture.tasks.sync();
 
         expect(fixture.updates).toEqual([]);
@@ -203,6 +236,7 @@ describe("Codex background terminal tasks", () => {
         await fixture.tasks.sync();
         const replacementTerminate = vi.fn().mockResolvedValue({terminated: true});
         fixture.tasks.setAppServer({
+            backgroundTerminalPages: CodexAppServerClient.prototype.backgroundTerminalPages,
             threadBackgroundTerminalsTerminate: replacementTerminate,
         } as unknown as CodexAppServerClient);
 
@@ -414,6 +448,7 @@ describe("Codex background terminal tasks", () => {
             terminal({itemId: "command-2", processId: "84"}),
         ]));
         const replacement = {
+            backgroundTerminalPages: CodexAppServerClient.prototype.backgroundTerminalPages,
             threadBackgroundTerminalsList: replacementList,
             threadBackgroundTerminalsTerminate: vi.fn(),
         } as unknown as CodexAppServerClient;
@@ -457,7 +492,7 @@ describe("Codex background terminal tasks", () => {
         });
         const sessionState = createTestSessionState({sessionId: "thread-1"});
         const session = new ACPSessionConnection(fixture.getAcpConnection(), sessionState.sessionId);
-        sessionState.subagents = new CodexSubagentEventRouter(sessionState.sessionId, true, session);
+        sessionState.subagents = new CodexSubagentEventRouter(sessionState.sessionId, true, session, () => {}, () => ({currentModel: null, availableModels: []}));
         sessionState.asyncTasks = new CodexBackgroundTerminalTasks(
             true,
             sessionState.sessionId,
@@ -543,6 +578,7 @@ function createFixture(
     const list = vi.fn<() => Promise<ThreadBackgroundTerminalsListResponse>>();
     const terminate = vi.fn();
     const appServer = {
+        backgroundTerminalPages: CodexAppServerClient.prototype.backgroundTerminalPages,
         threadBackgroundTerminalsList: list,
         threadBackgroundTerminalsTerminate: terminate,
     } as unknown as CodexAppServerClient;
@@ -626,6 +662,7 @@ function turnCompleted(threadId: string) {
             turn: {
                 id: "turn-id",
                 items: [],
+                rootTurnId: null,
                 itemsView: "notLoaded" as const,
                 status: "completed" as const,
                 error: null,
@@ -655,6 +692,8 @@ function childSpawned() {
 function childMaterialized() {
     return started({
         type: "subAgentActivity",
+        model: null,
+        reasoningEffort: null,
         id: "child-activity",
         kind: "started",
         agentThreadId: "child-1",
@@ -665,6 +704,8 @@ function childMaterialized() {
 function childInterrupted() {
     return started({
         type: "subAgentActivity",
+        model: null,
+        reasoningEffort: null,
         id: "child-activity-terminal",
         kind: "interrupted",
         agentThreadId: "child-1",
@@ -685,14 +726,4 @@ function childCompletedByCollaboration() {
         reasoningEffort: null,
         agentsStates: {"child-1": {status: "completed", message: null}},
     });
-}
-
-function deferred<T>() {
-    let resolve!: (value?: T) => void;
-    let reject!: (reason?: unknown) => void;
-    const promise = new Promise<T>((innerResolve, innerReject) => {
-        resolve = innerResolve as (value?: T) => void;
-        reject = innerReject;
-    });
-    return {promise, resolve, reject};
 }

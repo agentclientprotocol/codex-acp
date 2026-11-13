@@ -4,7 +4,12 @@ import type {
     ElicitationHandler,
 } from "../CodexAppServerClient";
 import type {ServerNotification} from "../app-server";
+import type {Thread} from "../app-server/v2";
 import {isRootAgentPath} from "./CodexAgentPath";
+
+export type SubagentInteraction = <T>(
+    sessionId: string, itemId: string | undefined, request: () => Promise<T>, turnId?: string | null,
+) => Promise<T>;
 
 type Subscription = {
     rootSessionId: string;
@@ -15,11 +20,14 @@ type Subscription = {
     elicitationHandler: ElicitationHandler;
     waitForRootNotifications(): Promise<void>;
     waitForChildSession(childThreadId: string): Promise<string | null>;
+    withUserAction?: SubagentInteraction;
+    observeWorkEnd?: (event: ServerNotification) => void;
 };
 
 type SessionSubscription = {
     current: Subscription;
     children: Set<string>;
+    childParents: Map<string, string>;
 };
 
 /** Discovers child threads and keeps their output/interaction boundary negotiated. */
@@ -35,12 +43,13 @@ export class CodexSubagentSubscriptions {
             return;
         }
 
-        const session = {current: subscription, children: new Set<string>()};
+        const session = {current: subscription, children: new Set<string>(), childParents: new Map<string, string>()};
         this.sessions.set(subscription.rootSessionId, session);
         this.client.onServerNotification(subscription.rootSessionId, (event) => {
             // Register synchronously: app-server may emit child output directly
             // after the spawning collaboration item.
             this.discover(session, event);
+            session.current.observeWorkEnd?.(event);
             session.current.dispatch(event);
         });
         this.registerInteractiveHandlers(session, subscription.rootSessionId);
@@ -53,7 +62,69 @@ export class CodexSubagentSubscriptions {
         this.sessions.delete(rootSessionId);
     }
 
+    redispatch(rootSessionId: string, notifications: ServerNotification[]): void {
+        const session = this.sessions.get(rootSessionId);
+        if (session) for (const notification of notifications) session.current.dispatch(notification);
+    }
+
+    isChildThread(threadId: string): boolean {
+        return [...this.sessions.values()].some(session => session.children.has(threadId));
+    }
+
+    childThreadIds(rootSessionId: string): string[] {
+        return [...this.sessions.get(rootSessionId)?.children ?? []];
+    }
+
+    async readChildThread(threadId: string): Promise<Thread | null> {
+        const session = [...this.sessions.values()].find(session => session.children.has(threadId));
+        const {thread} = await this.client.threadRead({threadId});
+        if (!thread || thread.id !== threadId) return null;
+        if (session && this.sessions.get(session.current.rootSessionId) === session) this.rememberParent(session, thread);
+        return thread;
+    }
+
+    /** Use observed ownership, without waiting on unrelated metadata reads during close. */
+    verifiedChildThreadIds(rootSessionId: string): string[] {
+        const parents = this.sessions.get(rootSessionId)?.childParents ?? new Map<string, string>();
+        const owned = new Set([rootSessionId]);
+        let changed: boolean;
+        do {
+            changed = false;
+            for (const [threadId, parentId] of parents) {
+                if (!owned.has(threadId) && owned.has(parentId)) {
+                    owned.add(threadId);
+                    changed = true;
+                }
+            }
+        } while (changed);
+        owned.delete(rootSessionId);
+        return [...owned];
+    }
+
+    async restoreChild(rootSessionId: string, parentThreadId: string, thread: Thread): Promise<Thread | null> {
+        const session = this.sessions.get(rootSessionId);
+        if (!session || session.children.has(thread.id) || thread.parentThreadId !== parentThreadId
+            || (parentThreadId !== rootSessionId && !session.children.has(parentThreadId))) return null;
+        if (!this.attachChild(session, thread.id)) return null;
+        this.rememberParent(session, thread);
+        if (thread.status.type === "notLoaded") return null;
+        try {
+            const response = await this.client.threadResume({threadId: thread.id, excludeTurns: true});
+            if (this.sessions.get(rootSessionId) === session && response.thread.id === thread.id
+                && response.thread.parentThreadId === parentThreadId && response.thread.status.type !== "notLoaded") return response.thread;
+        } catch (error) {
+            this.detachChild(session, thread.id);
+            throw error;
+        }
+        this.detachChild(session, thread.id);
+        return null;
+    }
+
     private discover(session: SessionSubscription, event: ServerNotification): void {
+        if (event.method === "thread/started") {
+            if (session.children.has(event.params.thread.id)) this.rememberParent(session, event.params.thread);
+            return;
+        }
         if (event.method !== "item/started" && event.method !== "item/completed") {
             return;
         }
@@ -70,17 +141,34 @@ export class CodexSubagentSubscriptions {
                 || session.children.has(childSessionId)) {
                 continue;
             }
-            session.children.add(childSessionId);
-            this.client.onServerNotification(childSessionId, (childEvent) => {
-                const eventThreadId = (childEvent.params as {threadId?: unknown}).threadId;
-                if (eventThreadId !== childSessionId) return;
-                this.discover(session, childEvent);
-                if (session.current.supportsSubagents) session.current.dispatch(childEvent);
-                else session.current.enqueueInteraction(this.rootAttributed(childEvent, session.current.rootSessionId));
-            });
-            // Hidden children keep only root-attributed permission requests.
-            this.registerInteractiveHandlers(session, childSessionId);
+            this.attachChild(session, childSessionId);
         }
+    }
+
+    private attachChild(session: SessionSubscription, childSessionId: string): boolean {
+        if ([...this.sessions.values()].some(other => other !== session
+            && (other.current.rootSessionId === childSessionId || other.children.has(childSessionId)))) return false;
+        session.children.add(childSessionId);
+        this.client.onServerNotification(childSessionId, event => {
+            if ((event.params as {threadId?: unknown}).threadId !== childSessionId) return;
+            this.discover(session, event);
+            session.current.observeWorkEnd?.(event);
+            if (session.current.supportsSubagents) session.current.dispatch(event);
+            else session.current.enqueueInteraction(this.rootAttributed(event, session.current.rootSessionId));
+        });
+        this.registerInteractiveHandlers(session, childSessionId);
+        return true;
+    }
+
+    private detachChild(session: SessionSubscription, childSessionId: string): void {
+        if (this.sessions.get(session.current.rootSessionId) !== session || !session.children.delete(childSessionId)) return;
+        session.childParents.delete(childSessionId);
+        if (!this.sessions.has(childSessionId)) this.client.clearThreadHandlers(childSessionId);
+    }
+
+    private rememberParent(session: SessionSubscription, thread: Thread): void {
+        if (thread.status.type === "notLoaded" || thread.parentThreadId === null) session.childParents.delete(thread.id);
+        else session.childParents.set(thread.id, thread.parentThreadId);
     }
 
     private registerInteractiveHandlers(session: SessionSubscription, targetSessionId: string): void {
@@ -90,27 +178,24 @@ export class CodexSubagentSubscriptions {
                 await current.waitForRootNotifications();
                 const sessionId = await this.interactionSessionId(current, targetSessionId);
                 if (sessionId === null) return {decision: "cancel"};
-                return await current.approvalHandler.handleCommandExecution(
-                    {...params, threadId: sessionId},
-                );
+                const request = () => current.approvalHandler.handleCommandExecution({...params, threadId: sessionId});
+                return current.withUserAction ? current.withUserAction(sessionId, params.itemId, request, params.turnId) : request();
             },
             handleFileChange: async (params) => {
                 const current = session.current;
                 await current.waitForRootNotifications();
                 const sessionId = await this.interactionSessionId(current, targetSessionId);
                 if (sessionId === null) return {decision: "cancel"};
-                return await current.approvalHandler.handleFileChange(
-                    {...params, threadId: sessionId},
-                );
+                const request = () => current.approvalHandler.handleFileChange({...params, threadId: sessionId});
+                return current.withUserAction ? current.withUserAction(sessionId, params.itemId, request, params.turnId) : request();
             },
             handlePermissionsRequest: async (params) => {
                 const current = session.current;
                 await current.waitForRootNotifications();
                 const sessionId = await this.interactionSessionId(current, targetSessionId);
                 if (sessionId === null) return {permissions: {}, scope: "turn", strictAutoReview: false};
-                return await current.approvalHandler.handlePermissionsRequest(
-                    {...params, threadId: sessionId},
-                );
+                const request = () => current.approvalHandler.handlePermissionsRequest({...params, threadId: sessionId});
+                return current.withUserAction ? current.withUserAction(sessionId, params.itemId, request, params.turnId) : request();
             },
         });
         this.client.onElicitationRequest(targetSessionId, {
@@ -119,18 +204,16 @@ export class CodexSubagentSubscriptions {
                 await current.waitForRootNotifications();
                 const sessionId = await this.interactionSessionId(current, targetSessionId);
                 if (sessionId === null) return {action: "cancel", content: null, _meta: null};
-                return await current.elicitationHandler.handleElicitation(
-                    {...params, threadId: sessionId},
-                );
+                const request = () => current.elicitationHandler.handleElicitation({...params, threadId: sessionId});
+                return current.withUserAction ? current.withUserAction(sessionId, undefined, request, params.turnId) : request();
             },
             handleUserInput: async (params) => {
                 const current = session.current;
                 await current.waitForRootNotifications();
                 const sessionId = await this.interactionSessionId(current, targetSessionId);
                 if (sessionId === null) return {answers: {}};
-                return await current.elicitationHandler.handleUserInput(
-                    {...params, threadId: sessionId},
-                );
+                const request = () => current.elicitationHandler.handleUserInput({...params, threadId: sessionId});
+                return current.withUserAction ? current.withUserAction(sessionId, params.itemId, request, params.turnId) : request();
             },
         });
     }

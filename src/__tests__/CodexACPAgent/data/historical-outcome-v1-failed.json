@@ -1,0 +1,17 @@
+[
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "state": {
+        "error": {
+          "code": -32603,
+          "message": "Recorded failure"
+        },
+        "stopReason": "error",
+        "state": "idle"
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  }
+]

@@ -5,7 +5,7 @@ import type {
     NewSessionResponse,
     ResumeSessionResponse,
     SessionId,
-} from "@agentclientprotocol/sdk";
+} from "@agentclientprotocol/sdk/unstable";
 import {
     GOAL_CONTROL_METHOD,
     LEGACY_GOAL_CONTROL_METHOD,
@@ -122,11 +122,17 @@ export async function legacySetSessionModel(
 export type SessionSteerRequest = {
     sessionId: SessionId;
     prompt: ContentBlock[];
+    _meta?: {
+        steering?: {
+            /** Leave idle input unconsumed so the host can own a normal prompt lifecycle. */
+            idleBehavior?: "promptRequired";
+        };
+    };
 }
 
-export type SessionSteeringResponse = {
-    outcome: "injected" | "startedNewTurn" | "failed";
-}
+export type SessionSteeringResponse =
+    | {outcome: "injected" | "startedNewTurn" | "failed"}
+    | {outcome: "promptRequired", reason: "noRunningTurn"}
 
 export type SessionSteeringExtRequest = {
     method: typeof SESSION_STEERING_METHOD;
