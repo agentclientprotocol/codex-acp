@@ -22,6 +22,8 @@ import {GOAL_CONTROL_METHOD, SESSION_STEERING_METHOD} from "../../AcpExtensions"
 import {ClientCapabilities} from "../../tool-calls/ClientCapabilities";
 import type {McpStartupResult} from "../../mcp/McpStartupTracker";
 
+vi.mock("open", () => ({default: vi.fn()}));
+
 describe('ACP server test', { timeout: 40_000 }, () => {
 
     let fixture: TestFixture;
@@ -218,6 +220,28 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(accountLoginSpy).not.toHaveBeenCalled();
     });
 
+    it.each([true, false])('should start a replacement ChatGPT browser login and preserve the current account on completion success=%s', async (success) => {
+        const chatGptFixture = createCodexMockTestFixture();
+        const appServer = chatGptFixture.getCodexAppServerClient();
+        const currentAccount = {type: "chatgpt" as const, email: "previous@example.com", planType: "pro" as const};
+        const accountReadSpy = vi.spyOn(appServer, "accountRead").mockResolvedValue({account: currentAccount, requiresOpenaiAuth: false});
+        const loginSpy = vi.spyOn(appServer, "accountLogin").mockResolvedValue({type: "chatgpt", loginId: "login-1", authUrl: "https://example.com/login"});
+        let completeLogin: ((event: unknown) => void) | undefined;
+        vi.spyOn(appServer.connection, "onNotification").mockImplementation(((method: unknown, handler: (event: unknown) => void) => {
+            if (method === "account/login/completed") completeLogin = handler;
+            return {dispose: () => {}};
+        }) as never);
+
+        const login = chatGptFixture.getCodexAcpClient().authenticate({methodId: "chat-gpt", _meta: {replaceLogin: true}});
+        await vi.waitFor(() => expect(completeLogin).toBeDefined());
+        expect(loginSpy).toHaveBeenCalledWith({type: "chatgpt"});
+        expect(accountReadSpy).not.toHaveBeenCalled();
+        expect((await appServer.accountRead({refreshToken: true})).account).toEqual(currentAccount);
+        completeLogin?.({loginId: "login-1", success, error: success ? null : "Login cancelled"});
+        await expect(login).resolves.toBe(success);
+        if (!success) expect((await appServer.accountRead({refreshToken: true})).account).toEqual(currentAccount);
+    });
+
     function createDeviceCodeFixture() {
         const deviceFixture = createCodexMockTestFixture();
         const codexAppServerClient = deviceFixture.getCodexAppServerClient();
@@ -245,6 +269,35 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             loginCompletedSubscribed: () => loginCompleted !== undefined,
         };
     }
+
+    it('should start device code replacement with an existing ChatGPT account and preserve it when cancelled', async () => {
+        const {deviceFixture, codexAppServerClient} = createDeviceCodeFixture();
+        const currentAccount = {type: "chatgpt" as const, email: "previous@example.com", planType: "pro" as const};
+        const accountReadSpy = vi.spyOn(codexAppServerClient, "accountRead")
+            .mockResolvedValue({account: currentAccount, requiresOpenaiAuth: false});
+        const loginSpy = vi.spyOn(codexAppServerClient, "accountLogin");
+        const cancelSpy = vi.spyOn(codexAppServerClient, "accountLoginCancel").mockResolvedValue({status: "canceled"});
+        await deviceFixture.getCodexAcpAgent().initialize({protocolVersion: 1, clientCapabilities: {elicitation: {url: {}}}});
+        deviceFixture.setElicitationResponse({action: "cancel"});
+
+        await expect(deviceFixture.getCodexAcpAgent().authenticate({methodId: "chat-gpt-device-code", _meta: {replaceLogin: true}}, 42))
+            .rejects.toMatchObject({code: -32000, message: "Authentication required: Sign-in did not complete"});
+        expect(loginSpy).toHaveBeenCalledWith({type: "chatgptDeviceCode"});
+        expect(cancelSpy).toHaveBeenCalledWith({loginId: "login-1"});
+        expect((await codexAppServerClient.accountRead({refreshToken: true})).account).toEqual(currentAccount);
+        expect(accountReadSpy).toHaveBeenCalled();
+    });
+
+    it('should keep an existing ChatGPT account without starting device code login when replacement is not requested', async () => {
+        const {deviceFixture, codexAppServerClient} = createDeviceCodeFixture();
+        vi.spyOn(codexAppServerClient, "accountRead").mockResolvedValue({
+            account: {type: "chatgpt", email: "previous@example.com", planType: "pro"},
+            requiresOpenaiAuth: false,
+        });
+        const loginSpy = vi.spyOn(codexAppServerClient, "accountLogin");
+        await expect(deviceFixture.getCodexAcpClient().authenticate({methodId: "chat-gpt-device-code"})).resolves.toBe(true);
+        expect(loginSpy).not.toHaveBeenCalled();
+    });
 
     it('should authenticate with ChatGPT device code via URL elicitation', async () => {
         const { deviceFixture, completeLogin, loginCompletedSubscribed } = createDeviceCodeFixture();

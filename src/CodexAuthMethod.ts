@@ -29,21 +29,25 @@ const ApiKeyAuthMethod: AuthMethod = {
 const ChatGptAuthMethod: AuthMethod = {
     id: "chat-gpt",
     name: "ChatGPT",
-    description: "Use ChatGPT to authenticate"
+    description: "Use ChatGPT to authenticate",
+    _meta: {replaceLogin: true},
 }
 
 export interface ChatGPTAuthRequest extends AuthenticateRequest {
     methodId: "chat-gpt";
+    _meta?: {replaceLogin?: boolean} | null;
 }
 
 const ChatGptDeviceCodeAuthMethod: AuthMethod = {
     id: "chat-gpt-device-code",
     name: "ChatGPT (device code)",
-    description: "Sign in to ChatGPT by opening a verification page and entering a one-time code"
+    description: "Sign in to ChatGPT by opening a verification page and entering a one-time code",
+    _meta: {replaceLogin: true},
 }
 
 export interface ChatGPTDeviceCodeAuthRequest extends AuthenticateRequest {
     methodId: "chat-gpt-device-code";
+    _meta?: {replaceLogin?: boolean} | null;
 }
 
 export const GatewayAuthMethod = {

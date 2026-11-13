@@ -266,9 +266,9 @@ export class CodexAcpClient {
             case "api-key":
                 return await this.authenticateWithApiKey(authRequest, signal);
             case "chat-gpt":
-                return await this.authenticateWithChatGpt(signal);
+                return await this.authenticateWithChatGpt(authRequest._meta?.replaceLogin === true, signal);
             case "chat-gpt-device-code":
-                return await this.authenticateWithChatGptDeviceCode(urlElicitationRequester, signal);
+                return await this.authenticateWithChatGptDeviceCode(authRequest._meta?.replaceLogin === true, urlElicitationRequester, signal);
             case "gateway":
                 return this.authenticateWithGateway(authRequest);
         }
@@ -279,8 +279,8 @@ export class CodexAcpClient {
         return runAccountLogin(this.codexClient, {type: "apiKey", apiKey}, async () => true, signal);
     }
 
-    private async authenticateWithChatGpt(signal?: AbortSignal): Promise<boolean> {
-        if (await this.hasWorkingChatGptLogin()) {
+    private async authenticateWithChatGpt(replaceLogin: boolean, signal?: AbortSignal): Promise<boolean> {
+        if (!replaceLogin && await this.hasWorkingChatGptLogin()) {
             throwIfRequestCancelled(signal);
             return true;
         }
@@ -317,8 +317,8 @@ export class CodexAcpClient {
         }
     }
 
-    private async authenticateWithChatGptDeviceCode(urlElicitationRequester?: UrlElicitationRequester, signal?: AbortSignal): Promise<boolean> {
-        if (await this.hasWorkingChatGptLogin()) {
+    private async authenticateWithChatGptDeviceCode(replaceLogin: boolean, urlElicitationRequester?: UrlElicitationRequester, signal?: AbortSignal): Promise<boolean> {
+        if (!replaceLogin && await this.hasWorkingChatGptLogin()) {
             throwIfRequestCancelled(signal);
             return true;
         }
