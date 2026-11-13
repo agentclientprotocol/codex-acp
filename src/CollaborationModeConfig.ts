@@ -1,4 +1,4 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import type {ReasoningEffort} from "./app-server";
 import type {ModeKind} from "./app-server/ModeKind";
 import {ModelId} from "./ModelId";

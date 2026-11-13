@@ -1,5 +1,10 @@
+import {chmodSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import path from "node:path";
 import {describe, expect, it, vi} from "vitest";
 import type {ServerNotification} from "../../app-server";
+import {CodexAppServerClient} from "../../CodexAppServerClient";
+import {startCodexConnection} from "../../CodexJsonRpcConnection";
 import type {Turn} from "../../app-server/v2";
 import {createCodexMockTestFixture, createTestSessionState} from "../acp-test-utils";
 
@@ -7,7 +12,7 @@ const sessionId = "compact-command-session";
 const turnId = "compact-command-turn";
 
 describe("compact command lifecycle", () => {
-    it.each(["interrupted", "failed"] as const)("captures an early %s turn before compact acknowledgement", async (status) => {
+    it.each(["completed", "interrupted", "failed"] as const)("captures an early %s turn before compact acknowledgement", async (status) => {
         const fixture = createCodexMockTestFixture();
         const appServer = fixture.getCodexAppServerClient();
         const completed = turnCompleted(status);
@@ -18,7 +23,7 @@ describe("compact command lifecycle", () => {
         });
         const onTurnStarted = vi.fn();
 
-        await expect(appServer.runCompact({threadId: sessionId}, onTurnStarted)).resolves.toEqual(completed);
+        await expect(appServer.runCompact({threadId: sessionId}, onTurnStarted)).resolves.toEqual(completed.params);
         expect(onTurnStarted).toHaveBeenCalledExactlyOnceWith(turnId);
     });
 
@@ -31,8 +36,7 @@ describe("compact command lifecycle", () => {
             settled = true;
             return result;
         });
-        // The preceding compact prompt may resolve on item/completed before this
-        // previous turn/completed reaches the next compact request.
+        // A preceding turn's terminal notification cannot finish this compaction.
         fixture.sendServerNotification({
             method: "turn/completed",
             params: {threadId: sessionId, turn: {...turn("completed"), id: "previous-turn"}},
@@ -62,7 +66,12 @@ describe("compact command lifecycle", () => {
             },
         };
         fixture.sendServerNotification(completed);
-        await expect(pending).resolves.toEqual(completed);
+        await new Promise(resolve => setImmediate(resolve));
+        expect(settled).toBe(false);
+
+        const finished = turnCompleted("completed");
+        fixture.sendServerNotification(finished);
+        await expect(pending).resolves.toEqual(finished.params);
     });
 
     it("releases compact observation after the request is rejected", async () => {
@@ -77,9 +86,28 @@ describe("compact command lifecycle", () => {
 
         start.mockResolvedValue({});
         const retry = appServer.runCompact({threadId: sessionId});
-        const completed: ServerNotification = {method: "thread/compacted", params: {threadId: sessionId, turnId}};
+        fixture.sendServerNotification({method: "turn/started", params: {threadId: sessionId, turn: turn("inProgress")}});
+        const completed = turnCompleted("completed");
         fixture.sendServerNotification(completed);
-        await expect(retry).resolves.toEqual(completed);
+        await expect(retry).resolves.toEqual(completed.params);
+    });
+
+    it.each(["failed", "interrupted"] as const)("preserves a %s turn after the compaction item completes", async status => {
+        const fixture = createCodexMockTestFixture();
+        const appServer = fixture.getCodexAppServerClient();
+        vi.spyOn(appServer, "threadCompactStart").mockResolvedValue({});
+        const pending = appServer.runCompact({threadId: sessionId});
+        startCompaction(fixture);
+        fixture.sendServerNotification({
+            method: "item/completed",
+            params: {
+                threadId: sessionId, turnId, completedAtMs: 1,
+                item: {type: "contextCompaction", id: "compaction-item"},
+            },
+        });
+        const completed = turnCompleted(status);
+        fixture.sendServerNotification(completed);
+        await expect(pending).resolves.toEqual(completed.params);
     });
 
     it("rejects a compact wait when the Codex connection closes", async () => {
@@ -98,6 +126,37 @@ describe("compact command lifecycle", () => {
 
         await expect(pending).rejects.toThrow("Codex connection closed during compaction.");
         expect(dispose).toHaveBeenCalledOnce();
+    });
+
+    it.skipIf(process.platform === "win32")("rejects a compact wait when the Codex process exits", async () => {
+        // The real connection path: the process exit disposes the vscode-jsonrpc connection and fires no close event.
+        const dir = mkdtempSync(path.join(tmpdir(), "codex-acp-compact-exit-"));
+        let codex: ReturnType<typeof startCodexConnection> | undefined;
+        try {
+            const fakeCodex = path.join(dir, "codex");
+            // The fake Codex acknowledges thread/compact/start and then never completes the compaction.
+            writeFileSync(fakeCodex, [
+                "#!/bin/sh",
+                "read line",
+                "id=$(printf '%s' \"$line\" | sed -E 's/.*\"id\":([0-9]+).*/\\1/')",
+                "printf '{\"id\":%s,\"result\":{}}\\n' \"$id\"",
+                "exec sleep 30",
+                "",
+            ].join("\n"));
+            chmodSync(fakeCodex, 0o755);
+            codex = startCodexConnection(fakeCodex);
+            const appServer = new CodexAppServerClient(codex.connection);
+            const start = vi.spyOn(appServer, "threadCompactStart");
+
+            const pending = appServer.runCompact({threadId: sessionId});
+            await expect(start.mock.results[0]?.value).resolves.toEqual({});
+            codex.process.kill();
+
+            await expect(pending).rejects.toThrow("Codex connection closed during compaction.");
+        } finally {
+            codex?.process.kill();
+            rmSync(dir, {recursive: true, force: true});
+        }
     });
 
     it("cancels the manual compact turn and finishes the ACP prompt", async () => {
@@ -160,13 +219,13 @@ function startCompaction(fixture: ReturnType<typeof createCodexMockTestFixture>)
     });
 }
 
-function turnCompleted(status: "failed" | "interrupted"): Extract<ServerNotification, {method: "turn/completed"}> {
+function turnCompleted(status: "completed" | "failed" | "interrupted"): Extract<ServerNotification, {method: "turn/completed"}> {
     return {method: "turn/completed", params: {threadId: sessionId, turn: turn(status)}};
 }
 
 function turn(status: Turn["status"]): Turn {
     return {
-        id: turnId, items: [], itemsView: "full", status,
+        id: turnId, rootTurnId: null, items: [], itemsView: "full", status,
         error: status === "failed" ? {
             message: "Compaction service failed.", codexErrorInfo: "serverOverloaded", additionalDetails: null, misalignment: null,
         } : null,

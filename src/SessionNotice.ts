@@ -1,4 +1,4 @@
-import type {ClientCapabilities, Notice, NoticeSeverity} from "@agentclientprotocol/sdk";
+import type {ClientCapabilities, Notice, NoticeSeverity} from "@agentclientprotocol/sdk/unstable";
 
 export function clientSupportsNotices(capabilities?: ClientCapabilities | null): boolean {
     const notices = capabilities?.session?.notices;

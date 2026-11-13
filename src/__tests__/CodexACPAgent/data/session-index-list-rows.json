@@ -1,0 +1,102 @@
+{
+  "sessions": [
+    {
+      "sessionId": "running",
+      "cwd": "/repo/project",
+      "title": "First message",
+      "updatedAt": "1970-01-01T00:03:20.000Z",
+      "_meta": {
+        "jetbrains": {
+          "air": {
+            "version": 1,
+            "archived": false,
+            "lastPromptAt": "1970-01-01T00:05:00.000Z",
+            "model": "gpt-5.5",
+            "forkedFrom": "01a0637c-5b99-7242-9064-04545d605fdd",
+            "state": "running"
+          }
+        }
+      }
+    },
+    {
+      "sessionId": "approval",
+      "cwd": "/repo/project",
+      "title": "First message",
+      "updatedAt": "1970-01-01T00:03:20.000Z",
+      "_meta": {
+        "jetbrains": {
+          "air": {
+            "version": 1,
+            "archived": false,
+            "lastPromptAt": "1970-01-01T00:05:00.000Z",
+            "state": "requires_action"
+          }
+        }
+      }
+    },
+    {
+      "sessionId": "input",
+      "cwd": "/repo/project",
+      "title": "First message",
+      "updatedAt": "1970-01-01T00:03:20.000Z",
+      "_meta": {
+        "jetbrains": {
+          "air": {
+            "version": 1,
+            "archived": false,
+            "lastPromptAt": "1970-01-01T00:05:00.000Z",
+            "state": "requires_action"
+          }
+        }
+      }
+    },
+    {
+      "sessionId": "foreign",
+      "cwd": "/repo/project",
+      "title": "First message",
+      "updatedAt": "1970-01-01T00:03:20.000Z",
+      "_meta": {
+        "jetbrains": {
+          "air": {
+            "version": 1,
+            "archived": false,
+            "lastPromptAt": "1970-01-01T00:05:00.000Z"
+          }
+        }
+      }
+    },
+    {
+      "sessionId": "broken",
+      "cwd": "/repo/project",
+      "title": "First message",
+      "updatedAt": "1970-01-01T00:03:20.000Z",
+      "_meta": {
+        "jetbrains": {
+          "air": {
+            "version": 1,
+            "archived": false,
+            "lastPromptAt": "1970-01-01T00:05:00.000Z",
+            "state": "error"
+          }
+        }
+      }
+    },
+    {
+      "sessionId": "idle",
+      "cwd": "/repo/project",
+      "title": "Explicit name",
+      "updatedAt": "1970-01-01T00:03:20.000Z",
+      "_meta": {
+        "jetbrains": {
+          "air": {
+            "version": 1,
+            "archived": false,
+            "state": "idle",
+            "lastTurnEndedAt": "1970-01-01T00:08:20.000Z"
+          }
+        }
+      }
+    }
+  ],
+  "nextCursor": null
+}

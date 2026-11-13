@@ -6,7 +6,12 @@
       "update": {
         "sessionUpdate": "session_info_update",
         "_meta": {
-          "goal": null
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "goal": null
+            }
+          }
         }
       }
     }

@@ -1,0 +1,21 @@
+{
+  "updates": [
+    {
+      "sessionUpdate": "agent_message_chunk",
+      "content": {
+        "type": "text",
+        "text": "Codex is temporarily overloaded.\n\n"
+      }
+    }
+  ],
+  "response": {
+    "stopReason": "end_turn",
+    "usage": null,
+    "_meta": {
+      "quota": {
+        "token_count": null,
+        "model_usage": []
+      }
+    }
+  }
+}

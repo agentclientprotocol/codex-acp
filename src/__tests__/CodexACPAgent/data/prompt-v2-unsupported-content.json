@@ -1,0 +1,4 @@
+{
+  "code": -32602,
+  "message": "Invalid params: Unsupported content block type: _custom"
+}

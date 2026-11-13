@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import type { ErrorNotification, TurnCompletedNotification } from "../../app-server/v2";
 import type { SessionState } from "../../CodexAcpServer";
 import {
     createCodexMockTestFixture,
+    createTestEventHandler,
     createTestSessionState,
+    deferred,
 } from "../acp-test-utils";
 import {logger} from "../../Logger";
-import {CodexEventHandler} from "../../CodexEventHandler";
 import type {AcpClientConnection} from "../../ACPSessionConnection";
 import {CodexCommands, type CommandHandleResult} from "../../CodexCommands";
 
@@ -75,7 +76,124 @@ const typedFailureCapabilities: acp.ClientCapabilities = {
     _meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}},
 };
 
+const modelRefusalMessage = "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.";
+const modelRefusalEnvelope = JSON.stringify({
+    type: "error", status: 400, error: {type: "invalid_request_error", message: modelRefusalMessage},
+});
+
+// The 400 that an LLM gateway returns when the provider can't decrypt reasoning from an earlier turn.
+const invalidEncryptedContentGatewayError = JSON.stringify({
+    error: {
+        message: "Provider returned error",
+        code: 400,
+        metadata: {
+            raw: JSON.stringify({error: {
+                message: "The encrypted content for item rs_1 could not be verified. Reason: Encrypted content could not be decrypted or parsed.",
+                type: "invalid_request_error", param: null, code: "invalid_encrypted_content",
+            }}, null, 2),
+            provider_name: "Azure", is_byok: false, provider_error_code: "invalid_encrypted_content",
+        },
+    },
+    user_id: "org_1",
+});
+
 describe("CodexEventHandler - auth error events", () => {
+    it.each([
+        {name: "terminal", retry: false, turnId: "turn-id"},
+        {name: "retry", retry: true, turnId: "turn-id"},
+        {name: "foreign turn", retry: false, turnId: "previous-turn"},
+    ])("reads a known service message for a typed $name failure", async ({retry, turnId}) => {
+        const {result, updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "service-envelope-session", account: {type: "apiKey"},
+        }), {
+            message: modelRefusalEnvelope, codexErrorInfo: "badRequest",
+            additionalDetails: "raw provider diagnostics", misalignment: null,
+        }, retry, typedFailureCapabilities, turnId);
+        const failureContainer = retry || turnId !== "turn-id" ? updates[0] : result;
+        expect(failureContainer).toMatchObject({
+            _meta: {jetbrains: {air: {sessionFailure: {
+                title: modelRefusalMessage, category: "request", severity: retry ? "warning" : "error",
+            }}}},
+        });
+        expect(JSON.stringify({result, updates})).not.toContain(modelRefusalEnvelope);
+    });
+
+    it.each([false, true])("reads a known service message after a turn ends (retry=%s)", async willRetry => {
+        const state = createTestSessionState({sessionId: "late-service-envelope", account: {type: "apiKey"}});
+        const updates: unknown[] = [];
+        const connection = {
+            notify: vi.fn(async (_method: unknown, params: {update: unknown}) => updates.push(params.update)),
+        } as unknown as AcpClientConnection;
+        const handler = createTestEventHandler(connection, state, {typedSessionFailures: true});
+        const notification = {
+            method: "error" as const,
+            params: {
+                threadId: state.sessionId, turnId: "completed-turn", willRetry,
+                error: {message: modelRefusalEnvelope, codexErrorInfo: "badRequest" as const,
+                    additionalDetails: "raw provider diagnostics", misalignment: null},
+            },
+        };
+        await handler.handleSessionScopedNotification(notification);
+        expect(updates).toEqual([expect.objectContaining({
+            _meta: {jetbrains: {air: expect.objectContaining({sessionFailure: expect.objectContaining({
+                title: modelRefusalMessage, severity: willRetry ? "warning" : "error",
+            })})}},
+        })]);
+        expect(notification.params.error.message).toBe(modelRefusalEnvelope);
+        expect(notification.params.error.additionalDetails).toBe("raw provider diagnostics");
+    });
+
+    it("reads the legacy error text and keeps the raw request error diagnostics", async () => {
+        const {result, updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "legacy-service-envelope", account: {type: "apiKey"},
+        }), {
+            message: modelRefusalEnvelope, codexErrorInfo: "usageLimitExceeded", additionalDetails: null, misalignment: null,
+        });
+        expect(updates).toEqual([expect.objectContaining({
+            sessionUpdate: "agent_message_chunk", content: {type: "text", text: `${modelRefusalMessage}\n\n`},
+        })]);
+        expect(result).toMatchObject({data: {message: modelRefusalEnvelope, codexErrorInfo: "usageLimitExceeded"}});
+    });
+
+    it.each([
+        {name: "legacy error text", capabilities: undefined},
+        {name: "typed failure", capabilities: typedFailureCapabilities},
+    ])("explains encrypted content from another provider in the $name", async ({capabilities}) => {
+        const {result, updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "encrypted-content-session", account: {type: "apiKey"},
+        }), {
+            message: invalidEncryptedContentGatewayError, codexErrorInfo: "badRequest", additionalDetails: null, misalignment: null,
+        }, false, capabilities);
+        await expect(JSON.stringify({result, updates}, null, 2)).toMatchFileSnapshot(
+            `data/invalid-encrypted-content-v1-${capabilities ? "typed-failure" : "legacy"}.json`,
+        );
+    });
+
+    it.each([
+        {name: "legacy error text", capabilities: undefined},
+        {name: "typed failure", capabilities: typedFailureCapabilities},
+    ])("explains an unreachable ChatGPT backend as a connection failure in the $name", async ({capabilities}) => {
+        const {result, updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "workspace-routing-session", account: {type: "chatgpt", email: "user@example.com", planType: "plus", workspaceName: null},
+        }), {
+            message: "workspace routing discovery failed", codexErrorInfo: "other", additionalDetails: null, misalignment: null,
+        }, false, capabilities);
+        await expect(JSON.stringify({result, updates}, null, 2)).toMatchFileSnapshot(
+            `data/workspace-routing-failed-v1-${capabilities ? "typed-failure" : "legacy"}.json`,
+        );
+    });
+
+    it.each([
+        "Plain error", "", "{invalid JSON}",
+        JSON.stringify({type: "error", status: 400, error: {type: "custom_error", message: "custom text"}}),
+        JSON.stringify({type: "error", status: 400, error: {type: "invalid_request_error", message: ""}}),
+    ])("keeps custom or malformed typed failure text: %s", async message => {
+        const {result} = await runPromptWithError(createTestSessionState({
+            sessionId: "custom-error-session", account: {type: "apiKey"},
+        }), {message, codexErrorInfo: "badRequest", additionalDetails: null, misalignment: null}, false, typedFailureCapabilities);
+        expect(result).toMatchObject({_meta: {jetbrains: {air: {sessionFailure: {title: message}}}}});
+    });
+
     it("publishes a typed terminal failure instead of assistant text when AIR negotiated it", async () => {
         const {result, updates} = await runPromptWithError(createTestSessionState({
             sessionId: "typed-failure-session",
@@ -188,12 +306,11 @@ describe("CodexEventHandler - auth error events", () => {
         }), {
             message: "Reconnecting... 1/5",
             codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
-            additionalDetails: "secret retry details",
+            additionalDetails: "  stream disconnected before completion: idle timeout waiting for websocket\n",
             misalignment: null,
         }, true, typedFailureCapabilities);
 
         expect(result).toMatchObject({stopReason: "end_turn"});
-        expect(JSON.stringify(updates)).not.toContain("secret retry details");
         expect(updates).toEqual([{
             sessionUpdate: "session_info_update",
             _meta: {
@@ -206,6 +323,7 @@ describe("CodexEventHandler - auth error events", () => {
                             category: "connection",
                             severity: "warning",
                             title: "Reconnecting... 1/5",
+                            details: "stream disconnected before completion: idle timeout waiting for websocket",
                             actions: [],
                         },
                     },
@@ -214,19 +332,18 @@ describe("CodexEventHandler - auth error events", () => {
         }]);
     });
 
-    it("publishes a safe rate-limit diagnostic while Codex retries HTTP 429", async () => {
+    it("publishes a rate-limit warning with its cause while Codex retries HTTP 429", async () => {
         const {result, updates} = await runPromptWithError(createTestSessionState({
             sessionId: "typed-rate-limit-retry-session",
             account: { type: "apiKey" },
         }), {
             message: "Rate limit reached. Please try again later.",
             codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: 429}},
-            additionalDetails: "secret rate-limit details",
+            additionalDetails: "HTTP 429 Too Many Requests",
             misalignment: null,
         }, true, typedFailureCapabilities);
 
         expect(result).toMatchObject({stopReason: "end_turn"});
-        expect(JSON.stringify(updates)).not.toContain("secret rate-limit details");
         expect(updates).toEqual([{
             sessionUpdate: "session_info_update",
             _meta: {
@@ -239,6 +356,7 @@ describe("CodexEventHandler - auth error events", () => {
                             category: "limit",
                             severity: "warning",
                             title: "Rate limit reached. Please try again later.",
+                            details: "HTTP 429 Too Many Requests",
                             actions: [],
                         },
                     },
@@ -247,7 +365,7 @@ describe("CodexEventHandler - auth error events", () => {
         }]);
     });
 
-    it("returns a typed auth failure without forwarding provider details", async () => {
+    it("uses the ACP login error without forwarding provider details", async () => {
         const {result, updates} = await runPromptWithError(createTestSessionState({
             sessionId: "typed-auth-session",
             account: null,
@@ -259,11 +377,55 @@ describe("CodexEventHandler - auth error events", () => {
             misalignment: null,
         }, false, typedFailureCapabilities);
 
-        expect(result).toMatchObject({
-            stopReason: "end_turn",
-            _meta: {jetbrains: {air: {sessionFailure: {category: "access"}}}},
-        });
+        expect(result).toMatchObject({code: -32000, message: "Authentication required"});
         expect(JSON.stringify(result)).not.toContain("secret authentication details");
+        expect(JSON.stringify(result)).not.toContain("sessionFailure");
+        expect(updates).toEqual([]);
+    });
+
+    it("does not forward an auth error from another turn", async () => {
+        const {result, updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "foreign-auth-session",
+            account: {type: "apiKey"},
+        }), {
+            message: "Sign in to continue",
+            codexErrorInfo: "unauthorized",
+            additionalDetails: null,
+            misalignment: null,
+        }, false, typedFailureCapabilities, "foreign-turn");
+
+        expect(result).toMatchObject({stopReason: "end_turn"});
+        expect(updates).toEqual([]);
+    });
+
+    it("uses the ACP login error when auth arrives before the turn id", async () => {
+        const {result, updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "early-auth-session",
+            account: {type: "apiKey"},
+        }), {
+            message: "Sign in to continue",
+            codexErrorInfo: "unauthorized",
+            additionalDetails: null,
+            misalignment: null,
+        }, false, typedFailureCapabilities, "turn-id", true);
+
+        expect(result).toMatchObject({code: -32000, message: "Authentication required"});
+        expect(updates).toEqual([]);
+    });
+
+    it("uses the ACP login error when only the failed turn reports auth", async () => {
+        const {result, updates} = await runPromptWithCompletedTurn(
+            createTestSessionState({sessionId: "completion-auth-session", account: {type: "apiKey"}}),
+            typedFailureCapabilities,
+            createTurn("failed", "turn-id", {
+                message: "Sign in to continue",
+                codexErrorInfo: "unauthorized",
+                additionalDetails: null,
+                misalignment: null,
+            }),
+        );
+
+        expect(result).toMatchObject({code: -32000, message: "Authentication required"});
         expect(updates).toEqual([]);
     });
 
@@ -303,10 +465,10 @@ describe("CodexEventHandler - auth error events", () => {
 
     it.each([
         ["connection", {responseStreamDisconnected: {httpStatusCode: 503}}],
-        ["access", "unauthorized"],
         ["limit", {responseStreamDisconnected: {httpStatusCode: 429}}],
         ["limit", "usageLimitExceeded"],
         ["service", "serverOverloaded"],
+        ["service", "flexUnavailable"],
         ["limit", "contextWindowExceeded"],
         ["limit", "sessionBudgetExceeded"],
         ["request", "cyberPolicy"],
@@ -314,6 +476,7 @@ describe("CodexEventHandler - auth error events", () => {
         ["service", "internalServerError"],
         ["service", "threadRollbackFailed"],
         ["service", "sandboxError"],
+        ["service", "tooManyDenials"],
         ["service", "other"],
         ["connection", {httpConnectionFailed: {httpStatusCode: null}}],
         ["connection", {responseStreamConnectionFailed: {httpStatusCode: 503}}],
@@ -518,7 +681,7 @@ describe("CodexEventHandler - auth error events", () => {
                 error: {
                     message: "Reconnecting... 1/5",
                     codexErrorInfo: {responseStreamDisconnected: {httpStatusCode: null}},
-                    additionalDetails: "secret retry detail",
+                    additionalDetails: "idle timeout waiting for websocket",
                     misalignment: null,
                 },
             },
@@ -538,6 +701,7 @@ describe("CodexEventHandler - auth error events", () => {
                             category: "connection",
                             severity: "warning",
                             title: "Reconnecting... 1/5",
+                            details: "idle timeout waiting for websocket",
                             actions: [],
                         },
                     },
@@ -545,7 +709,6 @@ describe("CodexEventHandler - auth error events", () => {
             },
         }]);
         expect(sessionState.sessionFailure).toMatchObject({id: "completed-turn:error", severity: "warning"});
-        expect(JSON.stringify(updates)).not.toContain("secret retry detail");
     });
 
     it("drains a terminal error that arrives during a local slash command", async () => {
@@ -628,7 +791,7 @@ describe("CodexEventHandler - auth error events", () => {
                     updates.push(params.update);
                 }),
             } as unknown as AcpClientConnection;
-            const handler = new CodexEventHandler(connection, state, false, true);
+            const handler = createTestEventHandler(connection, state, {typedSessionFailures: true});
             await handler.handleSessionScopedNotification({
                 method: "error",
                 params: {
@@ -683,7 +846,7 @@ describe("CodexEventHandler - auth error events", () => {
                 updates.push(params.update);
             }),
         } as unknown as AcpClientConnection;
-        const handler = new CodexEventHandler(connection, state, false, true, "test-epoch");
+        const handler = createTestEventHandler(connection, state, {typedSessionFailures: true});
         const retryError = (message: string) => ({
             method: "error" as const,
             params: {
@@ -758,25 +921,7 @@ describe("CodexEventHandler - auth error events", () => {
         expect(response).toMatchObject({
             stopReason: "end_turn",
         });
-        expect(updates).toEqual([{
-            sessionUpdate: "session_info_update",
-            _meta: {
-                codex: {
-                    error: {
-                        message: "Reconnecting after provider returned 401",
-                        codexErrorInfo: {
-                            responseStreamDisconnected: {
-                                httpStatusCode: 401,
-                            },
-                        },
-                        additionalDetails: "HTTP status 401",
-                        misalignment: null,
-                        turnId: "turn-id",
-                        willRetry: true,
-                    },
-                },
-            },
-        }]);
+        expect(updates).toEqual([]);
     });
 
     it("returns AuthRequired for auth errors when no auth is configured", async () => {
@@ -791,14 +936,8 @@ describe("CodexEventHandler - auth error events", () => {
             misalignment: null,
         });
 
-        expect(error).toMatchObject({
-            code: -32000,
-            message: "Authentication required: Authentication is required",
-            data: {
-                message: "Authentication is required",
-                codexErrorInfo: "unauthorized",
-            },
-        });
+        expect(error).toMatchObject({code: -32000, message: "Authentication required"});
+        expect(JSON.stringify(error)).not.toContain("Authentication is required");
     });
 
     it.each(configuredAuthFailureCases)(
@@ -810,16 +949,31 @@ describe("CodexEventHandler - auth error events", () => {
                 ...sessionOverrides,
             }), turnError);
 
-            expect(error).toMatchObject({
-                code: -32603,
-                message: "Internal error",
-                data: expectedData,
-            });
-            expect(error).not.toMatchObject({
-                code: -32000,
-            });
+            if (turnError.codexErrorInfo === "usageLimitExceeded") {
+                expect(error).toMatchObject({code: -32603, message: "Internal error", data: expectedData});
+            } else {
+                expect(error).toMatchObject({code: -32000, message: "Authentication required"});
+                expect(JSON.stringify(error)).not.toContain(turnError.message);
+            }
         },
     );
+});
+
+describe("CodexEventHandler - usage limit text", () => {
+    it("sends the message as agent text and fails the prompt, as origin/main does", async () => {
+        const {result, updates} = await runPromptWithError(createTestSessionState({
+            sessionId: "limited-session",
+            account: {type: "apiKey"},
+        }), {
+            message: "Usage limits were exceeded",
+            codexErrorInfo: "usageLimitExceeded",
+            additionalDetails: null,
+            misalignment: null,
+        });
+
+        expect(result).toMatchObject({data: {message: "Usage limits were exceeded"}});
+        expect(JSON.stringify(updates)).toContain("Usage limits were exceeded");
+    });
 });
 
 async function runPromptWithError(
@@ -951,6 +1105,7 @@ function createTurn(
     return {
         id,
         items: [],
+        rootTurnId: null,
         itemsView: "notLoaded" as const,
         status,
         error,
@@ -958,12 +1113,4 @@ function createTurn(
         completedAt: null,
         durationMs: null,
     };
-}
-
-function deferred<T>(): {promise: Promise<T>, resolve: (value: T) => void} {
-    let resolve: (value: T) => void = () => {};
-    const promise = new Promise<T>((innerResolve) => {
-        resolve = innerResolve;
-    });
-    return {promise, resolve};
 }

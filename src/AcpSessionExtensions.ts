@@ -1,19 +1,20 @@
-import type {SessionNotification} from "@agentclientprotocol/sdk";
+import type {SessionNotification} from "@agentclientprotocol/sdk/unstable";
 import type {AsyncTaskUpdate} from "./async-tasks/AcpAsyncTasks";
-import type {SubagentSpawnedUpdate, SubagentStateUpdate} from "./subagents/AcpSubagents";
+import type {StandardSubagentUpdate, SubagentSpawnedUpdate, SubagentStateUpdate} from "./subagents/AcpSubagents";
 
-/** Session updates that are not available in the published ACP SDK yet. */
+/** Updates the adapter emits, including its existing AIR subagent contract. */
 export type AcpSessionUpdate =
-    | SessionNotification["update"]
+    | Exclude<SessionNotification["update"], {sessionUpdate: "subagent_update"}>
     | SubagentSpawnedUpdate
     | SubagentStateUpdate
+    | StandardSubagentUpdate
     | AsyncTaskUpdate;
 
-type AcpSessionNotification = Omit<SessionNotification, "update"> & {
+export type AcpSessionNotification = Omit<SessionNotification, "update"> & {
     update: AcpSessionUpdate;
 };
 
-/** The only cast needed until the ACP SDK publishes the extension updates. */
+/** The only cast needed for AIR's private updates, which the ACP SDK does not type. */
 export function asSdkSessionNotification(
     notification: AcpSessionNotification,
 ): SessionNotification {

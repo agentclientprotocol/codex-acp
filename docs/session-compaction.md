@@ -20,4 +20,4 @@ Loading a session replays each persisted compaction as one completed update in i
 
 Codex's app-server compaction items expose lifecycle identity without a user-displayable summary. The adapter therefore omits `summary` and does not emit `compaction_summary_chunk`. It does not extract internal replacement history or encrypted compaction data. Context utilization continues to arrive separately through `usage_update`.
 
-When the client omits `session.compaction` or sets it to `null`, the adapter preserves its existing synthetic tool-call and text-message fallback.
+When the client omits `session.compaction` or sets it to `null`, the adapter preserves its existing synthetic tool-call and text-message fallback. The synthetic tool call carries the AIR `contextCompaction` key, see [AIR extensions](air-extensions.md#context-compaction).

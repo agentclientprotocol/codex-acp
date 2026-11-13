@@ -1,0 +1,20 @@
+{
+  "toolCallId": "cmd",
+  "kind": "execute",
+  "status": "pending",
+  "title": "https network access to example.com",
+  "rawInput": {
+    "command": "curl https://example.com",
+    "cwd": "/w",
+    "url": "https://example.com"
+  },
+  "content": [
+    {
+      "type": "content",
+      "content": {
+        "type": "text",
+        "text": "https access to example.com"
+      }
+    }
+  ]
+}

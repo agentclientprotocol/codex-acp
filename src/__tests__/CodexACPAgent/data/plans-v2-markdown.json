@@ -1,0 +1,13 @@
+[
+  {
+    "sessionId": "session-1",
+    "update": {
+      "plan": {
+        "planId": "plan-item-1",
+        "content": "1. Add the mapping.",
+        "type": "markdown"
+      },
+      "sessionUpdate": "plan_update"
+    }
+  }
+]

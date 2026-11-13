@@ -1,0 +1,24 @@
+{
+  "airWithoutSessionIndex": {
+    "cursor": "cursor-1",
+    "modelProviders": [],
+    "sourceKinds": [
+      "cli",
+      "vscode",
+      "appServer",
+      "unknown"
+    ],
+    "useStateDbOnly": true
+  },
+  "plain": {
+    "cursor": "cursor-1",
+    "modelProviders": [],
+    "sourceKinds": [
+      "cli",
+      "vscode",
+      "appServer",
+      "unknown"
+    ],
+    "useStateDbOnly": true
+  }
+}

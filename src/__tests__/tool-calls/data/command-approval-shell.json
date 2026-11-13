@@ -1,0 +1,10 @@
+{
+  "toolCallId": "cmd",
+  "kind": "execute",
+  "status": "pending",
+  "title": "printf '%s\\n' 'codex-acp approval display test'",
+  "rawInput": {
+    "command": "printf '%s\\n' 'codex-acp approval display test'",
+    "cwd": "/w"
+  }
+}

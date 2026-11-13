@@ -1,4 +1,4 @@
-import type {SessionId} from "@agentclientprotocol/sdk";
+import type {SessionId} from "@agentclientprotocol/sdk/unstable";
 
 export const ASYNC_TASK_STOP_METHOD = "_session/async_task/stop";
 

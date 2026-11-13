@@ -1,0 +1,21 @@
+[
+  {
+    "sessionId": "session-1",
+    "update": {
+      "used": 1200,
+      "size": 200000,
+      "cost": {
+        "amount": 0.25,
+        "currency": "USD"
+      },
+      "sessionUpdate": "usage_update"
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "title": "Fix the build",
+      "sessionUpdate": "session_info_update"
+    }
+  }
+]

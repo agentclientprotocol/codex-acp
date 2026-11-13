@@ -7,9 +7,16 @@
         "sessionUpdate": "tool_call_update",
         "toolCallId": "command-456",
         "status": "failed",
-        "rawOutput": {
-          "formatted_output": "cat: nonexistent.txt: No such file or directory",
-          "exit_code": 1
+        "_meta": {
+          "terminal_output_delta": {
+            "data": "cat: nonexistent.txt: No such file or directory",
+            "terminal_id": "command-456"
+          },
+          "terminal_exit": {
+            "exit_code": 1,
+            "signal": null,
+            "terminal_id": "command-456"
+          }
         }
       }
     }

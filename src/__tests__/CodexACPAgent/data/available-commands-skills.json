@@ -11,19 +11,26 @@
             "description": "Turn plan mode on.",
             "input": null,
             "_meta": {
-              "commandAction": {
-                "kind": "setConfigOption",
-                "configId": "collaboration_mode",
-                "value": "plan",
-                "resetValue": "default",
-                "presentation": "state"
+              "jetbrains": {
+                "air": {
+                  "version": 1,
+                  "commandAction": {
+                    "kind": "setConfigOption",
+                    "configId": "collaboration_mode",
+                    "value": "plan",
+                    "resetValue": "default",
+                    "presentation": "state"
+                  }
+                }
               }
             }
           },
           {
             "name": "mcp",
-            "description": "List configured Model Context Protocol (MCP) tools.",
-            "input": null
+            "description": "Show the status of the MCP servers, or reconnect them.",
+            "input": {
+              "hint": "[reconnect]"
+            }
           },
           {
             "name": "skills",
@@ -68,9 +75,14 @@
               "hint": "[<objective>|clear|pause|resume]"
             },
             "_meta": {
-              "commandAction": {
-                "kind": "prefixPrompt",
-                "presentation": "state"
+              "jetbrains": {
+                "air": {
+                  "version": 1,
+                  "commandAction": {
+                    "kind": "prefixPrompt",
+                    "presentation": "state"
+                  }
+                }
               }
             }
           },
@@ -89,7 +101,15 @@
           {
             "name": "$build",
             "description": "Build",
-            "input": null
+            "input": null,
+            "_meta": {
+              "jetbrains": {
+                "air": {
+                  "version": 1,
+                  "skillPath": "/workspace/.agents/skills/build/SKILL.md"
+                }
+              }
+            }
           }
         ]
       }

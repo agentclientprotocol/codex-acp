@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import * as acp from "@agentclientprotocol/sdk";
+import * as acp from "@agentclientprotocol/sdk/unstable";
 import type { McpServerElicitationRequestParams, ToolRequestUserInputParams } from '../../app-server/v2';
 import { createCodexMockTestFixture, createTestSessionState, type CodexMockTestFixture } from '../acp-test-utils';
 import type { SessionState } from '../../CodexAcpServer';
@@ -335,7 +335,7 @@ describe('Elicitation Events', () => {
                 method: 'requestPermission',
                 args: [{
                     sessionId,
-                    toolCall: {toolCallId: 'call-id', kind: 'execute', status: 'pending'},
+                    toolCall: {toolCallId: 'call-id', status: 'pending'},
                 }],
             });
             expect(events[0]!.args[0].options.map((option: {name: string}) => option.name)).toEqual([
@@ -734,7 +734,7 @@ describe('Elicitation Events', () => {
                 success: true,
             });
 
-            await expect((agent as any).authenticateMcpServer(sessionId, 'linear')).resolves.toBe(true);
+            await expect((agent as any).mcpServerSignIn(sessionId, 'linear')).resolves.toBe('signedIn');
 
             expect(oauthLogin).toHaveBeenCalledWith({name: 'linear', threadId: sessionId});
             const events = fixture.getAcpConnectionEvents([]);
@@ -996,6 +996,50 @@ describe('Elicitation Events', () => {
                     next_step: { answers: ['None of the above', 'user_note: Inspect flaky logs'] },
                 },
             });
+
+            completeTurn();
+            await promptPromise;
+        });
+
+        it.each([
+            { answer: 'Inspect flaky logs', expected: ['None of the above', 'user_note: Inspect flaky logs'] },
+            { answer: 'Run tests', expected: ['Run tests'] },
+        ])('should mark the note as the AIR custom answer and map $answer to Codex answers', async ({ answer, expected }) => {
+            const { promptPromise, completeTurn } = await setupSessionWithPendingPromptAndCapabilities({
+                elicitation: { form: {} },
+                _meta: { jetbrains: { air: { version: 1, capabilities: [] } } },
+            });
+            fixture.setElicitationResponse({
+                action: 'accept',
+                content: { next_step: answer },
+            });
+
+            const params: ToolRequestUserInputParams = {
+                threadId: sessionId,
+                turnId: 'turn-1',
+                itemId: 'request-user-input-1',
+                autoResolutionMs: null,
+                isBlocking: true,
+                questions: [{
+                    id: 'next_step',
+                    header: 'Next step',
+                    question: 'What should I do next?',
+                    isOther: true,
+                    isSecret: false,
+                    options: [
+                        { label: 'Run tests', description: 'Run the focused test suite.' },
+                        { label: 'Stop', description: 'Stop and report current status.' },
+                    ],
+                }],
+            };
+
+            const response = await fixture.sendServerRequest('item/tool/requestUserInput', params);
+            expect(response).toEqual({
+                answers: { next_step: { answers: expected } },
+            });
+            await expect(fixture.getAcpConnectionDump([])).toMatchFileSnapshot(
+                'data/elicitation-user-input-air-custom-answer.json',
+            );
 
             completeTurn();
             await promptPromise;

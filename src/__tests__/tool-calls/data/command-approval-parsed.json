@@ -1,0 +1,15 @@
+{
+  "toolCallId": "cmd",
+  "kind": "execute",
+  "status": "pending",
+  "title": "cat a.txt | head -n 5",
+  "rawInput": {
+    "command": "cat a.txt | head -n 5",
+    "cwd": "/w"
+  },
+  "locations": [
+    {
+      "path": "/w/a.txt"
+    }
+  ]
+}

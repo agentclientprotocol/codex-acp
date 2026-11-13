@@ -1,0 +1,11 @@
+{
+  "args": [
+    "-c",
+    "model_provider=\"corp\"",
+    "-c",
+    "model_providers.corp={ \"name\" = \"Corp\", \"base_url\" = \"https://llm.corp/v1\", \"wire_api\" = \"responses\", \"env_http_headers\" = { \"X-Org\" = \"CORP_ORG\", \"Authorization\" = \"CODEX_ACP_PROVIDER_HEADER_0\" } }"
+  ],
+  "env": {
+    "CODEX_ACP_PROVIDER_HEADER_0": "Bearer k"
+  }
+}

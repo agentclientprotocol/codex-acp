@@ -1,4 +1,4 @@
-import type * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {describe, expect, it, vi} from "vitest";
 import {ACPSessionConnection} from "../../ACPSessionConnection";
 import type {ServerNotification} from "../../app-server";
@@ -128,6 +128,8 @@ describe("session notices", () => {
                 startedAtMs: 0,
                 item: {
                     type: "subAgentActivity",
+                    model: null,
+                    reasoningEffort: null,
                     id: "notice-child-activity",
                     kind: "started",
                     agentThreadId: childSessionId,
@@ -157,7 +159,7 @@ describe("session notices", () => {
         const client = fixture.getCodexAcpClient();
         const appServer = fixture.getCodexAppServerClient();
         const model = createTestModel();
-        vi.spyOn(client, "authRequired").mockResolvedValue(false);
+        vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
         vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
         vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
         vi.spyOn(appServer, "listModels").mockResolvedValue({data: [model], nextCursor: null});
@@ -213,6 +215,8 @@ async function createFixture(clientCapabilities?: unknown, nativeSubagents = fal
             sessionId,
             true,
             new ACPSessionConnection(fixture.getAcpConnection(), sessionId),
+            () => {},
+            () => ({currentModel: null, availableModels: []}),
         );
     }
     vi.spyOn(agent, "getSessionState").mockReturnValue(sessionState);
@@ -256,7 +260,7 @@ function modelRerouted(threadId: string): ServerNotification {
 }
 
 function createTurn(status: Turn["status"]): Turn {
-    return {id: turnId, items: [], itemsView: "full", status, error: null, startedAt: null, completedAt: null, durationMs: null};
+    return {id: turnId, rootTurnId: null, items: [], itemsView: "full", status, error: null, startedAt: null, completedAt: null, durationMs: null};
 }
 
 function createThread(): Thread {

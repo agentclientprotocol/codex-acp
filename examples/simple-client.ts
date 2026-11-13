@@ -53,8 +53,8 @@ import {
     client as acpClient,
     methods,
     ndJsonStream,
-} from "@agentclientprotocol/sdk";
-import type { AnyMessage, Stream } from "@agentclientprotocol/sdk";
+} from "@agentclientprotocol/sdk/unstable";
+import type { AnyMessage, Stream } from "@agentclientprotocol/sdk/unstable";
 
 // ---------------------------------------------------------------- steering
 

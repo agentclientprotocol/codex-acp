@@ -1,0 +1,28 @@
+[
+  {
+    "state": "requires_action"
+  },
+  {
+    "state": "requires_action"
+  },
+  {
+    "state": "idle",
+    "stopReason": "cancelled"
+  },
+  {
+    "state": "running"
+  },
+  {
+    "state": "requires_action"
+  },
+  {
+    "state": "requires_action"
+  },
+  {
+    "state": "requires_action"
+  },
+  {
+    "state": "idle",
+    "stopReason": "end_turn"
+  }
+]

@@ -54,7 +54,7 @@ function setUp() {
         serviceTier: null,
     } as any);
     vi.spyOn(codexAppServerClient, "threadReadWithHistory").mockResolvedValue({
-        thread: {id: "thread-id"} as any,
+        thread: {id: "thread-id", turns: []} as any,
     });
     vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
         data: [createTestModel({id: "gpt-5"})],
@@ -132,7 +132,7 @@ describe('_meta.codex.strictMcpConfig', () => {
             _meta: strictMeta,
         });
 
-        expect(configReadSpy).toHaveBeenCalledWith({includeLayers: false, cwd: "/workspace"});
+        expect(configReadSpy).toHaveBeenCalledWith({includeLayers: true, cwd: "/workspace"});
         expect(threadStartSpy.mock.calls[0]![0].config?.["mcp_servers"]).toEqual({
             "user-mcp": {enabled: false},
             "project-mcp": {enabled: false},

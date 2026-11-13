@@ -1,4 +1,4 @@
-import type {ClientCapabilities, CompactionUpdate} from "@agentclientprotocol/sdk";
+import type {ClientCapabilities, CompactionUpdate} from "@agentclientprotocol/sdk/unstable";
 
 type Update = CompactionUpdate & {sessionUpdate: "compaction_update"};
 type TerminalStatus = "completed" | "failed" | "cancelled";

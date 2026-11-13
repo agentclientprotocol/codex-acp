@@ -11,8 +11,11 @@
           "text": "### Fallback plan\n\n1. Use the completed item."
         },
         "_meta": {
-          "codex": {
-            "phase": "final_answer"
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "phase": "final_answer"
+            }
           }
         }
       }

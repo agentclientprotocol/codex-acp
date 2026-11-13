@@ -105,8 +105,6 @@ describe("CodexEventHandler - fuzzy file search events", () => {
                     update: {
                         sessionUpdate: "tool_call_update",
                         toolCallId: "fuzzyFileSearch.search-1",
-                        title: "Search for 'event handler'",
-                        status: "in_progress",
                         locations: [{ path: "/repo/src/CodexEventHandler.ts" }],
                     },
                 },
