@@ -32,7 +32,7 @@ import {isDeepStrictEqual} from "node:util";
 import {logger} from "./Logger";
 import {isAccountReadAuthFailureError, isAccountReadUnavailableError} from "./CodexThreadErrors";
 import {listedSessionTitle, normalizeSessionTitle} from "./SessionTitle";
-import {type AcpMcpServer, type WithAcpMcpServers, normalizeMcpServers, toCodexMcpServerConfig} from "./McpServerConfig";
+import {type AcpMcpServer, type NormalizedMcpServer, type WithAcpMcpServers, normalizeMcpServers, toCodexMcpServerConfig} from "./McpServerConfig";
 import type {
     AccountUpdatedNotification,
     ApprovalsReviewer,
@@ -694,7 +694,7 @@ export class CodexAcpClient {
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const {config, skippedMcpServers, defaultPermissionProfileId, ...permissionProfileMetadata} =
-            await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
+            await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? [], readStrictMcpConfig(request._meta));
         const response = await this.resumeThreadWithInstructions({
             excludeTurns: true,
             config,
@@ -732,11 +732,12 @@ export class CodexAcpClient {
     ): Promise<SessionMetadata> {
         const instructions = await this.resolveSessionInstructions(request, previousInstructions);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+        const strictMcpConfig = readStrictMcpConfig(request._meta);
         return await runForkSession(request, additionalDirectories, {
             codexClient: this.codexClient,
             refreshSkills: (cwd, directories) => this.refreshSkills(cwd, directories),
             createSessionConfig: (cwd, directories, mcpServers) =>
-                this.createSessionConfig(cwd, directories, mcpServers),
+                this.createSessionConfig(cwd, directories, mcpServers, strictMcpConfig),
             getResumeModelProvider: () => this.getResumeModelProvider(),
             fetchAvailableModels: () => this.fetchAvailableModels(),
             createCurrentModelId: (models, model, reasoningEffort) =>
@@ -757,7 +758,7 @@ export class CodexAcpClient {
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const {config, skippedMcpServers, defaultPermissionProfileId, ...permissionProfileMetadata} =
-            await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
+            await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? [], readStrictMcpConfig(request._meta));
         const response = await this.resumeThreadWithInstructions({
             excludeTurns: true,
             config,
@@ -864,7 +865,7 @@ export class CodexAcpClient {
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const {config, skippedMcpServers, defaultPermissionProfileId: _defaultPermissionProfileId, ...permissionProfileMetadata} =
-            await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
+            await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? [], readStrictMcpConfig(request._meta));
         const response = await this.codexClient.threadStart({
             config,
             modelProvider: this.getModelProvider(),
@@ -1139,7 +1140,8 @@ export class CodexAcpClient {
     private async createSessionConfig(
         projectPath: string,
         additionalDirectories: string[],
-        mcpServers: Array<AcpMcpServer>
+        mcpServers: Array<AcpMcpServer>,
+        strictMcpConfig: boolean,
     ): Promise<SessionConfig> {
         const sessionRoots = [projectPath, ...additionalDirectories];
         const activeProvider = this.gatewayConfig
@@ -1172,6 +1174,14 @@ export class CodexAcpClient {
             ...(effectiveConfig?.config?.approval_policy != null && {approvalPolicy: effectiveConfig.config.approval_policy}),
             ...(effectiveConfig?.config?.approvals_reviewer != null && {approvalsReviewer: effectiveConfig.config.approvals_reviewer}),
         };
+        if (strictMcpConfig) {
+            const requested = normalizeMcpServers(mcpServers).map(server => ({name: server.name, server}));
+            return {
+                config: this.createStrictMcpSessionConfig(effectiveConfig, configWithWorkspaceRoots, requested),
+                skippedMcpServers: [],
+                ...permissionProfileMetadata,
+            };
+        }
         if (mcpServers.length === 0) {
             return {config: configWithWorkspaceRoots, skippedMcpServers: [], ...permissionProfileMetadata};
         }
@@ -1203,6 +1213,43 @@ export class CodexAcpClient {
             },
             skippedMcpServers,
             ...permissionProfileMetadata,
+        };
+    }
+
+    /**
+     * Session config for `_meta.codex.strictMcpConfig`: the session's MCP servers are
+     * exactly the client's. Every server Codex has configured is disabled by name, and
+     * the features that add MCP servers of their own are turned off.
+     */
+    private createStrictMcpSessionConfig(
+        effectiveConfig: ConfigReadResponse,
+        config: JsonObject,
+        requestedServers: Array<{ name: string, server: NormalizedMcpServer }>,
+    ): JsonObject {
+        const configuredNames = getEffectiveMcpServerNames(effectiveConfig);
+        // A client server cannot replace a configured one: Codex deep-merges the two
+        // entries, so fields of the configured server would leak into the client's.
+        const conflicts = requestedServers
+            .map(mcp => mcp.name)
+            .filter(name => configuredNames.has(name));
+        if (conflicts.length > 0) {
+            throw RequestError.invalidParams(
+                undefined,
+                `_meta.codex.strictMcpConfig: MCP server name(s) ${conflicts.join(", ")} are also configured in Codex; pass them under different names`,
+            );
+        }
+
+        const features = isJsonObject(config["features"]) ? config["features"] : {};
+        return {
+            ...config,
+            features: {
+                ...features,
+                ...STRICT_MCP_DISABLED_FEATURES,
+            },
+            "mcp_servers": {
+                ...Object.fromEntries([...configuredNames].map(name => [name, {enabled: false}])),
+                ...Object.fromEntries(requestedServers.map(mcp => [mcp.name, toCodexMcpServerConfig(mcp.server)])),
+            },
         };
     }
 
@@ -1736,6 +1783,39 @@ function buildGatewayConfig(params: GatewayRoutingParams): GatewayConfig {
  */
 function sameProviderConfig(left: GatewayConfig, right: GatewayConfig): boolean {
     return left.modelProvider === right.modelProvider && isDeepStrictEqual(left.config, right.config);
+}
+
+/**
+ * Features that add MCP servers of their own. `strictMcpConfig` turns them off so a
+ * session's servers are exactly the ones the client passed.
+ */
+const STRICT_MCP_DISABLED_FEATURES = {
+    apps: false,
+    plugins: false,
+    skill_mcp_dependency_install: false,
+} as const;
+
+/**
+ * Names of the MCP servers Codex will load: the effective config only. Servers in
+ * disabled layers (an untrusted project, for example) never load, and naming them in
+ * the session config would create entries with no transport.
+ */
+function getEffectiveMcpServerNames(response: ConfigReadResponse): Set<string> {
+    const effectiveMcpServers = response?.config?.["mcp_servers"];
+    return new Set(isJsonObject(effectiveMcpServers) ? Object.keys(effectiveMcpServers) : []);
+}
+
+/** Reads `_meta.codex.strictMcpConfig`. Absent means false; any non-boolean is rejected. */
+function readStrictMcpConfig(meta?: Record<string, unknown> | null): boolean {
+    const codexMeta = meta?.["codex"] as JsonValue | undefined;
+    if (!isJsonObject(codexMeta) || !("strictMcpConfig" in codexMeta)) {
+        return false;
+    }
+    const value = codexMeta["strictMcpConfig"];
+    if (typeof value !== "boolean") {
+        throw RequestError.invalidParams(undefined, "_meta.codex.strictMcpConfig must be a boolean");
+    }
+    return value;
 }
 
 function readMetaAdditionalRoots(meta?: Record<string, unknown> | null): string[] | undefined {
