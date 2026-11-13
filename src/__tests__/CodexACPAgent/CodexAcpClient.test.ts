@@ -3328,8 +3328,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                     },
                 });
             });
-        let cancelResolved = false;
-
         const promptPromise = mockFixture.getCodexAcpAgent().prompt({
             sessionId: "session-id",
             prompt: [{ type: "text", text: "/goal Ship the migration and keep tests green" }],
@@ -3343,12 +3341,10 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             });
         });
 
-        const cancelPromise = mockFixture.getCodexAcpAgent().cancel({sessionId: "session-id"})
-            .then(() => {
-                cancelResolved = true;
-            });
-        await flushAsyncWork();
-        expect(cancelResolved).toBe(false);
+        // session/cancel does not wait for the pending turn start: it returns at once, and the
+        // goal turn that starts after it below is still interrupted.
+        const cancelPromise = mockFixture.getCodexAcpAgent().cancel({sessionId: "session-id"});
+        await expect(cancelPromise).resolves.toBeUndefined();
 
         mockFixture.sendServerNotification({
             method: "thread/goal/updated",
@@ -3375,7 +3371,6 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 turnId: "goal-turn-id",
             });
         });
-        await expect(cancelPromise).resolves.toBeUndefined();
         await expect(promptPromise).resolves.toMatchObject({stopReason: "cancelled"});
     });
 
