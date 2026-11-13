@@ -76,6 +76,47 @@ describe("PromptTokenUsage", () => {
         expect(new PromptTokenUsage(count(1000)).usage()).toBeNull();
     });
 
+    it("uses the total difference when the start is known, even if an intermediate update is missing", () => {
+        const usage = new PromptTokenUsage(count(1000));
+        usage.observe(count(1000), count(100));
+        expect(usage.usage()).toBeNull();
+
+        usage.observe(count(1600), count(200));
+        usage.observe(count(1600), count(200));
+
+        expect(usage.usage()).toEqual(count(600));
+    });
+
+    it("uses inherited history as the baseline without counting it as a new request", () => {
+        const usage = new PromptTokenUsage(null);
+        usage.observe(count(1000), count(100));
+        usage.observe(count(1000), count(100));
+        expect(usage.usage()).toBeNull();
+
+        usage.observeModelOutput();
+        usage.observe(count(1600), count(200));
+
+        expect(usage.usage()).toEqual(count(600));
+    });
+
+    it("sums requests without a baseline and ignores repeated totals", () => {
+        const usage = new PromptTokenUsage(null);
+        usage.observeModelOutput();
+        usage.observe(count(11000), count(1000));
+        usage.observe(count(11000), count(1000));
+        usage.observe(count(11500), count(500));
+
+        expect(usage.usage()).toEqual(count(1500));
+    });
+
+    it("distinguishes a reported zero from missing usage", () => {
+        const usage = new PromptTokenUsage(null);
+        usage.observeModelOutput();
+        usage.observe(count(0), count(0));
+
+        expect(usage.usage()).toEqual(count(0));
+    });
+
     it("sums the requests once the total went back, even after it passes the start again", () => {
         const usage = new PromptTokenUsage(count(1000));
 

@@ -736,6 +736,61 @@ describe('Token Usage Events', () => {
             expect(response.usage?.totalTokens).toBe(1000);
         });
 
+        describe('in _meta.quota.model_usage', () => {
+            const childSpawnedWithModel: ServerNotification = {
+                ...childSpawned,
+                params: {...childSpawned.params, item: {...(childSpawned.params as {item: object}).item, model: 'gpt-5.6-luna'}},
+            } as ServerNotification;
+
+            async function promptWithChild(nativeSubagentSessions: boolean, notifications: ServerNotification[]) {
+                const codexAcpAgent = mockFixture.getCodexAcpAgent();
+                await codexAcpAgent.initialize({
+                    protocolVersion: 1,
+                    clientCapabilities: {
+                        _meta: { jetbrains: { air: { version: 1, capabilities: nativeSubagentSessions ? ['nativeSubagentSessions'] : [] } } },
+                    },
+                });
+                const sessionState = createTestSessionState({ sessionId, currentModelId: 'gpt-5.6-sol[high]' });
+                sessionState.subagents = new CodexSubagentEventRouter(
+                    sessionId,
+                    nativeSubagentSessions,
+                    new ACPSessionConnection(mockFixture.getAcpConnection(), sessionId),
+                    () => {},
+                    () => ({currentModel: null, availableModels: []}),
+                );
+                mockFixture.getCodexAppServerClient().turnStart = vi.fn().mockResolvedValue({
+                    turn: { id: 'turn-id', items: [], status: 'inProgress', error: null },
+                });
+                mockFixture.getCodexAppServerClient().awaitTurnCompleted = vi.fn().mockImplementation(async () => {
+                    for (const notification of notifications) mockFixture.sendServerNotification(notification);
+                    return {
+                        threadId: sessionId,
+                        turn: { id: 'turn-id', items: [], status: 'completed', error: null },
+                    };
+                });
+                vi.spyOn(codexAcpAgent, 'getSessionState').mockReturnValue(sessionState);
+                return await codexAcpAgent.prompt({
+                    sessionId,
+                    prompt: [{ type: 'text', text: 'test prompt' }],
+                });
+            }
+
+            it.each([false, true])('adds the usage of a subagent for its model (native subagent sessions: %s)', async (nativeSubagentSessions) => {
+                const response = await promptWithChild(nativeSubagentSessions, [
+                    childSpawnedWithModel,
+                    reasoningStarted(sessionId),
+                    parentUsage,
+                    reasoningStarted(childThreadId, 'child-reasoning-id'),
+                    childUsage,
+                    childCompleted,
+                ]);
+
+                await expect(`${JSON.stringify(response, null, 2)}\n`).toMatchFileSnapshot(
+                    'data/token-usage-subagent-model-usage.json'
+                );
+            });
+        });
+
         it('ignores the usage of a thread that is not the session or its subagent', async () => {
             const sessionState = createTestSessionState({ sessionId });
             const handler = createTestEventHandler(mockFixture.getAcpConnection(), sessionState);
