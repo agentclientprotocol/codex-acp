@@ -111,3 +111,5 @@ See [AIR extensions](docs/air-extensions.md#async-tasks) for the capability, lif
 ## License
 
 By contributing, you agree that your contributions will be licensed under the Apache 2.0 License.
+
+See [Prompt suggestions](docs/prompt-suggestions.md) for the optional, independently negotiated next-Prompt prediction extension.

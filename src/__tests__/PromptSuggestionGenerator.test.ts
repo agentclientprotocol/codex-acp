@@ -1,5 +1,5 @@
 import {describe, expect, it, vi} from "vitest";
-import {PromptSuggestionGenerator, promptSuggestionsEnabled} from "../PromptSuggestionGenerator";
+import {PromptSuggestionGenerator, promptSuggestionsEnabled, promptSuggestionId, clientSupportsPromptSuggestions, promptSuggestionsMeta} from "../PromptSuggestionGenerator";
 import type {CodexAppServerClient} from "../CodexAppServerClient";
 import {deferred} from "./acp-test-utils";
 
@@ -168,5 +168,68 @@ describe("promptSuggestionsEnabled", () => {
         expect(promptSuggestionsEnabled({})).toBe(true);
         expect(promptSuggestionsEnabled({CODEX_ACP_PROMPT_SUGGESTIONS: "true"})).toBe(true);
         expect(promptSuggestionsEnabled({CODEX_ACP_PROMPT_SUGGESTIONS: " False "})).toBe(false);
+    });
+});
+
+
+describe("independent prompt suggestions", () => {
+    it.each([
+        [undefined, false],
+        [null, false],
+        [{}, false],
+        [{_meta: {promptSuggestions: null}}, false],
+        [{_meta: {promptSuggestions: {version: 2}}}, false],
+        [{_meta: {promptSuggestions: {version: 1}}}, true],
+    ])("negotiates only the supported version: %j", (capabilities, expected) => {
+        expect(clientSupportsPromptSuggestions(capabilities)).toBe(expected);
+    });
+
+    it.each([
+        [undefined, undefined],
+        [{promptSuggestions: {enabled: false, promptId: "client-1"}}, undefined],
+        [{promptSuggestions: {enabled: true, promptId: " "}}, undefined],
+        [{promptSuggestions: {enabled: true, promptId: 1}}, undefined],
+        [{promptSuggestions: {enabled: true, promptId: "client-1"}}, "client-1"],
+    ])("reads explicit per-prompt consent and correlation: %j", (meta, expected) => {
+        expect(promptSuggestionId(meta)).toBe(expected);
+    });
+
+    it("does not sample without per-prompt opt-in", async () => {
+        const threadSample = vi.fn().mockResolvedValue(suggestionSample("Run the tests"));
+        const publish = vi.fn().mockResolvedValue(undefined);
+        const generator = new PromptSuggestionGenerator({threadSample} as unknown as CodexAppServerClient, publish, true);
+        await generator.beginPrompt();
+        generator.onTurnCompleted("thread", "turn");
+        await flush();
+        expect(threadSample).not.toHaveBeenCalled();
+        expect(publish).not.toHaveBeenCalled();
+    });
+
+    it("echoes the captured client id for predictions and clears, independently of vendor turn ids", async () => {
+        const threadSample = vi.fn().mockResolvedValue(suggestionSample("Run the tests"));
+        const publish = vi.fn().mockResolvedValue(undefined);
+        const generator = new PromptSuggestionGenerator({threadSample} as unknown as CodexAppServerClient, publish, true);
+        await generator.beginPrompt("client-1");
+        generator.onTurnCompleted("thread", "vendor-turn-1");
+        await vi.waitFor(() => expect(publish).toHaveBeenCalledWith("Run the tests", "client-1"));
+        await generator.beginPrompt("client-2");
+        expect(publish).toHaveBeenLastCalledWith(null, "client-1");
+        expect(promptSuggestionsMeta(null, "client-1")).toEqual({promptSuggestions: {version: 1, promptId: "client-1", suggestions: []}});
+    });
+
+    it("discards an older sample after the next client prompt opts out", async () => {
+        const result = deferred<SampleResult>();
+        const threadSample = vi.fn().mockReturnValue(result.promise);
+        const publish = vi.fn().mockResolvedValue(undefined);
+        const generator = new PromptSuggestionGenerator({threadSample} as unknown as CodexAppServerClient, publish, true);
+        await generator.beginPrompt("client-1");
+        generator.onTurnCompleted("thread", "vendor-turn-1");
+        await generator.beginPrompt();
+        result.resolve(suggestionSample("Too late"));
+        await flush();
+        generator.onTurnCompleted("thread", "vendor-turn-2");
+        await flush();
+        expect(publish).not.toHaveBeenCalled();
+        expect(threadSample).toHaveBeenCalledTimes(1);
     });
 });
