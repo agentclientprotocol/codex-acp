@@ -64,6 +64,7 @@ describe('CodexACPAgent - initialize', () => {
                 },
                 _meta: {
                     authStatus: {},
+                    promptSuggestions: {version: 1},
                 },
             },
             authMethods: getCodexAuthMethods(),

@@ -29,9 +29,9 @@ function suggestionUpdates(client: PromptSession): unknown[] {
 }
 
 /** Runs turn number `index` (from 0) to completion; its id is `turn-${index + 1}`. */
-async function runTurn(client: PromptSession, protocolVersion: 1 | 2, index: number, text: string, answer: string) {
+async function runTurn(client: PromptSession, protocolVersion: 1 | 2, index: number, text: string, answer: string, meta?: Record<string, unknown>) {
     const turnId = `turn-${index + 1}`;
-    const response = client.sendPrompt([{type: "text", text}]);
+    const response = meta ? client.request("session/prompt", {sessionId, prompt: [{type: "text", text}], _meta: meta}) : client.sendPrompt([{type: "text", text}]);
     await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(index + 1));
     const params = client.turnStartParams[index]!;
     client.emit(turnStarted(turnId));
@@ -56,10 +56,13 @@ describe.each([1, 2] as const)("predicted follow-up prompt over ACP v%i", (proto
 
     let sampleParams: Array<Record<string, unknown>> = [];
 
-    function connect(air: boolean) {
+    function connect(air: boolean | "shared") {
         sampleParams = [];
         return connectSession(protocolVersion, {
-            ...(air ? {clientCapabilities: airCapabilities, v1ClientCapabilities: airCapabilities} : {}),
+            ...(air ? {
+                clientCapabilities: air === "shared" ? {_meta: {promptSuggestions: {version: 1}}} : airCapabilities,
+                v1ClientCapabilities: air === "shared" ? {_meta: {promptSuggestions: {version: 1}}} : airCapabilities,
+            } : {}),
             codexResponses: {
                 "thread/sample": async params => {
                     sampleParams.push(params as Record<string, unknown>);
@@ -90,6 +93,22 @@ describe.each([1, 2] as const)("predicted follow-up prompt over ACP v%i", (proto
             {suggestions: [{text: "Run the tests"}]},
             {suggestions: []},
         ]);
+    });
+
+    it("serves a generic opted-in client with correlation, without AIR metadata", async () => {
+        const client = await connect("shared");
+        closeClient = () => client.connection.close();
+        await runTurn(client, protocolVersion, 0, "Fix the bug", "Fixed.", {promptSuggestions: {enabled: true, promptId: "client-1"}});
+        await vi.waitFor(() => expect(suggestionUpdates(client)).toEqual([
+            {version: 1, promptId: "client-1", suggestions: [{text: "Run the tests"}]},
+        ]));
+        await runTurn(client, protocolVersion, 1, "Thanks", "Done.", {promptSuggestions: {enabled: false, promptId: "client-2"}});
+        await settle();
+        expect(suggestionUpdates(client)).toEqual([
+            {version: 1, promptId: "client-1", suggestions: [{text: "Run the tests"}]},
+            {version: 1, promptId: "client-1", suggestions: []},
+        ]);
+        expect(sampleParams).toHaveLength(1);
     });
 
     /** The prediction samples the session's own thread, anchored at the turn that just completed. */

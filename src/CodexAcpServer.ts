@@ -200,7 +200,7 @@ import {
 } from "./AuthStatusMeta";
 import {randomUUID} from "node:crypto";
 import {TitleGenerator} from "./TitleGenerator";
-import {PromptSuggestionGenerator, promptSuggestionsEnabled, promptSuggestionsMeta} from "./PromptSuggestionGenerator";
+import {PromptSuggestionGenerator, promptSuggestionsEnabled, promptSuggestionsMeta, clientSupportsPromptSuggestions, promptSuggestionId, PROMPT_SUGGESTIONS_CAPABILITY} from "./PromptSuggestionGenerator";
 import {once} from "node:events";
 import {
     AIR_AGENT_FILE_CHANGE_REPORT_KEY,
@@ -293,7 +293,7 @@ export interface SessionState extends SessionIndexTitleState {
     sessionTitleSource: "unset" | "fallback" | "explicit" | "unknown";
     sessionFailure?: SessionFailure;
     titleGen?: TitleGenerator;
-    /** Predicts the follow-up prompt of a finished turn; set for AIR clients only. */
+    /** Predicts the follow-up prompt for independently opted-in clients and legacy AIR clients. */
     promptSuggestions?: PromptSuggestionGenerator | undefined;
     subagents: SubagentEventRouter;
     subagentTransition?: Promise<void>;
@@ -861,6 +861,7 @@ export class CodexAcpServer {
                     // Presence means "this agent pushes `_auth/status_update`". It
                     // never carries a payload, and the client never asks for one.
                     [AUTH_STATUS_META_KEY]: authStatusCapability(),
+                    promptSuggestions: PROMPT_SUGGESTIONS_CAPABILITY,
                 },
             },
             authMethods: getCodexAuthMethods(_params.clientCapabilities),
@@ -895,6 +896,7 @@ export class CodexAcpServer {
                 version: packageJson.version,
             },
             capabilities: {
+                _meta: {promptSuggestions: PROMPT_SUGGESTIONS_CAPABILITY},
                 auth: {
                     _meta: {
                         // Presence means "this agent pushes `_auth/status_update`".
@@ -4037,15 +4039,17 @@ export class CodexAcpServer {
     }
 
     private createPromptSuggestions(sessionState: SessionState): PromptSuggestionGenerator | undefined {
-        if (!sessionState.clientCapabilities.airClient || !promptSuggestionsEnabled()) return undefined;
+        const shared = clientSupportsPromptSuggestions(this.clientCapabilities);
+        if ((!sessionState.clientCapabilities.airClient && !shared) || !promptSuggestionsEnabled()) return undefined;
         return new PromptSuggestionGenerator(
             this.codexAcpClient.appServerClient,
-            async text => {
+            async (text, promptId) => {
                 await new ACPSessionConnection(this.connection, sessionState.sessionId).update({
                     sessionUpdate: "session_info_update",
-                    _meta: promptSuggestionsMeta(text),
+                    _meta: promptSuggestionsMeta(text, promptId),
                 });
             },
+            shared,
         );
     }
 
@@ -4906,8 +4910,12 @@ export class CodexAcpServer {
         });
         const sessionState = this.getSessionState(params.sessionId);
         // Awaited only when a clear is sent, so a prompt with no held suggestion starts in the same tick.
-        const clearing = sessionState.promptSuggestions?.clear();
-        if (clearing) await clearing;
+        if (clientSupportsPromptSuggestions(this.clientCapabilities)) {
+            await sessionState.promptSuggestions?.beginPrompt(promptSuggestionId(params._meta));
+        } else {
+            const clearing = sessionState.promptSuggestions?.clear();
+            if (clearing) await clearing;
+        }
         const agentFileChangeReportRequest = clientSupportsAgentFileChangeReports(this.clientCapabilities)
             ? parseAgentFileChangeReportRequest(params._meta)
             : null;
