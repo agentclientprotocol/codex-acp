@@ -31,7 +31,10 @@
       "sse": false
     },
     "_meta": {
-      "authStatus": {}
+      "authStatus": {},
+      "promptSuggestions": {
+        "version": 1
+      }
     }
   },
   "authMethods": [

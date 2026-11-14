@@ -26,7 +26,12 @@
         "authStatus": {}
       }
     },
-    "providers": {}
+    "providers": {},
+    "_meta": {
+      "promptSuggestions": {
+        "version": 1
+      }
+    }
   },
   "authMethods": [
     {
