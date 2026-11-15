@@ -267,6 +267,7 @@ function createThread(): Thread {
     return {
         id: sessionId,
         sessionId,
+        environments: null,
         parentThreadId: null,
         threadSource: null,
         originator: null,

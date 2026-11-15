@@ -16,6 +16,7 @@ function createLiveThread(): Thread {
     return {
         id: threadId,
         sessionId: threadId,
+        environments: null,
         parentThreadId: null,
         threadSource: null,
         originator: null,

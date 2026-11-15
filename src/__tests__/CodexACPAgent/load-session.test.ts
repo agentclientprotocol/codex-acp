@@ -123,6 +123,7 @@ describe("CodexACPAgent - loadSession", () => {
         const makeThread = (id: string, items: Thread["turns"][number]["items"]): Thread => ({
             id,
             sessionId: id,
+            environments: null,
             parentThreadId: id === "root-history" ? null : "root-history",
             threadSource: null,
             originator: null,
@@ -332,6 +333,7 @@ describe("CodexACPAgent - loadSession", () => {
         const makeThread = (id: string, turns: Thread["turns"]): Thread => ({
             id,
             sessionId: id,
+            environments: null,
             parentThreadId: id === "root-history" ? null : "root-history",
             threadSource: null,
             originator: null,
@@ -479,6 +481,7 @@ describe("CodexACPAgent - loadSession", () => {
         const makeThread = (id: string, turns: Thread["turns"]): Thread => ({
             id,
             sessionId: "root-history",
+            environments: null,
             parentThreadId: id === "root-history" ? null : "root-history",
             threadSource: null,
             originator: null,
@@ -630,6 +633,7 @@ describe("CodexACPAgent - loadSession", () => {
         const thread: Thread = {
             id: "session-1",
             sessionId: "session-1",
+            environments: null,
             parentThreadId: null,
             threadSource: null,
             originator: null,
@@ -952,6 +956,7 @@ describe("CodexACPAgent - loadSession", () => {
         const thread: Thread = {
             id: "session-1",
             sessionId: "session-1",
+            environments: null,
             parentThreadId: null,
             threadSource: null,
             originator: null,
@@ -1044,6 +1049,7 @@ describe("CodexACPAgent - loadSession", () => {
         const thread: Thread = {
             id: "session-1",
             sessionId: "session-1",
+            environments: null,
             parentThreadId: null,
             threadSource: null,
             originator: null,
