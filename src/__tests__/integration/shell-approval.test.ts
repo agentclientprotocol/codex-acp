@@ -65,6 +65,14 @@ describeIntegration("integration: shell approval", () => {
         return requests[0];
     }
 
+    /**
+     * The updates of the command. Codex may stream the output before the command completes, and then the
+     * completed update does not repeat it, so the output can be in any of them.
+     */
+    function commandUpdates() {
+        return toolCallUpdates(agent, sessionId).filter((u) => u.toolCallId === CALL_ID);
+    }
+
     function toolCallWithStatus(status: "completed" | "failed") {
         return toolCallUpdates(agent, sessionId).find((u) => u.status === status);
     }
@@ -86,7 +94,7 @@ describeIntegration("integration: shell approval", () => {
      * Expected:
      * - the turn ends with `end_turn`;
      * - there was one permission request, with the options allow once / allow with exec policy / cancel;
-     * - the tool call completed with the output "shell-ok";
+     * - the tool call completed, and its updates carry the output "shell-ok";
      * - marker.txt exists, so the command really ran;
      * - the model's 2nd request contains the output "shell-ok".
      */
@@ -103,7 +111,8 @@ describeIntegration("integration: shell approval", () => {
         expect(expectOnePermissionRequest()?.options.map((o) => o.optionId)).toEqual([
             ApprovalOptionId.AllowOnce, ApprovalOptionId.AcceptWithExecpolicyAmendment, ApprovalOptionId.Cancel,
         ]);
-        expect(JSON.stringify(toolCallWithStatus("completed"))).toContain("shell-ok");
+        expect(toolCallWithStatus("completed")).toBeDefined();
+        expect(JSON.stringify(commandUpdates())).toContain("shell-ok");
         expect(commandRan()).toBe(true);
         expectOutputSentToModel("shell-ok");
         expectNoUnscriptedModelRequests(mock);
