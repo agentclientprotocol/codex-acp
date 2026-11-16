@@ -142,7 +142,7 @@ describe('Plans, compaction, notices and commands over ACP v2', () => {
         await expect(dump(updates)).toMatchFileSnapshot('data/plans-v2-markdown.json');
     });
 
-    it('sends compaction and notice updates without client capabilities', async () => {
+    it('sends compaction, notice and hook updates without client capabilities', async () => {
         const {connection, updates, startPrompt, send} = await connectV2Client();
         closeClient = () => connection.close();
         await startPrompt();
@@ -152,9 +152,15 @@ describe('Plans, compaction, notices and commands over ACP v2', () => {
             {method: "item/started", params: {threadId: sessionId, turnId, startedAtMs: 0, item}},
             {method: "item/completed", params: {threadId: sessionId, turnId, completedAtMs: 1, item}},
             {method: "warning", params: {threadId: sessionId, message: "Optional integration unavailable"}},
+            {method: "hook/completed", params: {threadId: sessionId, turnId, run: {
+                id: "user-prompt-submit:0", eventName: "userPromptSubmit", handlerType: "command", executionMode: "sync",
+                scope: "turn", sourcePath: "/hooks/config.toml", source: "user", displayOrder: 0n, status: "blocked",
+                statusMessage: null, startedAt: 1n, completedAt: 1n, durationMs: 1n,
+                entries: [{kind: "feedback", text: "blocked by policy"}],
+            }}},
         ]);
 
-        await vi.waitFor(() => expect(updates).toHaveLength(3));
+        await vi.waitFor(() => expect(updates).toHaveLength(4));
         await expect(dump(updates)).toMatchFileSnapshot('data/plans-v2-compaction-and-notice.json');
     });
 

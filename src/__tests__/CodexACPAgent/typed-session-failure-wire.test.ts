@@ -4,6 +4,7 @@ import {CodexAppServerClient} from "../../CodexAppServerClient";
 import {CodexAcpClient} from "../../CodexAcpClient";
 import {CodexAcpServer} from "../../CodexAcpServer";
 import {createTestSessionState} from "../acp-test-utils";
+import type {HookOutputEntry, HookRunStatus} from "../../app-server/v2";
 import {createMockConnections} from "./test-utils";
 
 const noticeCapabilities: acp.ClientCapabilities = {
@@ -371,6 +372,26 @@ describe("typed session failures over ACP transport", () => {
         }).jetbrains.air.sessionFailure);
         expect(records.map(record => record.revision)).toEqual([1, 1, 1]);
         expect(records[2]!.id).not.toBe(records[0]!.id);
+    });
+
+    it("gives the advisory of each prompt its own id", async () => {
+        const fixture = await createIdleFixture("wire-hook-blocked");
+        vi.spyOn(fixture.appServer, "awaitTurnCompleted").mockImplementation(async () => {
+            fixture.sendServerNotification(hookCompleted(fixture.sessionId, "blocked", [{kind: "feedback", text: "blocked by policy"}]));
+            await fixture.codexClient.waitForSessionNotifications(fixture.sessionId);
+            return {threadId: fixture.sessionId, turn: createTurn("completed")};
+        });
+
+        for (const text of ["first", "second"]) {
+            await fixture.client.request(acp.methods.agent.session.prompt, {sessionId: fixture.sessionId, prompt: [{type: "text", text}]});
+        }
+
+        const records = fixture.updates.map(update => (update.update._meta as {
+            jetbrains: {air: {sessionFailure: {id: string; revision: number; title: string}}};
+        }).jetbrains.air.sessionFailure);
+        expect(records).toHaveLength(2);
+        expect(records[0]).toMatchObject({revision: 1, title: "UserPromptSubmit hook blocked the prompt — blocked by policy"});
+        expect(records[1]!.id).not.toBe(records[0]!.id);
     });
 
     it("updates one late retry incident from warning attempts to terminal error", async () => {
@@ -769,6 +790,21 @@ function createWireFixture(options: {exitCode?: number | null; stderr?: string} 
             const handler = mockConnections.getUnhandledNotificationHandler();
             if (!handler) throw new Error("App-server notification handler was not installed");
             handler(notification);
+        },
+    };
+}
+
+function hookCompleted(threadId: string, status: HookRunStatus, entries: HookOutputEntry[]) {
+    return {
+        method: "hook/completed",
+        params: {
+            threadId,
+            turnId: "turn-id",
+            run: {
+                id: "user-prompt-submit:0", eventName: "userPromptSubmit", handlerType: "command", executionMode: "sync",
+                scope: "turn", sourcePath: "/hooks/config.toml", source: "user", displayOrder: 0, status,
+                statusMessage: null, startedAt: 1, completedAt: 1, durationMs: 1, entries,
+            },
         },
     };
 }

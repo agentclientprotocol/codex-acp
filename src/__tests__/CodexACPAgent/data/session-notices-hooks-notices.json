@@ -1,0 +1,41 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "UserPromptSubmit hook blocked the prompt",
+        "description": "blocked by policy"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "SessionStart hook stopped the turn",
+        "description": "stopped by hook\nhook error"
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "notice",
+        "severity": "warning",
+        "title": "PreToolUse hook blocked the tool call"
+      }
+    }
+  ]
+}

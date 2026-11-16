@@ -101,7 +101,7 @@ npm run package:all
 ### Session notices
 
 The adapter implements [Session Notices](https://agentclientprotocol.com/rfds/session-notices)
-for Codex warnings, configuration warnings, deprecation notices, model rerouting, and the legacy
+for Codex warnings, configuration warnings, deprecation notices, model rerouting, hooks that block or stop Codex, and the legacy
 `thread/compacted` advisory when the client advertises `clientCapabilities.session.notices: {}`.
 These are live `session/update` notifications with
 `sessionUpdate: "notice"`, a severity, a plain-text title, and optional description.
@@ -111,6 +111,10 @@ Without that capability (including absent or null capability objects), the adapt
 the existing assistant/thought text or AIR `sessionFailure` advisory records. When notices are
 enabled, they take precedence over AIR advisory records. Clients control their presentation;
 the adapter does not rely on notices being displayed.
+
+A hook notice is a warning titled with the hook event and what it did (for example `UserPromptSubmit hook blocked
+the prompt` or `PreToolUse hook blocked the tool call`); its description holds the hook's `stop`, `feedback`, `error` and `warning` output. Hooks that complete
+or fail without blocking send nothing, because Codex carries on as usual.
 
 Command replies, review results, and terminal/retrying errors retain their existing response or
 failure channels. Clients advertising session compaction support continue to receive the dedicated
