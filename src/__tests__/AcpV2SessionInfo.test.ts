@@ -1,7 +1,7 @@
 import {describe, expect, it, vi} from "vitest";
 import {AcpV2SessionInfo} from "../AcpV2SessionInfo";
 import {AcpV2Connection, type AcpV2ClientConnection} from "../ACPSessionConnection";
-import {CodexEventHandler} from "../CodexEventHandler";
+import {CodexEventHandler, SessionFailureIds} from "../CodexEventHandler";
 import {createTestSessionState} from "./acp-test-utils";
 import type {SessionFailure} from "../CodexAcpServer";
 
@@ -118,7 +118,7 @@ describe("V2 session metadata", () => {
         const v2 = new AcpV2Connection(client);
         const failure: SessionFailure = {id: "incident", revision: 1, category: "service", severity: "warning", title: "Retrying", actions: ["retry"]};
         const state = createTestSessionState({sessionId: "session", sessionFailure: failure});
-        const handler = new CodexEventHandler(v2.extensionOnlyV1View(), state, true, "epoch", state.subagents, undefined, false, false, false);
+        const handler = new CodexEventHandler(v2.extensionOnlyV1View(), state, true, new SessionFailureIds("epoch"), state.subagents, undefined, false, false, false);
         await v2.client.notify("session/update", {sessionId: "session", update: {
             sessionUpdate: "session_info_update",
             _meta: {jetbrains: {other: true, air: {version: 1, sibling: {value: null}, sessionFailure: {...failure, revision}}}},

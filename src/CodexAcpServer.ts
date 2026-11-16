@@ -1,6 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk/unstable";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk/unstable";
-import {CodexEventHandler, type CompletedPlan, failureWasShownAsMessage} from "./CodexEventHandler";
+import {CodexEventHandler, type CompletedPlan, failureWasShownAsMessage, SessionFailureIds} from "./CodexEventHandler";
 import {attachmentFileUri, desktopAttachmentHistory} from "./DesktopAttachmentHistory";
 import {CodexApprovalHandler} from "./permissions/CodexApprovalHandler";
 import {isRecord} from "./permissions/json";
@@ -505,7 +505,7 @@ export class CodexAcpServer {
     private readonly defaultAuthRequest: CodexAuthRequest | null;
     private readonly getExitCode: () => number | null;
     private readonly getRecentStderr: () => string;
-    private readonly sessionFailureEpoch: string;
+    private readonly sessionFailureIds: SessionFailureIds;
     private availableCommands: CodexCommands;
     private clientInfo: acp.Implementation | null;
     private clientCapabilities: acp.ClientCapabilities | null;
@@ -641,7 +641,7 @@ export class CodexAcpServer {
         this.captureStderr();
         this.getExitCode = getExitCode ?? (() => this.codexProcessState?.connection.process.exitCode ?? null);
         this.getRecentStderr = getRecentStderr ?? (() => this.codexProcessState?.stderr ?? "");
-        this.sessionFailureEpoch = randomUUID();
+        this.sessionFailureIds = new SessionFailureIds(randomUUID());
         this.clientInfo = null;
         this.clientCapabilities = null;
         this.capabilities = ClientCapabilities.DEFAULT;
@@ -1676,7 +1676,7 @@ export class CodexAcpServer {
                         this.connection,
                         sessionState,
                         clientSupportsTypedSessionFailures(this.clientCapabilities),
-                        this.sessionFailureEpoch,
+                        this.sessionFailureIds,
                         sessionState.subagents,
                         (accountUpdated) => this.handleAccountUpdated(accountUpdated),
                         false,
@@ -5008,7 +5008,7 @@ export class CodexAcpServer {
                 this.connection,
                 sessionState,
                 clientSupportsTypedSessionFailures(this.clientCapabilities),
-                this.sessionFailureEpoch,
+                this.sessionFailureIds,
                 sessionState.subagents,
                 (accountUpdated) => this.handleAccountUpdated(accountUpdated),
                 agentFileChangeReportRequest !== null,
