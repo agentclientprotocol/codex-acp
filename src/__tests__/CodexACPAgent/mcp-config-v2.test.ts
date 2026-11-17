@@ -1,17 +1,20 @@
 import {describe, expect, it, vi} from 'vitest';
 import type * as acp from '@agentclientprotocol/sdk/unstable';
 import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
-import {createCodexMockTestFixture, createTestModel} from '../acp-test-utils';
-import type {AcpMcpServer} from '../../McpServerConfig';
+import {createTestModel} from '../acp-test-utils';
+import {createMockConnections} from './test-utils';
+import type {AcpMcpServer, McpOverAcpToHttp} from '../../McpServerConfig';
+import {CodexAcpClient, type JsonObject} from '../../CodexAcpClient';
+import {CodexAppServerClient} from '../../CodexAppServerClient';
 
-/**
- * Starts a session with the given MCP servers and returns the `mcp_servers` config
- * sent to Codex `thread/start`.
- */
-async function startSessionWithMcpServers(mcpServers: Array<AcpMcpServer> | undefined, configuredNames: string[] = []) {
-    const mockFixture = createCodexMockTestFixture();
-    const codexAcpClient = mockFixture.getCodexAcpClient();
-    const codexAppServerClient = mockFixture.getCodexAppServerClient();
+/** Starts a session and returns the config sent to Codex `thread/start`. */
+async function startSessionWithMcpServers(
+    mcpServers: Array<AcpMcpServer> | undefined, configuredNames: string[] = [], toHttp?: McpOverAcpToHttp, overrides?: JsonObject,
+) {
+    const codexAppServerClient = new CodexAppServerClient(createMockConnections().mockCodexConnection);
+    const codexAcpClient = new CodexAcpClient(codexAppServerClient, overrides, undefined, toHttp);
+    vi.spyOn(codexAppServerClient, "hasExperimentalFeature").mockResolvedValue(true);
+    await codexAcpClient.initialize({});
 
     vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
     vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({
@@ -32,8 +35,7 @@ async function startSessionWithMcpServers(mcpServers: Array<AcpMcpServer> | unde
         cwd: "/workspace",
         ...(mcpServers !== undefined && {mcpServers}),
     });
-    const config = threadStartSpy.mock.calls[0]![0].config;
-    return config?.["mcp_servers"] ?? null;
+    return threadStartSpy.mock.calls[0]![0].config!;
 }
 
 describe('MCP server config from ACP v1 and v2 session requests', () => {
@@ -56,7 +58,9 @@ describe('MCP server config from ACP v1 and v2 session requests', () => {
             {type: "http", name: "http-minimal", url: "https://example.com/minimal"},
         ];
 
-        await expect(JSON.stringify(await startSessionWithMcpServers(v2Servers), null, 2))
+        const config = await startSessionWithMcpServers(v2Servers);
+        expect(config["features"]).not.toHaveProperty("mcp_2026_07_28");
+        await expect(JSON.stringify(config["mcp_servers"], null, 2))
             .toMatchFileSnapshot("data/mcp-config-v2-servers.json");
     });
 
@@ -71,20 +75,53 @@ describe('MCP server config from ACP v1 and v2 session requests', () => {
             },
         ];
 
-        await expect(JSON.stringify(await startSessionWithMcpServers(v1Servers), null, 2))
+        await expect(JSON.stringify((await startSessionWithMcpServers(v1Servers))["mcp_servers"], null, 2))
             .toMatchFileSnapshot("data/mcp-config-v1-servers.json");
     });
 
     it('adds no MCP config when mcpServers is omitted', async () => {
-        expect(await startSessionWithMcpServers(undefined)).toBeNull();
+        expect(await startSessionWithMcpServers(undefined)).not.toHaveProperty("mcp_servers");
     });
 
-    it('rejects sse, acp, and custom transports', async () => {
+    it('re-exports ACP registrations after name filtering and preserves their opaque server IDs', async () => {
+        const toHttp = vi.fn<McpOverAcpToHttp>().mockResolvedValue({
+            type: "http", name: "my_tools", url: "http://127.0.0.1:1234/tools", headers: [{name: "Authorization", value: "Bearer test-only"}],
+        });
+        const tools = {type: "acp", name: "my tools", serverId: "client/opaque id"} as const;
+        const skipped = {...tools, name: "existing"};
+        const local = {...tools, name: "local"};
+        const overrides = {
+            mcp_servers: {other: {command: "other"}},
+            "mcp_servers.local.url": "https://example.com/local",
+            "features.mcp_2026_07_28": false, features: {other: true},
+        };
+        const config = await startSessionWithMcpServers([tools, skipped, local], ["existing"], toHttp, overrides);
+        expect(toHttp.mock.calls).toEqual([[tools]]);
+        expect(config["mcp_servers"]).toEqual({
+            other: {command: "other"}, local: {url: "https://example.com/local"},
+            my_tools: {url: "http://127.0.0.1:1234/tools", http_headers: {Authorization: "Bearer test-only"}},
+        });
+        expect(Object.keys(config)).not.toContain("mcp_servers.local.url");
+        expect(Object.keys(config)).not.toContain("features.mcp_2026_07_28");
+        expect(config["features"]).toMatchObject({other: true, mcp_2026_07_28: true});
+
+        const filtered = await startSessionWithMcpServers([skipped, local], ["existing"], toHttp, overrides);
+        expect(filtered["features"]).toMatchObject({other: true, mcp_2026_07_28: false});
+        expect(toHttp).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports a bridge failure instead of starting the session without its tools', async () => {
+        const toHttp = vi.fn<McpOverAcpToHttp>().mockRejectedValue(new Error("listen failed"));
+        await expect(startSessionWithMcpServers([{type: "acp", name: "tools", serverId: "id"}], [], toHttp))
+            .rejects.toMatchObject({code: -32603, data: {name: "tools"}, message: expect.stringContaining("listen failed")});
+    });
+
+    it('rejects sse, custom transports, and an ACP declaration without a serverId', async () => {
         const unsupported: Record<string, unknown> = {
             "v2 sse": {type: "sse", name: "sse", url: "https://example.com/sse"},
             "v2 custom": {type: "_custom", name: "custom", endpoint: "somewhere"},
             "v1 sse": {type: "sse", name: "sse", url: "https://example.com/sse", headers: []} satisfies acp.McpServer,
-            "v1 acp": {type: "acp", name: "acp", id: "server-1"},
+            "obsolete acp id": {type: "acp", name: "acp", id: "server-1"},
         };
         const rejections: Record<string, unknown> = {};
         for (const [label, server] of Object.entries(unsupported)) {
@@ -96,10 +133,11 @@ describe('MCP server config from ACP v1 and v2 session requests', () => {
             .toMatchFileSnapshot("data/mcp-config-unsupported-transports.json");
     });
 
-    it('rejects an unsupported transport even when its name is already configured', async () => {
-        await expect(startSessionWithMcpServers([
-            {type: "sse", name: "existing", url: "https://example.com/sse", headers: []},
-        ], ["existing"])).rejects.toMatchObject({code: -32602});
+    it.each([
+        {type: "sse", name: "existing", url: "https://example.com/sse", headers: []},
+        {type: "acp", name: "existing", serverId: "not-available"},
+    ] satisfies AcpMcpServer[])('rejects unavailable $type transport even when its name is already configured', async server => {
+        await expect(startSessionWithMcpServers([server], ["existing"])).rejects.toMatchObject({code: -32602});
     });
 
     it.each([
@@ -116,6 +154,6 @@ describe('MCP server config from ACP v1 and v2 session requests', () => {
     it('uses the last stdio environment entry with a repeated name', async () => {
         const config = await startSessionWithMcpServers([{type: "stdio", name: "files", command: "mcp-fs",
             env: [{name: "EXAMPLE", value: "first"}, {name: "EXAMPLE", value: "last"}]}]);
-        expect(config).toMatchObject({files: {env: {EXAMPLE: "last"}}});
+        expect(config["mcp_servers"]).toMatchObject({files: {env: {EXAMPLE: "last"}}});
     });
 });

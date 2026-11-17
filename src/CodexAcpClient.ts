@@ -32,7 +32,7 @@ import {isDeepStrictEqual} from "node:util";
 import {logger} from "./Logger";
 import {isAccountReadAuthFailureError, isAccountReadUnavailableError} from "./CodexThreadErrors";
 import {listedSessionTitle, normalizeSessionTitle} from "./SessionTitle";
-import {type AcpMcpServer, type WithAcpMcpServers, normalizeMcpServers, toCodexMcpServerConfig} from "./McpServerConfig";
+import {type AcpMcpServer, type McpOverAcpToHttp, type WithAcpMcpServers, normalizeMcpServers, toCodexMcpServerConfig} from "./McpServerConfig";
 import type {
     AccountUpdatedNotification,
     ApprovalsReviewer,
@@ -92,7 +92,7 @@ import {
     narrowToListedModels,
 } from "./GatewayModelDiscovery";
 import {findSupportedEffort} from "./ModelConfigOption";
-import {type ProviderStartupConfig, configOverride, NO_PROVIDER_STARTUP_CONFIG} from "./CodexConfigOverride";
+import {type ProviderStartupConfig, configOverride, expandConfigTables, NO_PROVIDER_STARTUP_CONFIG} from "./CodexConfigOverride";
 import {disableUnsupportedSkills, withoutUnsupportedSkills} from "./UnsupportedSkills";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 /** A null turn marks unavailable outcome metadata, not a failed turn. */
@@ -123,6 +123,7 @@ type ResumedThread = {
 export const CUSTOM_GATEWAY_PROVIDER_ID = "custom-gateway";
 export const OPENAI_PROVIDER_ID = "openai";
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+const STATELESS_MCP_FEATURE = "mcp_2026_07_28";
 
 /**
  * The url-mode variant of the ACP `elicitation/create` request params.
@@ -177,9 +178,14 @@ export class CodexAcpClient {
     private readonly subagents: CodexSubagentSubscriptions;
     private skillExtraRoots: string[] = [];
     private configPath: string | null = null;
+    private verifiedMcpBridge?: McpOverAcpToHttp;
 
-
-    constructor(codexClient: CodexAppServerClient, codexConfig?: JsonObject, modelProvider?: string) {
+    constructor(
+        codexClient: CodexAppServerClient,
+        codexConfig?: JsonObject,
+        modelProvider?: string,
+        private readonly mcpOverAcpToHttp?: McpOverAcpToHttp,
+    ) {
         this.codexClient = codexClient;
         this.config = codexConfig ?? {};
         this.modelProvider = modelProvider ?? null;
@@ -192,12 +198,16 @@ export class CodexAcpClient {
         return this.codexClient;
     }
 
+    get supportsMcpOverAcp(): boolean {
+        return this.verifiedMcpBridge !== undefined;
+    }
+
     /**
      * A client of the same configuration for another app-server: the same config and model provider. The routing
      * that the agent set at runtime (gateway auth, `providers/set`) is copied by {@link adoptRoutingFrom}.
      */
     withAppServer(codexClient: CodexAppServerClient): CodexAcpClient {
-        const client = new CodexAcpClient(codexClient, this.config, this.modelProvider ?? undefined);
+        const client = new CodexAcpClient(codexClient, this.config, this.modelProvider ?? undefined, this.mcpOverAcpToHttp);
         client.adoptRoutingFrom(this);
         return client;
     }
@@ -227,6 +237,18 @@ export class CodexAcpClient {
             }
         });
         this.configPath = response?.codexHome ?? null;
+        // A CODEX_PATH binary may support HTTP but not stateless MCP. Don't offer a bridge it can't use.
+        if (this.mcpOverAcpToHttp) {
+            try {
+                if (await this.codexClient.hasExperimentalFeature(STATELESS_MCP_FEATURE)) {
+                    this.verifiedMcpBridge = this.mcpOverAcpToHttp;
+                }
+            } catch (error) {
+                if (this.codexClient.connectionLoss.lost) throw error;
+                // Older app-servers need not implement the feature catalog to serve other transports.
+                logger.log("Could not verify MCP-over-ACP support", {error: String(error)});
+            }
+        }
         this.isInitialized = true;
     }
 
@@ -1155,8 +1177,9 @@ export class CodexAcpClient {
             apiType: activeProvider.apiType,
             baseUrl: activeProvider.baseUrl,
         });
+        const overrides = mcpServers.length ? expandConfigTables(this.config, "mcp_servers", "features") : this.config;
         const mergedConfig = {
-            ...disableUnsupportedSkills(forceGitRootTurnDiffPaths(mergeGatewayConfig(this.config, this.gatewayConfig))),
+            ...disableUnsupportedSkills(forceGitRootTurnDiffPaths(mergeGatewayConfig(overrides, this.gatewayConfig))),
             projects: Object.fromEntries(sessionRoots.map(root => [root, {
                 trust_level: "trusted",
             }])),
@@ -1176,11 +1199,13 @@ export class CodexAcpClient {
             return {config: configWithWorkspaceRoots, skippedMcpServers: [], ...permissionProfileMetadata};
         }
 
-        const requestedServers = normalizeMcpServers(mcpServers).map(server => ({name: server.name, server}));
+        // config/read sees Codex's layers, but not the per-thread overrides from CODEX_CONFIG.
+        const localServers = overrides["mcp_servers"];
+        const requestedServers = normalizeMcpServers(mcpServers, this.verifiedMcpBridge);
         let serversToConfigure = requestedServers;
         if (shouldDeduplicateMcpConflicts()) {
             // Prevents Codex from deep-merging incompatible field types, such as url and stdio schemas.
-            const existingNames = this.getConfigMcpServerNames(effectiveConfig);
+            const existingNames = this.getConfigMcpServerNames(effectiveConfig, localServers);
             serversToConfigure = requestedServers.filter(mcp => !existingNames.has(mcp.name));
         }
         const skippedMcpServers = requestedServers
@@ -1196,26 +1221,30 @@ export class CodexAcpClient {
             return {config: configWithWorkspaceRoots, skippedMcpServers, ...permissionProfileMetadata};
         }
 
+        const configs = await Promise.all(serversToConfigure.map(async server =>
+            [server.name, await toCodexMcpServerConfig(server)] as const));
+        const features = configWithWorkspaceRoots["features"];
         return {
             config: {
                 ...configWithWorkspaceRoots,
-                "mcp_servers": Object.fromEntries(serversToConfigure.map(mcp => [mcp.name, toCodexMcpServerConfig(mcp.server)])),
+                // Without modern discovery Codex sends `initialize`, which the ACP bridge does not accept.
+                ...(serversToConfigure.some(server => server.type === "acp") && {
+                    features: {...(isJsonObject(features) ? features : {}), [STATELESS_MCP_FEATURE]: true},
+                }),
+                mcp_servers: {...(isJsonObject(localServers) ? localServers : {}), ...Object.fromEntries(configs)},
             },
             skippedMcpServers,
             ...permissionProfileMetadata,
         };
     }
 
-    private getConfigMcpServerNames(response: ConfigReadResponse): Set<string> {
+    private getConfigMcpServerNames(response: ConfigReadResponse, localServers: JsonValue | undefined): Set<string> {
         const effectiveMcpServers = response?.config?.["mcp_servers"];
         const configLayers = response?.layers ?? [];
         const layerMcpServers = configLayers.map(layer => {
             return isJsonObject(layer.config) ? layer.config["mcp_servers"] : undefined;
         });
-        const configuredMcpServers = [effectiveMcpServers, ...layerMcpServers].filter(isJsonObject);
-        if (configuredMcpServers.length === 0) {
-            return new Set();
-        }
+        const configuredMcpServers = [localServers, effectiveMcpServers, ...layerMcpServers].filter(isJsonObject);
         return new Set(configuredMcpServers.flatMap(server => Object.keys(server)));
     }
 

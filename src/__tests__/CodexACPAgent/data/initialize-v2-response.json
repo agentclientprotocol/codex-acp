@@ -13,7 +13,8 @@
       },
       "mcp": {
         "stdio": {},
-        "http": {}
+        "http": {},
+        "acp": {}
       },
       "delete": {},
       "additionalDirectories": {},
