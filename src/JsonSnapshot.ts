@@ -27,7 +27,7 @@ export class JsonText {
     constructor(readonly text: string) {}
 }
 
-/** Deeper values go to `JSON.stringify` instead of being kept as individual snapshot nodes. */
+/** Deeper values go to `JSON.stringify`, because `sameJson` and `jsonText` recurse over the tree. */
 const MAX_DEPTH = 256;
 const apply = Reflect.apply;
 const getPrototypeOf = Object.getPrototypeOf;
@@ -57,14 +57,12 @@ export function jsonSnapshot(value: unknown, previous?: JsonTree): JsonTree | un
             parent.append(item);
         }
         const frame = stack[stack.length - 1]!;
-        if (frame.index === frame.length) {
+        if (frame.done) {
             item = frame.finish();
             stack.pop();
             ancestors.pop();
         } else {
-            const key = frame.key;
-            const before = frame.before;
-            item = serializeProperty((frame.value as Record<string | number, unknown>)[key], key, before, stack.length);
+            item = frame.next(stack.length);
         }
     }
 }
@@ -134,7 +132,7 @@ function serializeProperty(
             return reused(serializeNatively(value, String(key), false), previous);
     }
     const toJSON: unknown = (value as {toJSON?: unknown}).toJSON;
-    if (typeof toJSON !== "function") return new ContainerFrame(value, previous);
+    if (typeof toJSON !== "function") return containerFrame(value, previous);
     const result: unknown = apply(toJSON, value, [String(key)]);
     switch (typeof result) {
         case "string":
@@ -150,7 +148,7 @@ function serializeProperty(
             if (result === null) return null;
             // `JSON.stringify` does not call the `toJSON` of the result.
             return isPlain(result) && depth < MAX_DEPTH
-                ? new ContainerFrame(result, previous)
+                ? containerFrame(result, previous)
                 : reused(serializeNatively(result, String(key), true), previous);
         default:
             return reused(serializeNatively(result, String(key), true), previous);
@@ -164,69 +162,116 @@ function isPlain(value: object): boolean {
     return Array.isArray(value) ? prototype === Array.prototype : prototype === Object.prototype || prototype === null;
 }
 
-/** A container waiting for its children, retaining its original keys or length and any reusable snapshot. */
-class ContainerFrame {
-    readonly keys: string[] | null;
-    readonly length: number;
-    private readonly previous: JsonObject | readonly JsonTree[] | undefined;
-    private readonly previousValues: readonly JsonTree[] | undefined;
-    private readonly previousKeys: readonly string[] | undefined;
-    private values: JsonTree[] | undefined;
-    index = 0;
-    private count = 0;
+function containerFrame(value: object, previous: JsonTree | undefined): ContainerFrame {
+    return Array.isArray(value)
+        ? new ArrayFrame(value, Array.isArray(previous) ? previous : undefined)
+        : new ObjectFrame(value as Record<string, unknown>, previous instanceof JsonObject ? previous : undefined);
+}
 
-    constructor(readonly value: object, previous: JsonTree | undefined) {
-        if (Array.isArray(value)) {
-            this.keys = null;
-            this.length = value.length;
-            const array = Array.isArray(previous) ? previous : undefined;
-            this.previous = array;
-            this.previousValues = array;
-            this.previousKeys = undefined;
-            this.values = this.previousValues?.length === this.length ? undefined : new Array<JsonTree>(this.length);
-        } else {
-            this.keys = Object.keys(value);
-            this.length = this.keys.length;
-            this.previous = previous instanceof JsonObject ? previous : undefined;
-            this.previousValues = this.previous?.values;
-            this.previousKeys = this.previous?.keys;
-            this.values = this.previous === undefined ? new Array<JsonTree>(this.length) : undefined;
-        }
+/** A plain array or object that the walk is in, with the snapshot of its items so far. */
+abstract class ContainerFrame {
+    protected index = 0;
+
+    constructor(readonly value: object) {}
+
+    abstract get done(): boolean;
+
+    /** Serializes the next item, or returns the frame of the container that the walk enters next. */
+    abstract next(depth: number): JsonTree | ContainerFrame | undefined;
+
+    /** Takes the serialized item that `next` started. */
+    abstract append(item: JsonTree | undefined): void;
+
+    abstract finish(): JsonTree;
+}
+
+class ArrayFrame extends ContainerFrame {
+    private readonly length: number;
+    private before: JsonTree | undefined;
+    private tree: JsonTree[] | undefined;
+
+    constructor(override readonly value: readonly unknown[], private readonly previous: readonly JsonTree[] | undefined) {
+        super(value);
+        this.length = value.length;
+        // While every item equals the item of `previous`, the array is not copied.
+        this.tree = previous?.length === this.length ? undefined : new Array<JsonTree>(this.length);
     }
 
-    get key(): string | number {
-        return this.keys === null ? this.index : this.keys[this.index]!;
+    get done(): boolean {
+        return this.index === this.length;
     }
 
-    get before(): JsonTree | undefined {
-        return this.keys === null || this.previousKeys?.[this.count] === this.key ? this.previousValues?.[this.count] : undefined;
+    next(depth: number): JsonTree | ContainerFrame | undefined {
+        this.before = this.previous?.[this.index];
+        // The index becomes a string only for a `toJSON` call.
+        return serializeProperty(this.value[this.index], this.index, this.before, depth);
     }
 
     append(item: JsonTree | undefined): void {
-        if (this.keys === null) item ??= null;
-        if (item !== undefined) {
-            // Copy only when a member changes; unchanged snapshots retain their identity.
-            if (this.values === undefined && (item !== this.before || (this.keys !== null && this.previousKeys?.[this.count] !== this.key))) {
-                this.values = this.previousValues!.slice(0, this.count);
-            }
-            if (this.values !== undefined) this.values[this.count] = item;
-            // `keys` is a fresh array, so it can keep only the serialized keys.
-            if (this.keys !== null) this.keys[this.count] = this.keys[this.index]!;
-            this.count++;
+        const tree = item ?? null;
+        if (this.tree === undefined && tree !== this.before) {
+            this.tree = this.previous!.slice(0, this.index);
+            this.tree.length = this.length;
         }
+        if (this.tree !== undefined) this.tree[this.index] = tree;
         this.index++;
     }
 
     finish(): JsonTree {
-        if (this.keys === null) return this.values ?? this.previous!;
-        this.keys.length = this.count;
+        return this.tree ?? this.previous!;
+    }
+}
+
+class ObjectFrame extends ContainerFrame {
+    private readonly keys: string[];
+    private before: JsonTree | undefined;
+    private values: JsonTree[] | undefined;
+    private count = 0;
+
+    constructor(override readonly value: Record<string, unknown>, private readonly previous: JsonObject | undefined) {
+        super(value);
+        this.keys = Object.keys(value);
+        // While every member equals the member of `previous`, the values are not copied.
+        this.values = previous === undefined ? new Array<JsonTree>(this.keys.length) : undefined;
+    }
+
+    get done(): boolean {
+        return this.index === this.keys.length;
+    }
+
+    next(depth: number): JsonTree | ContainerFrame | undefined {
+        const key = this.keys[this.index]!;
+        this.before = this.previous?.keys[this.count] === key ? this.previous.values[this.count] : undefined;
+        return serializeProperty(this.value[key], key, this.before, depth);
+    }
+
+    append(item: JsonTree | undefined): void {
+        const index = this.index++;
+        if (item === undefined) return;
+        // `keys` is a fresh array, so it can keep only the serialized keys.
+        if (this.count !== index) this.keys[this.count] = this.keys[index]!;
         if (this.values === undefined) {
-            if (this.count === this.previousValues!.length) return this.previous!;
-            this.values = this.previousValues!.slice(0, this.count);
+            // `before` is `undefined` when the key differs, so this also checks the key.
+            if (item === this.before) {
+                this.count++;
+                return;
+            }
+            this.values = this.previous!.values.slice(0, this.count);
         }
-        this.values.length = this.count;
+        this.values[this.count++] = item;
+    }
+
+    finish(): JsonTree {
+        const previous = this.previous;
+        this.keys.length = this.count;
+        let values = this.values;
+        if (values === undefined) {
+            if (this.count === previous!.keys.length) return previous!;
+            values = previous!.values.slice(0, this.count);
+        }
+        values.length = this.count;
         // The record keeps the keys of `previous` when they did not change.
-        return new JsonObject(this.previousKeys !== undefined && sameList(this.keys, this.previousKeys) ? this.previousKeys : this.keys, this.values);
+        return new JsonObject(previous !== undefined && sameList(this.keys, previous.keys) ? previous.keys : this.keys, values);
     }
 }
 

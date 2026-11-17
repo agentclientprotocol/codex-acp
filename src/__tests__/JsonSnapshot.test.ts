@@ -17,6 +17,23 @@ function nested(depth: number, leaf: unknown): unknown {
     return value;
 }
 
+/** The largest depth that `serialize` handles before the stack runs out. */
+function deepest(serialize: (value: unknown) => unknown): number {
+    let low = 1;
+    let high = 100_000;
+    while (low < high) {
+        const middle = Math.ceil((low + high) / 2);
+        try {
+            serialize(nested(middle, 1));
+            low = middle;
+        } catch (error) {
+            if (!(error instanceof RangeError)) throw error;
+            high = middle - 1;
+        }
+    }
+    return low;
+}
+
 class Box {
     constructor(readonly value: number) {}
 }
@@ -126,13 +143,15 @@ describe("jsonSnapshot", () => {
     });
 
     it("serializes values nested thousands deep and reuses unchanged snapshots", () => {
-        const deep = nested(4000, 1);
+        // A holder without a prototype keeps `JSON.stringify` on its recursive path, like `serializeNatively`.
+        const depth = deepest((value) => JSON.stringify({__proto__: null, value}));
+        const deep = nested(depth, 1);
         const expected = JSON.stringify(deep);
         const snapshot = jsonSnapshot(deep);
 
         expect(text(snapshot)).toBe(expected);
-        expect(jsonSnapshot(nested(4000, 1), snapshot)).toBe(snapshot);
-        expect(sameJson(jsonSnapshot(nested(4000, 2), snapshot), snapshot)).toBe(false);
+        expect(jsonSnapshot(nested(depth, 1), snapshot)).toBe(snapshot);
+        expect(sameJson(jsonSnapshot(nested(depth, 2), snapshot), snapshot)).toBe(false);
     });
 
     it("reuses the text of a value that JSON.stringify serialized", () => {
