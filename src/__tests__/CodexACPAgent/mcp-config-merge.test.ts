@@ -17,6 +17,8 @@ describe('MCP config merge across configured MCP servers and ACP request', { tim
     beforeEach(() => {
         vi.clearAllMocks();
 
+        const node = JSON.stringify(process.execPath);
+        const mcpServer = JSON.stringify(path.resolve(process.cwd(), "node_modules/mcp-hello-world/build/stdio.js"));
         const globalConfig = `
 [mcp_servers.shared-mcp]
 url = "https://example.com/mcp"
@@ -24,6 +26,13 @@ url = "https://example.com/mcp"
 [mcp_servers.disabled-mcp]
 command = "./node_modules/.bin/mcp-hello-world"
 enabled = false
+
+[mcp_servers.same-transport]
+command = "missing-global-command"
+
+[mcp_servers.global-only]
+command = ${node}
+args = [${mcpServer}]
 `;
 
         const projectConfig = `
@@ -129,6 +138,37 @@ url = "https://example.com/mcp"
             const dump = fixture.getAcpConnectionDump([]);
             expect(dump).toContain("MCP server `broken-mcp` failed to start");
             expect(dump).toContain("MCP server `disabled-mcp` was not started, because the Codex config already defines an MCP server with this name.");
+        });
+    });
+
+    it('should prefer a same-transport ACP MCP and preserve unrelated configured servers', async () => {
+        const codexAcpAgent = fixture.getCodexAcpAgent();
+        await codexAcpAgent.initialize({protocolVersion: 1});
+        fixture.getCodexAcpClient().readAuthRequirement = vi.fn().mockResolvedValue({required: false, account: null});
+
+        const codexAcpClient = fixture.getCodexAcpClient();
+        const startupVersion = codexAcpClient.getMcpServerStartupVersion();
+        const mcpServer = path.resolve(process.cwd(), "node_modules/mcp-hello-world/build/stdio.js");
+        const {sessionId} = await codexAcpAgent.newSession({
+            cwd: "",
+            mcpServers: [{
+                name: "same-transport",
+                command: process.execPath,
+                args: [mcpServer],
+                env: [],
+            }],
+        });
+
+        await expect(codexAcpClient.awaitMcpServerStartup(["same-transport"], startupVersion, {threadId: sessionId})).resolves.toEqual({
+            ready: ["same-transport"],
+            failed: [],
+            cancelled: [],
+        });
+        await expect(codexAcpClient.listMcpServers({threadId: sessionId})).resolves.toMatchObject({
+            data: expect.arrayContaining([
+                expect.objectContaining({name: "same-transport"}),
+                expect.objectContaining({name: "global-only"}),
+            ]),
         });
     });
 
