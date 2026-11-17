@@ -11,6 +11,12 @@
   {
     "sessionId": "thread-1:subagent:worker",
     "update": {
+      "sessionUpdate": "replay_complete"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
       "state": "idle",
       "sessionUpdate": "state_update"
     }

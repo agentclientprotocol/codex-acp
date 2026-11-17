@@ -1,0 +1,46 @@
+[
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "send-1:to:worker",
+      "senderSessionId": "thread-1",
+      "recipientSessionId": "thread-1:subagent:worker",
+      "content": [
+        {
+          "text": "Check the tests",
+          "type": "text"
+        }
+      ],
+      "sessionUpdate": "session_message"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "send-2:to:worker",
+      "senderSessionId": "thread-1",
+      "recipientSessionId": "thread-1:subagent:worker",
+      "content": [
+        {
+          "text": "Check the tests",
+          "type": "text"
+        }
+      ],
+      "sessionUpdate": "session_message"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "messageId": "received",
+      "recipientSessionId": "thread-1:subagent:worker",
+      "content": [
+        {
+          "text": "Check the tests",
+          "type": "text"
+        }
+      ],
+      "sessionUpdate": "session_message"
+    }
+  }
+]

@@ -6,7 +6,7 @@ import {
     asSdkSessionNotification,
 } from "./AcpSessionExtensions";
 import {toV2SessionUpdates} from "./AcpV2SessionUpdate";
-import {toV2ReplayUpdates} from "./AcpV2Replay";
+import {AcpV2Replay, toV2ReplayUpdates} from "./AcpV2Replay";
 import {toV1RequestPermissionResponse, toV2RequestPermissionRequest} from "./AcpV2Permissions";
 import {elicitationSessionId, toV1CreateElicitationResponse, toV2CreateElicitationRequest} from "./AcpV2Elicitation";
 import {AcpV2ForegroundState} from "./AcpV2ForegroundState";
@@ -27,9 +27,11 @@ export class AcpV2Connection {
     private readonly sessionInfo = new Map<string, AcpV2SessionInfo>();
     private sessionDelivery: AcpClientDelivery | null = null;
     private sendElicitationCompletion: (params: unknown) => Promise<void>;
+    readonly replay: AcpV2Replay;
 
     constructor(private readonly transportClient: AcpV2ClientConnection) {
         const client = transportClient;
+        this.replay = new AcpV2Replay(params => client.notify(acpV2.methods.client.session.update, params));
         this.sendElicitationCompletion = params => client.notify(acpV2.methods.client.elicitation.complete, params as acpV2.CompleteElicitationNotification);
         this.client = {
             notify: (method: string, params?: unknown) => {
@@ -39,6 +41,7 @@ export class AcpV2Connection {
                 if (sessionId !== null) {
                     const {update, _meta} = params as acpV2.UpdateSessionNotification;
                     if (acpV2.SessionUpdate.isSessionInfoUpdate(update)) return this.sessionInfoFor(sessionId).update(update, _meta);
+                    return this.replay.notify(params as acpV2.UpdateSessionNotification);
                 }
                 return client.notify(method as `_${string}`, params);
             },
@@ -47,7 +50,8 @@ export class AcpV2Connection {
                 if (sessionId !== null && this.sessionDelivery && !this.sessionDelivery.canRequestSession(sessionId)) {
                     return Promise.reject(acp.RequestError.requestCancelled(undefined, `Session ${sessionId} is closing or closed`));
                 }
-                const send = () => {
+                const send = async () => {
+                    if (sessionId !== null) await this.replay.wait(sessionId, options?.cancellationSignal);
                     const request = () => client.request(method as `_${string}`, params, options);
                     return this.sessionDelivery?.withElicitationRequest(method, params, request) ?? request();
                 };
@@ -157,7 +161,7 @@ export class AcpV2Connection {
         if (!info) {
             info = new AcpV2SessionInfo((update, notificationMetadata) => {
                 if (this.sessionDelivery && !this.sessionDelivery.canPublishSession(sessionId)) return Promise.resolve();
-                return this.transportClient.notify(acpV2.methods.client.session.update,
+                return this.replay.notify(
                     {sessionId, update, ...(notificationMetadata !== undefined ? {_meta: notificationMetadata} : {})});
             }, metadata);
             this.sessionInfo.set(sessionId, info);

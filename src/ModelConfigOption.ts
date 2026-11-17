@@ -89,6 +89,7 @@ export function createReasoningEffortConfigOption(
         category: "thought_level",
         type: "select",
         currentValue: currentEffort,
+        // Codex supplies the model's effort ordering, including provider-defined levels.
         options: supportedReasoningEfforts.map(option => ({
             value: option.reasoningEffort,
             name: capitalize(option.reasoningEffort),

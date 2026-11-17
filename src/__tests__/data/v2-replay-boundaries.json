@@ -1,0 +1,114 @@
+[
+  {
+    "sessionId": "root",
+    "update": {
+      "sessionUpdate": "subagent_update",
+      "sessionId": "child"
+    }
+  },
+  {
+    "sessionId": "child",
+    "update": {
+      "sessionUpdate": "subagent_update",
+      "sessionId": "empty"
+    }
+  },
+  {
+    "sessionId": "child",
+    "update": {
+      "sessionUpdate": "session_message",
+      "messageId": "task",
+      "content": [
+        {
+          "type": "text",
+          "text": "Investigate"
+        }
+      ]
+    }
+  },
+  {
+    "sessionId": "unrelated",
+    "update": {
+      "sessionUpdate": "state_update",
+      "state": "idle"
+    }
+  },
+  {
+    "sessionId": "root",
+    "update": {
+      "sessionUpdate": "replay_complete"
+    }
+  },
+  {
+    "sessionId": "child",
+    "update": {
+      "sessionUpdate": "replay_complete"
+    }
+  },
+  {
+    "sessionId": "empty",
+    "update": {
+      "sessionUpdate": "replay_complete"
+    }
+  },
+  {
+    "sessionId": "child",
+    "update": {
+      "sessionUpdate": "state_update",
+      "state": "unknown"
+    }
+  },
+  {
+    "sessionId": "root",
+    "update": {
+      "sessionUpdate": "subagent_update",
+      "sessionId": "child",
+      "state": {
+        "state": "unknown"
+      }
+    }
+  },
+  {
+    "sessionId": "root",
+    "update": {
+      "sessionUpdate": "notice",
+      "title": "Live",
+      "severity": "info"
+    }
+  },
+  {
+    "sessionId": "child",
+    "update": {
+      "sessionUpdate": "agent_message_chunk",
+      "messageId": "answer",
+      "content": {
+        "type": "text",
+        "text": "Live child"
+      }
+    }
+  },
+  {
+    "sessionId": "root",
+    "update": {
+      "sessionUpdate": "subagent_update",
+      "sessionId": "new-child"
+    }
+  },
+  {
+    "sessionId": "new-child",
+    "update": {
+      "sessionUpdate": "replay_complete"
+    }
+  },
+  {
+    "sessionId": "new-child",
+    "update": {
+      "sessionUpdate": "agent_message_chunk",
+      "messageId": "new-answer",
+      "content": {
+        "type": "text",
+        "text": "New child"
+      }
+    }
+  }
+]

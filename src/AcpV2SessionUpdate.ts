@@ -65,6 +65,7 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
         case "compaction_summary_chunk":
         case "session_message":
         case "session_message_chunk":
+        case "prompt_suggestions_update":
             return update;
         case "config_option_update":
             return {...update, configOptions: toV2ConfigOptions(update.configOptions)};

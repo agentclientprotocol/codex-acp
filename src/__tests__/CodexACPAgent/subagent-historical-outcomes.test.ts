@@ -40,8 +40,9 @@ describe.each([1, 2] as const)("ACP v%s historical child outcomes", version => {
     const stateUpdates = () => h.scopedUpdates.filter(entry => entry.update.sessionUpdate === "subagent_update"
         && entry.update.sessionId === childId && entry.update.state != null
         || entry.sessionId === childId && entry.update.sessionUpdate === "state_update");
-    const gap = () => h.scopedUpdates.some(entry => entry.update.sessionUpdate === "agent_thought_chunk"
-        && entry.update.messageId === `${sessionId}:subagent-history-gap`);
+    const gap = () => h.scopedUpdates.some(entry => version === 1
+        ? entry.update.sessionUpdate === "agent_thought_chunk" && entry.update.messageId === `${sessionId}:subagent-history-gap`
+        : entry.update.sessionUpdate === "notice" && entry.update.title === "Some recorded child history is unavailable or incomplete.");
 
     function history(turns: Turn[], paginated = false) {
         const reads: Array<{threadId: string; includeTurns?: boolean}> = [];

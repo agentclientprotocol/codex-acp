@@ -201,13 +201,6 @@
     {
       "sessionId": "thread-1",
       "update": {
-        "title": "Inserted via session/prompt",
-        "sessionUpdate": "session_info_update"
-      }
-    },
-    {
-      "sessionId": "thread-1",
-      "update": {
         "messageId": "client-user-1",
         "content": [],
         "_meta": null,
@@ -308,6 +301,19 @@
           "signal": null
         },
         "sessionUpdate": "terminal_update"
+      }
+    },
+    {
+      "sessionId": "thread-1",
+      "update": {
+        "sessionUpdate": "replay_complete"
+      }
+    },
+    {
+      "sessionId": "thread-1",
+      "update": {
+        "title": "Inserted via session/prompt",
+        "sessionUpdate": "session_info_update"
       }
     },
     {
