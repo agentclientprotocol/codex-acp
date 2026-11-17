@@ -510,7 +510,8 @@ export class CodexEventHandler {
             && notification.params.item.type === "commandExecution") {
             updateEvent = await this.createUpdateEvent(notification);
         }
-        if (!handledBySubagents) {
+        const deferBackgroundEnd = this.session.protocolVersion === 2 && notification.method === "item/completed";
+        if (!handledBySubagents && !deferBackgroundEnd) {
             await this.sessionState.asyncTasks.handleNotification(
                 notification,
                 this.subagents.notificationSessionId(notification),
@@ -522,6 +523,10 @@ export class CodexEventHandler {
         if (updateEvent === undefined) updateEvent = await this.createUpdateEvent(notification);
         if (updateEvent) {
             await this.publishUpdate(updateEvent, this.subagents.notificationSessionId(notification));
+        }
+        if (deferBackgroundEnd) {
+            await this.sessionState.asyncTasks.handleNotification(notification,
+                this.subagents.notificationSessionId(notification));
         }
     }
 

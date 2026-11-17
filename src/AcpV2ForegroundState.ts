@@ -8,6 +8,7 @@ export class AcpV2ForegroundState {
     private activity: Activity;
     private readonly items = new Set<string>();
     private readonly actions = new Map<symbol, string | undefined>();
+    private readonly background = new Map<string, acpV2.BackgroundWork>();
     private sending: Promise<void> = Promise.resolve();
     private disposed = false;
 
@@ -18,14 +19,14 @@ export class AcpV2ForegroundState {
         this.activity = running === "unknown" ? "unknown" : running ? "running" : "idle";
     }
 
-    async update(state: acpV2.StateUpdate): Promise<void> {
+    async update(state: acpV2.StateUpdate, force = false): Promise<void> {
         if (state.state === "idle" || state.state === "unknown") {
             this.items.clear();
             this.actions.clear();
-            if (this.activity === state.state) return this.sending;
+            if (this.activity === state.state && !force) return this.sending;
             this.activity = state.state;
         } else if (state.state === "running" || state.state === "requires_action") {
-            if (this.activity === state.state) return this.sending;
+            if (this.activity === state.state && !force) return this.sending;
             this.activity = state.state;
         }
         await this.publish(state);
@@ -48,6 +49,16 @@ export class AcpV2ForegroundState {
             case "unknown":
                 return this.publish({state: "unknown"});
         }
+    }
+
+    backgroundWork(key: string, work: acpV2.BackgroundWork | null): Promise<void> {
+        if (work) this.background.set(key, work);
+        else this.background.delete(key);
+        return this.snapshot();
+    }
+
+    hasWork(): boolean {
+        return this.activity !== "idle" || this.background.size > 0;
     }
 
     async startItem(itemId: string): Promise<void> {
@@ -107,7 +118,7 @@ export class AcpV2ForegroundState {
     }
 
     private publish(state: acpV2.StateUpdate): Promise<void> {
-        return this.serializePublication(() => this.notify(state));
+        return this.serializePublication(() => this.notify({...state, background: [...this.background.values()]}));
     }
 
     serializePublication(publish: () => Promise<void>): Promise<void> {

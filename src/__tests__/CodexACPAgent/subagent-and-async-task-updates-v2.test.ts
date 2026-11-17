@@ -172,12 +172,12 @@ describe('subagent and async task updates on ACP v2', () => {
         expect(updates).toEqual([]);
     });
 
-    function createAsyncTasks(enabled: boolean) {
+    function createAsyncTasks(enabled: boolean, airEnabled = enabled) {
         const {session, updates} = v2Session("root");
         const list = vi.fn<() => Promise<ThreadBackgroundTerminalsListResponse>>();
         const appServer = {threadBackgroundTerminalsList: list,
             backgroundTerminalPages: CodexAppServerClient.prototype.backgroundTerminalPages} as unknown as CodexAppServerClient;
-        const tasks = new CodexBackgroundTerminalTasks(enabled, "root", appServer, session);
+        const tasks = new CodexBackgroundTerminalTasks(enabled, "root", appServer, session, airEnabled);
         return {tasks, list, updates};
     }
 
@@ -225,7 +225,32 @@ describe('subagent and async task updates on ACP v2', () => {
                 canStop: true,
                 toolCallId: "command-1",
             },
+            {sessionUpdate: "state_update", state: "idle", background: [{type: "terminal", terminalId: "command-1"}]},
         ]);
+    });
+
+    it('reports a terminal in the standard v2 background snapshot without AIR updates', async () => {
+        const {tasks, list, updates} = createAsyncTasks(true, false);
+        list.mockResolvedValue({data: [{itemId: "command-1", processId: "42", command: "sleep 2"}], nextCursor: null});
+        await tasks.sync();
+        expect(updates).toEqual([
+            {sessionUpdate: "state_update", state: "idle", background: [{type: "terminal", terminalId: "command-1"}]},
+        ]);
+        list.mockResolvedValue({data: [], nextCursor: null});
+        await tasks.sync();
+        expect(updates.at(-2)).toEqual({sessionUpdate: "terminal_update", terminalId: "command-1",
+            exitStatus: {exitCode: null, signal: null}});
+        expect(updates.at(-1)).toEqual({sessionUpdate: "state_update", state: "idle", background: []});
+    });
+
+    it('reports a live child in its parent snapshot and removes it at idle', async () => {
+        const {session, updates} = v2Session("root");
+        await session.update({sessionUpdate: "subagent_update", sessionId: "child", capabilities: {}}, "root");
+        await session.updateSubagentState("child", "root", {state: "running"});
+        expect(updates.at(-1)).toEqual({sessionUpdate: "state_update", state: "idle",
+            background: [{type: "subagent", sessionId: "child"}]});
+        await session.updateSubagentState("child", "root", {state: "idle"});
+        expect(updates.at(-1)).toEqual({sessionUpdate: "state_update", state: "idle", background: []});
     });
 
     it('never emits `_async_task_*` (or `async_task_*`) when async tasks are disabled', async () => {
