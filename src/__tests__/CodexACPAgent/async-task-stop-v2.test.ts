@@ -43,7 +43,7 @@ const asyncTasksClientCapabilities = {
     _meta: {jetbrains: {air: {version: 1, capabilities: [AIR_ASYNC_TASKS_KEY]}}},
 };
 
-/** Emits the notifications that make `CodexBackgroundTerminalTasks` announce and sync a spawned task. */
+/** Emits the notifications that make `CodexBackgroundTasks` announce and sync a spawned task. */
 async function spawnAsyncTask(client: {emit: (n: ServerNotification) => void}) {
     client.emit(turnStarted());
     await settle();

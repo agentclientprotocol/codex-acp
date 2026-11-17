@@ -240,7 +240,7 @@ import type {SessionOptionMetadata} from "./SessionMetadata";
 import {SessionIndexService} from "./SessionIndexService";
 import type {SessionIndexTitleState} from "./SessionIndexTitles";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
-import {CodexBackgroundTerminalTasks} from "./async-tasks/CodexBackgroundTerminalTasks";
+import {CodexBackgroundTasks} from "./async-tasks/CodexBackgroundTasks";
 import {clientSupportsCompaction, CodexSessionCompactions, createCompactionUpdate} from "./CodexSessionCompactions";
 import {CodexSessionToolCalls} from "./CodexSessionToolCalls";
 import {
@@ -315,7 +315,7 @@ export interface SessionState extends SessionIndexTitleState, SessionOptionState
     promptSuggestions?: PromptSuggestionGenerator | undefined;
     subagents: SubagentEventRouter;
     subagentTransition?: Promise<void>;
-    asyncTasks: CodexBackgroundTerminalTasks;
+    asyncTasks: CodexBackgroundTasks;
     compactions: CodexSessionCompactions;
     toolCallReports: ToolCallReports;
     /**
@@ -1633,16 +1633,17 @@ export class CodexAcpServer {
         return a === b;
     }
 
-    private createAsyncTasks(sessionId: string): CodexBackgroundTerminalTasks {
+    private createAsyncTasks(sessionId: string): CodexBackgroundTasks {
         const existing = this.sessions.get(sessionId)?.asyncTasks;
         if (this.protocolVersion === 2 && existing) return existing;
-        return new CodexBackgroundTerminalTasks(
+        return new CodexBackgroundTasks(
             clientSupportsAirCapability(this.clientCapabilities, AIR_ASYNC_TASKS_KEY),
             sessionId,
             this.codexAcpClient.appServerClient,
             new ACPSessionConnection(this.connection, sessionId),
             this.protocolVersion === 2,
             this.usesStandardSubagents(),
+            this.capabilities,
         );
     }
 
@@ -2502,7 +2503,7 @@ export class CodexAcpServer {
 
             logger.log("Restarting Codex app-server for provider update", {sessionCount: this.sessions.size});
             for (const session of this.sessions.values()) {
-                session.asyncTasks.prepareForAppServerReplacement();
+                await session.asyncTasks.prepareForAppServerReplacement();
             }
             await this.finishAllAsyncTasks("stopped", "before the provider restart");
             const replacement = await this.restartCodexClient();
