@@ -185,6 +185,24 @@ describe("normalization of the recorded messages", () => {
         ]);
     });
 
+    it("omits only the separately tested ChatGPT replacement capability from scenario recordings", () => {
+        const initialize: RecordedMessage = {
+            direction: "response", method: "initialize", params: {
+                agentInfo: {version: packageJson.version},
+                authMethods: [
+                    {id: "chat-gpt", _meta: {replaceLogin: true}},
+                    {id: "chat-gpt-device-code", _meta: {replaceLogin: true, other: "kept"}},
+                    {id: "gateway", _meta: {replaceLogin: true}},
+                ],
+            },
+        };
+        expect((normalize([initialize])[0]!.params as Update)["authMethods"]).toEqual([
+            {id: "chat-gpt"},
+            {id: "chat-gpt-device-code", _meta: {other: "kept"}},
+            {id: "gateway", _meta: {replaceLogin: true}},
+        ]);
+    });
+
     it("keeps every other id, version, path, and time", () => {
         const kept = [
             message("session/update", {update: {toolCallId: id, locations: [{path: "/elsewhere/App.ts"}]}}),

@@ -127,6 +127,13 @@ describe('CodexACPAgent - initialize', () => {
         ]));
     });
 
+    it('advertises replacement login on both ChatGPT methods in ACP v1', async () => {
+        const result = await agent.initialize({protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {elicitation: {url: {}}}});
+        for (const methodId of ["chat-gpt", "chat-gpt-device-code"]) {
+            expect(result.authMethods?.find(method => method.id === methodId)?._meta).toMatchObject({replaceLogin: true});
+        }
+    });
+
     it('enables experimental thread settings without requesting attestation', async () => {
         await agent.initialize({
             protocolVersion: acp.PROTOCOL_VERSION,

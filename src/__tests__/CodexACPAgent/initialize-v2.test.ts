@@ -135,6 +135,20 @@ describe('CodexACPAgent - initialize over ACP v2', () => {
         await expect(initialize(v2ClientCapabilities)).resolves.toHaveProperty("protocolVersion", 2);
     });
 
+    it('advertises replacement login on both ChatGPT methods in ACP v2', async () => {
+        const {clientStream} = connectRouter();
+        const connection = acpV2.client({name: "test-client"}).connect(clientStream);
+        closeClient = () => connection.close();
+        const response = await connection.agent.request(acpV2.methods.agent.initialize, {
+            protocolVersion: 2,
+            info: {name: "test-client", version: "1.0.0"},
+            capabilities: v2ClientCapabilities,
+        });
+        for (const methodId of ["chat-gpt", "chat-gpt-device-code"]) {
+            expect(response.authMethods?.find(method => method.methodId === methodId)?._meta).toMatchObject({replaceLogin: true});
+        }
+    });
+
     it('still routes a v1 initialize to the unchanged v1 chain', async () => {
         const {clientStream} = connectRouter();
         const connection = acp.client({name: "test-client"}).connect(clientStream);

@@ -276,6 +276,7 @@ const MCP_STARTUP_TOOL_CALL_ID = /^mcp_startup\.[^.]+\.([0-9a-f]{8}-[0-9a-f]{4}-
 /**
  * Replaces the exact values that change from run to run or from release to release with stable placeholders.
  * - The package version in `initialize.agentInfo.version` becomes `<version>`.
+ * - The separately tested ChatGPT replacement capability is omitted from scenario recordings.
  * - The random id of each MCP startup tool call becomes `<uuid>`, wherever that exact id occurs.
  *
  * `runScenario` already replaces the exact temporary workspace path.
@@ -290,9 +291,15 @@ export function normalize(messages: RecordedMessage[]): RecordedMessage[] {
     });
     return messages.map(message => {
         if (message.method !== "initialize" || message.direction !== "response") return message;
-        const params = message.params as {agentInfo?: {version?: unknown}};
+        const params = message.params as {agentInfo?: {version?: unknown}; authMethods?: Array<{id?: string; _meta?: Record<string, unknown>}>};
         if (params.agentInfo?.version !== packageJson.version) return message;
-        return {...message, params: {...params, agentInfo: {...params.agentInfo, version: "<version>"}}};
+        const authMethods = params.authMethods?.map(method => {
+            if (!(["chat-gpt", "chat-gpt-device-code"].includes(method.id ?? "") && method._meta?.["replaceLogin"] === true)) return method;
+            const {_meta, ...rest} = method;
+            const {replaceLogin, ...remainingMeta} = _meta!;
+            return Object.keys(remainingMeta).length ? {...rest, _meta: remainingMeta} : rest;
+        });
+        return {...message, params: {...params, agentInfo: {...params.agentInfo, version: "<version>"}, ...(authMethods ? {authMethods} : {})}};
     }).map(message => [...randomIds].reduce((result, id) => replaceText(result, id, "<uuid>"), message));
 }
 
