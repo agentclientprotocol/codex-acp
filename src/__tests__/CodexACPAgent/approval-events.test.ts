@@ -1,3 +1,5 @@
+import {APPROVAL_POLICY_META} from "../../permissions/automatic-choice";
+import {toV2RequestPermissionRequest} from "../../AcpV2Permissions";
 import {beforeEach, describe, expect, it, vi} from "vitest";
 import type {
     AdditionalPermissionProfile,
@@ -792,6 +794,32 @@ describe("Approval Events", () => {
                 permissions,
             };
         }
+
+        it.each([1, 2] as const)("identifies the ordinary turn grant only after ACP v%s negotiation", async version => {
+            const meta = {[APPROVAL_POLICY_META]: {version: 1, owner: "instance",
+                instanceId: "507e147b-d051-4fb3-9406-5aa9d0d2d40a", automaticChoice: true}};
+            const agent = fixture.getCodexAcpAgent();
+            const initialized = version === 1
+                ? await agent.initialize({protocolVersion: 1, _meta: meta})
+                : await agent.initializeV2({protocolVersion: 2, info: {name: "fixture", version: "1"}, _meta: meta});
+            expect(initialized._meta?.[APPROVAL_POLICY_META]).toEqual({version: 1, owner: "instance",
+                producer: "agentclientprotocol.codex-acp", automaticChoice: true});
+            fixture.clearAcpConnectionDump();
+            const prompt = setupSessionWithPendingPrompt();
+            fixture.setPermissionResponse({outcome: {outcome: "selected", optionId: ApprovalOptionId.AllowPermissionsForTurn}});
+            const response = await fixture.sendServerRequest("item/permissions/requestApproval", params());
+            const request = permissionRequest();
+            expect(request.toolCall._meta[APPROVAL_POLICY_META]).toEqual({automaticChoice: {version: 1,
+                producer: "agentclientprotocol.codex-acp", allowOptionId: ApprovalOptionId.AllowPermissionsForTurn}});
+            expect(request.options.filter((option: {kind: string}) => option.kind === "allow_once").map((option: {optionId: string}) => option.optionId))
+                .toEqual([ApprovalOptionId.AllowPermissionsForTurn, ApprovalOptionId.AllowPermissionsForTurnWithStrictAutoReview]);
+            if (version === 2) {
+                const wire = toV2RequestPermissionRequest(request);
+                expect(wire.subject).toMatchObject({type: "tool_call", toolCall: {_meta: request.toolCall._meta}});
+            }
+            expect(response).toEqual({permissions, scope: "turn", strictAutoReview: false});
+            await finish(prompt);
+        });
 
         it.each([
             [ApprovalOptionId.AllowPermissionsForTurn, "turn", false],

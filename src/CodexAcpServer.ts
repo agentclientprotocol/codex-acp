@@ -1,3 +1,4 @@
+import {automaticChoiceCapability} from "./permissions/automatic-choice";
 import * as acp from "@agentclientprotocol/sdk/unstable";
 import {RequestError, type SessionId, type SessionModeState} from "@agentclientprotocol/sdk/unstable";
 import {CodexEventHandler, type CompletedPlan, failureWasShownAsMessage, SessionFailureIds} from "./CodexEventHandler";
@@ -816,7 +817,7 @@ export class CodexAcpServer {
         this.clientInfo = _params.clientInfo ?? null;
         this.clientCapabilities = _params.clientCapabilities ?? null;
         this.initializeRequest = _params;
-        this.capabilities = ClientCapabilities.from(_params.clientCapabilities);
+        this.capabilities = ClientCapabilities.from(_params.clientCapabilities, _params._meta);
         this.clientDelivery.reports.compareMeta = this.capabilities.airToolCallContract;
         this.booleanConfigOptionsSupported = clientSupportsBooleanConfigOptions(_params.clientCapabilities);
         this.sessionIndex.configure(_params.clientCapabilities);
@@ -880,7 +881,7 @@ export class CodexAcpServer {
         this.clientInfo = params.info;
         this.clientCapabilities = clientCapabilities;
         this.initializeRequest = {clientInfo: params.info};
-        this.capabilities = ClientCapabilities.fromV2(clientCapabilities);
+        this.capabilities = ClientCapabilities.fromV2(clientCapabilities, params._meta);
         this.clientDelivery.reports.compareMeta = this.capabilities.airToolCallContract;
         // Boolean config options are baseline on v2, so there is nothing to probe.
         this.booleanConfigOptionsSupported = true;
@@ -953,6 +954,7 @@ export class CodexAcpServer {
                 ...this.sessionIndex.agentCapabilities(),
             ];
         return {
+            ...automaticChoiceCapability(this.capabilities.automaticChoice),
             steering: {
                 supported: true,
             },

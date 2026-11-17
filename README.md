@@ -108,6 +108,10 @@ Codex can keep a shell command running after a turn continues. AIR clients can s
 
 See [AIR extensions](docs/air-extensions.md#async-tasks) for the capability, lifecycle events, and stop request.
 
+### Approval policy integration
+
+Optional [Instance Automatic approval choices](docs/instance-automatic-choice.md) let an installed host identify the ordinary turn grant without changing manual choices.
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the Apache 2.0 License.

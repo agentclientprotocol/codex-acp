@@ -1,3 +1,4 @@
+import {supportsAutomaticChoice} from "../permissions/automatic-choice";
 import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {
     AIR_DIFF_PATCH_KEY,
@@ -35,6 +36,7 @@ type ClientCapabilityValues = {
     readonly air: AirCapabilities;
     readonly diffPatchFormat: DiffPatchFormat;
     readonly permissionPromptFields: boolean;
+    readonly automaticChoice: boolean;
 };
 
 /**
@@ -54,6 +56,7 @@ export class ClientCapabilities {
         air: {rawInputRendering: false, planContentDelta: false, diffPatch: false},
         diffPatchFormat: "none",
         permissionPromptFields: false,
+        automaticChoice: false,
     });
 
     /** The client declares `_meta.jetbrains.air`. */
@@ -70,6 +73,7 @@ export class ClientCapabilities {
     readonly diffPatchFormat: DiffPatchFormat;
     /** A permission request has its own `title` and `description` (ACP v2). */
     readonly permissionPromptFields: boolean;
+    readonly automaticChoice: boolean;
 
     private constructor(values: ClientCapabilityValues) {
         this.airClient = values.airClient;
@@ -80,9 +84,10 @@ export class ClientCapabilities {
         this.air = values.air;
         this.diffPatchFormat = values.diffPatchFormat;
         this.permissionPromptFields = values.permissionPromptFields;
+        this.automaticChoice = values.automaticChoice;
     }
 
-    static from(capabilities: acp.ClientCapabilities | null | undefined): ClientCapabilities {
+    static from(capabilities: acp.ClientCapabilities | null | undefined, initializeMeta?: Record<string, unknown> | null): ClientCapabilities {
         const airClient = isAirClient(capabilities);
         const diffPatch = clientSupportsAirCapability(capabilities, AIR_DIFF_PATCH_KEY);
         return new ClientCapabilities({
@@ -98,6 +103,7 @@ export class ClientCapabilities {
             },
             diffPatchFormat: diffPatch ? "air" : "none",
             permissionPromptFields: false,
+            automaticChoice: supportsAutomaticChoice(initializeMeta),
         });
     }
 
@@ -109,7 +115,7 @@ export class ClientCapabilities {
      * so its output goes to `content` at the end. A diff carries a Git patch. A permission request has its own title.
      * Plan updates need no capability on v2.
      */
-    static fromV2(capabilities: acp.ClientCapabilities | null | undefined): ClientCapabilities {
+    static fromV2(capabilities: acp.ClientCapabilities | null | undefined, initializeMeta?: Record<string, unknown> | null): ClientCapabilities {
         return new ClientCapabilities({
             airClient: isAirClient(capabilities),
             airToolCallContract: false,
@@ -119,6 +125,7 @@ export class ClientCapabilities {
             air: {rawInputRendering: false, planContentDelta: false, diffPatch: false},
             diffPatchFormat: "acpV2",
             permissionPromptFields: true,
+            automaticChoice: supportsAutomaticChoice(initializeMeta),
         });
     }
 
