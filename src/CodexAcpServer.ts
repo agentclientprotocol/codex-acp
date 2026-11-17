@@ -854,7 +854,7 @@ export class CodexAcpServer {
                 },
                 sessionCapabilities,
                 mcpCapabilities: {
-                    acp: false,
+                    acp: this.codexAcpClient.supportsMcpOverAcp,
                     http: true,
                     sse: false
                 },
@@ -911,6 +911,7 @@ export class CodexAcpServer {
                     mcp: {
                         stdio: {},
                         http: {},
+                        ...(this.codexAcpClient.supportsMcpOverAcp && {acp: {}}),
                     },
                     delete: {},
                     additionalDirectories: {},

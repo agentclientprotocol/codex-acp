@@ -87,7 +87,11 @@ export function startCodexConnection(
 export function attachLogs(proc: ChildProcessWithoutNullStreams) {
     const originalWrite = proc.stdin.write.bind(proc.stdin);
     proc.stdin.write = (chunk: any, encoding?: any, callback?: any): boolean => {
-        if (logger.enabled) logger.log(`[IN] ${chunk.toString()}`);
+        if (logger.enabled) {
+            // The writer sends one complete JSON message. Keep MCP endpoint credentials out of its trace.
+            const line = chunk.toString().replace(/("Authorization"\s*:\s*")Bearer [^"]+"/gi, '$1Bearer [REDACTED]"');
+            logger.log(`[IN] ${line}`);
+        }
         return originalWrite(chunk, encoding, callback);
     };
 

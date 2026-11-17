@@ -14,6 +14,7 @@ import {runCodexCli} from "./CodexCli";
 import {prepareCodexHookConfig} from "./CodexHookConfig";
 import {createAcpAgentRouter} from "./AcpAgentRouter";
 import type {AcpClientConnection, AcpV2Connection} from "./ACPSessionConnection";
+import type {McpOverAcpToHttp} from "./McpServerConfig";
 
 if (process.argv.includes("--version")) {
     console.log(`${packageJson.name} ${packageJson.version}`);
@@ -84,9 +85,9 @@ function startAcpServer() {
 
     const acpJsonStream = createJsonStream(process.stdin, process.stdout);
 
-    function createAgent(connection: AcpClientConnection | AcpV2Connection): CodexAcpServer {
+    function createAgent(connection: AcpClientConnection | AcpV2Connection, toHttp: McpOverAcpToHttp): CodexAcpServer {
         const appServerClient = new CodexAppServerClient(codexProcessState.connection.connection);
-        const codexClient = new CodexAcpClient(appServerClient, hookConfig.sessionConfig, modelProvider);
+        const codexClient = new CodexAcpClient(appServerClient, hookConfig.sessionConfig, modelProvider, toHttp);
         return new CodexAcpServer(
             connection,
             codexClient,

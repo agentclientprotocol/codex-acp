@@ -31,12 +31,17 @@ const v2ClientCapabilities: acpV2.ClientCapabilities = {
     },
 };
 
-function connectRouter() {
+function connectRouter(hasModernMcp = true) {
     const mocks = createMockConnections();
+    mocks.mockCodexConnection.sendRequest.mockImplementation(async (method: string, params: {cursor?: string}) => {
+        if (method !== "experimentalFeature/list") return {};
+        if (!params.cursor) return {data: [], nextCursor: "next"};
+        return {data: hasModernMcp ? [{name: "mcp_2026_07_28", enabled: false, stage: "underDevelopment"}] : [], nextCursor: null};
+    });
     let agent: CodexAcpServer;
     let codexClient: CodexAcpClient;
-    const router = createAcpAgentRouter((connection) => {
-        const codexAcpClient = new CodexAcpClient(new CodexAppServerClient(mocks.mockCodexConnection as any));
+    const router = createAcpAgentRouter((connection, toHttp) => {
+        const codexAcpClient = new CodexAcpClient(new CodexAppServerClient(mocks.mockCodexConnection as any), undefined, undefined, toHttp);
         codexClient = codexAcpClient;
         vi.spyOn(codexAcpClient, "getAgentConfiguredModelProvider").mockResolvedValue("openai");
         vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: true});
@@ -135,7 +140,24 @@ describe('CodexACPAgent - initialize over ACP v2', () => {
         await expect(initialize(v2ClientCapabilities)).resolves.toHaveProperty("protocolVersion", 2);
     });
 
-    it('still routes a v1 initialize to the unchanged v1 chain', async () => {
+    it.each([1, 2] as const)('does not advertise ACP transport over v%i if Codex lacks modern MCP', async version => {
+        const {clientStream} = connectRouter(false);
+        if (version === 1) {
+            const connection = acp.client().connect(clientStream);
+            closeClient = () => connection.close();
+            const response = await connection.agent.request(acp.methods.agent.initialize, {protocolVersion: 1});
+            expect(response.agentCapabilities?.mcpCapabilities).toMatchObject({http: true, acp: false});
+        } else {
+            const connection = acpV2.client().connect(clientStream);
+            closeClient = () => connection.close();
+            const response = await connection.agent.request(acpV2.methods.agent.initialize, {
+                protocolVersion: 2, info: {name: "test", version: "1"},
+            });
+            expect(response.capabilities?.session?.mcp).toEqual({http: {}, stdio: {}});
+        }
+    });
+
+    it('still routes a v1 initialize to the v1 chain', async () => {
         const {clientStream} = connectRouter();
         const connection = acp.client({name: "test-client"}).connect(clientStream);
         closeClient = () => connection.close();
