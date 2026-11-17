@@ -642,6 +642,35 @@ describe('Session lifecycle over ACP v2', () => {
             .toMatchFileSnapshot('data/session-lifecycle-v2-resume-start-replay.json');
     });
 
+    it('ends an empty replay before current-state updates', async () => {
+        const {connection, updates} = await connectV2Client();
+        closeClient = () => connection.close();
+        await connection.agent.request(acpV2.methods.agent.session.resume, {sessionId, cwd, replayFrom: {type: "start"}});
+        expect(updates[0]?.update).toEqual({sessionUpdate: "replay_complete"});
+        expect(updates.filter(({update}) => update.sessionUpdate === "replay_complete")).toHaveLength(1);
+        expect(updates.at(-1)?.update).toEqual({sessionUpdate: "state_update", state: "idle"});
+    });
+
+    it('does not activate an inactive session at replay_complete', async () => {
+        const {connection, agent, updates} = await connectV2Client();
+        closeClient = () => connection.close();
+        let release!: () => void;
+        const held = new Promise<void>(resolve => { release = resolve; });
+        const server = agent() as any;
+        const snapshot = server.snapshotSessionStateV2.bind(server);
+        vi.spyOn(server, "snapshotSessionStateV2").mockImplementation(async () => {
+            await held;
+            await snapshot(sessionId);
+        });
+        const resumed = connection.agent.request(acpV2.methods.agent.session.resume, {sessionId, cwd, replayFrom: {type: "start"}});
+        try {
+            await vi.waitFor(() => expect(updates.some(({update}) => update.sessionUpdate === "replay_complete")).toBe(true));
+            await expect(connection.agent.request(acpV2.methods.agent.session.prompt, {
+                sessionId, prompt: [{type: "text", text: "Too early"}],
+            })).rejects.toMatchObject({code: -32002});
+        } finally { release(); await resumed; }
+    });
+
     it('snapshots a live rename after replay rather than restoring the older history title', async () => {
         let releaseRead!: () => void;
         let readStarted!: () => void;
@@ -674,6 +703,10 @@ describe('Session lifecycle over ACP v2', () => {
         });
         const lastHistoryIndex = updates.map(({update}) => update.sessionUpdate).lastIndexOf("agent_message_chunk");
         expect(updates.indexOf(info.at(-1)!)).toBeGreaterThan(lastHistoryIndex);
+        const boundary = updates.findIndex(({update}) => update.sessionUpdate === "replay_complete");
+        expect(boundary).toBeGreaterThan(lastHistoryIndex);
+        expect(updates.filter(({update}) => update.sessionUpdate === "session_info_update")
+            .every(info => updates.indexOf(info) > boundary)).toBe(true);
     });
 
     it('does not replay any history when replayFrom is absent', async () => {
@@ -685,7 +718,7 @@ describe('Session lifecycle over ACP v2', () => {
 
         expect(updates.some(({update}) => update.sessionUpdate.endsWith("_message_chunk")
             || update.sessionUpdate.endsWith("_message")
-            || update.sessionUpdate === "tool_call")).toBe(false);
+            || update.sessionUpdate === "tool_call" || update.sessionUpdate === "replay_complete")).toBe(false);
     });
 
     it('forks a session, dropping modes and using v2-shaped configOptions', async () => {

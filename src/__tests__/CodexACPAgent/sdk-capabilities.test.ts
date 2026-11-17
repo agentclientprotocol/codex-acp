@@ -13,6 +13,8 @@ describe.each([1, 2] as const)("ACP v%s SDK upgrade capabilities", version => {
             expect(session.title).toEqual({});
             expect(session.archive).toBeUndefined();
             expect(session.status).toBeUndefined();
+            expect(session.options).toBeUndefined();
+            expect(session.prompt?.skill).toBeUndefined();
             expect(capabilities.auth.status).toBeUndefined();
             for (const method of ["auth/status", "session/status", "session/archive", "session/unarchive"]) {
                 await expect(h.request(method, {sessionId})).rejects.toMatchObject({code: -32601});

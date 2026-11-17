@@ -159,7 +159,7 @@ import {
 } from "./FastModeConfig";
 import packageJson from "../package.json";
 import {isJetBrains2026_1Client} from "./JBUtils";
-import {clientSupportsNotices} from "./SessionNotice";
+import {clientSupportsNotices, createSessionNotice} from "./SessionNotice";
 import {AsyncQuestionClient, AsyncQuestionElicitations, renderAsyncQuestionReply} from "./CodexAsyncQuestions";
 import {
     createAgentTextMessageChunk,
@@ -678,7 +678,8 @@ export class CodexAcpServer {
             const state = this.sessions.get(sessionId);
             return state ? this.subagentModels(state) : null;
         };
-        const setupReady = this.clientDelivery.sessionSetupReady(sessionId);
+        // Resume history may announce children before the response activates the root.
+        const setupReady = replay ? null : this.clientDelivery.sessionSetupReady(sessionId);
         const transition = this.sessions.get(sessionId)?.subagentTransition;
         const ready = setupReady ? Promise.all([setupReady, transition]).then(() => {}) : transition;
         const router = this.usesStandardSubagents()
@@ -1932,7 +1933,10 @@ export class CodexAcpServer {
 
         try {
             try {
-                await this.streamThreadHistory(sessionId, thread, history);
+                const readHistory = () => this.streamThreadHistory(sessionId, thread, history);
+                const v2 = AcpV2Connection.of(this.connection);
+                if (v2) await v2.replay.withHistory(sessionId, readHistory);
+                else await readHistory();
             } finally {
                 // Only after replay is fully streamed does the baseline tracker start dispatching
                 // live events, so a live goal-turn frame can never race ahead of history.
@@ -1985,17 +1989,18 @@ export class CodexAcpServer {
         };
     }
 
-    async resumeSessionV2(params: acpV2.ResumeSessionRequest): Promise<acpV2.ResumeSessionResponse> {
-        // Initial config option values are not advertised, so they are not applied.
+    async resumeSessionV2(params: acpV2.ResumeSessionRequest, signal?: AbortSignal): Promise<acpV2.ResumeSessionResponse> {
+        // session.options is not implemented, so initial config values are not applied.
         const {replayFrom, systemPrompt, configOptions: _configOptions, ...rest} = params;
         const request = {...rest, systemPrompt: toV1SystemPrompt(systemPrompt)};
+        if (replayFrom != null && replayFrom.type !== "start") {
+            throw RequestError.invalidParams(undefined, `Unsupported replayFrom type: ${replayFrom.type}`);
+        }
+        if (this.setupResponseOrdering && !this.sessions.has(params.sessionId)) this.clientDelivery.beginSessionSetup(params.sessionId);
         if (replayFrom == null) {
             await this.resumeSession(request);
         } else {
-            if (replayFrom.type !== "start") {
-                throw RequestError.invalidParams(undefined, `Unsupported replayFrom type: ${replayFrom.type}`);
-            }
-            await this.loadSessionAndReplayHistory(request);
+            await AcpV2Connection.of(this.connection)!.replay.run(params.sessionId, () => this.loadSessionAndReplayHistory(request), signal);
         }
         await this.snapshotSessionStateV2(params.sessionId);
         return this.createSessionSetupResponseV2(this.getSessionState(params.sessionId));
@@ -2038,7 +2043,8 @@ export class CodexAcpServer {
     }
 
     async forkSessionV2(params: acpV2.ForkSessionRequest): Promise<acpV2.ForkSessionResponse> {
-        const {systemPrompt, ...rest} = params;
+        // session.options is not implemented, so initial config values are not applied.
+        const {systemPrompt, configOptions: _configOptions, ...rest} = params;
         const request = {...rest, systemPrompt: toV1SystemPrompt(systemPrompt)};
         const {sessionId} = await this.forkSession(request);
         return {
@@ -2214,7 +2220,7 @@ export class CodexAcpServer {
     }
 
     async newSessionV2(params: acpV2.NewSessionRequest): Promise<acpV2.NewSessionResponse> {
-        // Initial config option values are not advertised, so they are not applied.
+        // session.options is not implemented, so initial config values are not applied.
         const {systemPrompt, configOptions: _configOptions, ...rest} = params;
         const request = {...rest, systemPrompt: toV1SystemPrompt(systemPrompt)};
         const {sessionId} = await this.newSession(request);
@@ -3995,6 +4001,10 @@ export class CodexAcpServer {
         }
         if (!isOpen()) throw new SessionClosedDuringLoadError();
         if (threadId === state.sessionId && gaps.size > 0) {
+            if (this.protocolVersion === 2) {
+                await session.update(createSessionNotice("warning", "Some recorded child history is unavailable or incomplete."));
+                return;
+            }
             const update = {sessionUpdate: "agent_thought_chunk" as const, messageId: `${sessionId}:subagent-history-gap`,
                 content: {type: "text" as const, text: "Some recorded child history is unavailable or incomplete."}};
             await session.replayUpdate(update, replayedEntities);
@@ -4646,6 +4656,9 @@ export class CodexAcpServer {
     async promptV2(params: acpV2.PromptRequest, signal?: AbortSignal): Promise<acpV2.PromptResponse> {
         this.assertInstructionsReady(params.sessionId);
         const sessionId = params.sessionId;
+        if (this.clientDelivery.sessionSetupReady(sessionId)) {
+            throw new RequestError(-32002, `Session ${sessionId} is not active`, {sessionId});
+        }
         const request = toV1PromptRequest(params);
         const sessionState = this.getSessionState(sessionId);
         if (this.sessionIsClosing(sessionId)) {

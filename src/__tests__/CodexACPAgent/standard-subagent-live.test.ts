@@ -126,6 +126,23 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         expect(JSON.stringify(h.scopedUpdates.filter(entry => entry.update.sessionUpdate === "session_message"))).not.toContain("Never sent");
     });
 
+    it("leaves repeated identical messages unlinked rather than guessing their sender view", async () => {
+        await connect();
+        h.emit(itemCompleted(collab("spawnAgent", "spawn", null)));
+        h.emit(itemCompleted(collab("sendInput", "send-1", "Check the tests")));
+        h.emit(itemCompleted(collab("sendInput", "send-2", "Check the tests")));
+        h.emit(onWorker(turnStarted("child-turn")));
+        h.emit(onWorker(itemStarted(task("received", "Check the tests"), "child-turn")));
+        await flush(h);
+        const messages = h.scopedUpdates.filter(entry => entry.update.sessionUpdate === "session_message");
+        const incoming = messages.find(entry => entry.sessionId === childId)?.update;
+        expect(incoming).not.toHaveProperty("senderSessionId");
+        expect(incoming).not.toHaveProperty("senderMessageId");
+        expect(messages.every(entry => !("recipientMessageId" in entry.update))).toBe(true);
+        await expect(JSON.stringify(messages, null, 2) + "\n")
+            .toMatchFileSnapshot(`data/live-core-v${version}-ambiguous-delegation.json`);
+    });
+
     it("waits for immediate parentage and announces ancestors before child traffic", async () => {
         await connect();
         h.emit(itemStarted(activityItem(worker, "/root/coordinator/worker")));
@@ -398,7 +415,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
             && entry.update.messageId === "parent-answer")).toBe(true);
         expect(h.scopedUpdates.some(entry => entry.sessionId === sessionId && entry.update.sessionUpdate === "agent_thought_chunk"
             && entry.update.messageId === `${sessionId}:subagent-history-gap`)).toBe(false);
-        expect(childUpdates().filter(entry => entry.sessionId === childId)).toEqual([]);
+        expect(childUpdates().filter(entry => entry.sessionId === childId && entry.update.sessionUpdate !== "replay_complete")).toEqual([]);
     });
 
     it("finishes concurrent same-parent setups without deadlock", async () => {

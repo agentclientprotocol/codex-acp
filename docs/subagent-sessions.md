@@ -31,7 +31,7 @@ The task a session gives a child is reported as `session_message`, not as a user
 
 - **Incoming view.** A `userMessage` item in the child's Codex thread is reported on the child session, before the child's response. `messageId` is the Codex item ID. `recipientSessionId` is the child.
 - **Outgoing view.** A completed `spawnAgent`, `sendInput`, `sendMessage`, or `followupTask` collaboration call with a prompt is reported on the sender's session. `messageId` is `<item id>:to:<receiver thread id>`. A failed or interrupted call reports no message.
-- **Linking.** The two views are linked with `senderMessageId` and `recipientMessageId` when the same text was observed for the same recipient on both sides. Whichever view is observed second carries the reference, and a metadata-only `session_message` adds the reference to the first.
+- **Linking.** The two views are linked with `senderMessageId` and `recipientMessageId` when the same text was observed for the same recipient on both sides and identifies one waiting view. Repeated identical text with several waiting views is left unlinked. Whichever view is observed second carries the reference, and a metadata-only `session_message` adds the reference to the first.
 - The incoming view names `senderSessionId` only when it is linked. Codex does not record the sender on the child's item, so an unlinked incoming view names only its recipient. Subagents recorded only as `subAgentActivity` items have no prompt on the parent side, so their tasks have no outgoing view and no sender.
 - Neither view is derived from the other. A view is reported only when its Codex item was observed.
 - Message IDs are the same live and on replay.
@@ -43,7 +43,11 @@ The task a session gives a child is reported as `session_message`, not as a user
 
 ### Session load
 
-`session/load`, and v2 `session/resume` with `replayFrom`, replay each recorded child conversation once, before the response. Replay reports the same announcements, session messages, and session references as the live path. It reports the latest recorded turn outcome as a historical `idle` state. A missing or incomplete child transcript adds one advisory thought on the root session. Replay grants no cancel capability.
+`session/load`, and v2 `session/resume` with `replayFrom`, replay each recorded child conversation once, before the response. Replay reports the same announcements, session messages, and session references as the live path. It reports the latest recorded turn outcome as an `idle` snapshot. Replay grants no cancel capability.
+
+On v2, the root and each announced child get exactly one `replay_complete`, including children with no retained content. Live updates, state snapshots, and requests follow the boundary for their session. The boundary does not activate an inactive root session. That happens with the successful resume response. A resume without `replayFrom` sends no replay boundary.
+
+A missing or incomplete child transcript adds one advisory on the root session. On v1 this is a thought. On v2 it is a live notice after `replay_complete`, not retained history.
 
 ### Directories
 

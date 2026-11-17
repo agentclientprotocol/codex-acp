@@ -48,15 +48,18 @@ describe.each([1, 2] as const)('ACP v%s prompt content capabilities', (version) 
         }
     });
 
-    it('rejects unadvertised audio before inserting any part of a mixed prompt', async () => {
+    it.each([
+        {kind: "audio", block: {type: "audio" as const, data: "AA==", mimeType: "audio/wav"}},
+        ...(version === 2 ? [{kind: "skill", block: {type: "skill" as const, name: "test"}}] : []),
+    ])('rejects unadvertised $kind before inserting any part of a mixed prompt', async ({kind, block}) => {
         const session = await connectSession(version);
         try {
             const error = await session.sendPrompt([
                 {type: "text", text: "Transcribe this"},
-                {type: "audio", data: "AA==", mimeType: "audio/wav"},
+                block,
             ]).then(() => null, error => ({code: error.code, message: error.message}));
             await expect(JSON.stringify({error, turnStarts: session.turnStartParams, updates: session.transcript}, null, 2))
-                .toMatchFileSnapshot(`data/prompt-content-capabilities-v${version}.json`);
+                .toMatchFileSnapshot(`data/prompt-content-capabilities-v${version}${kind === "audio" ? "" : `-${kind}`}.json`);
         } finally {
             session.connection.close();
         }

@@ -2,7 +2,70 @@ import * as acp from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import {describe, expect, it, vi} from "vitest";
 import {ACPSessionConnection, AcpV2Connection, type AcpV2ClientConnection} from "../ACPSessionConnection";
 import {AcpClientDelivery} from "../AcpClientDelivery";
-import {toV2ReplayUpdates} from "../AcpV2Replay";
+import {AcpV2Replay, toV2ReplayUpdates} from "../AcpV2Replay";
+
+describe("V2 replay boundaries", () => {
+    it("holds live updates and requests, including current state produced by history, until each replay is complete", async () => {
+        const sent: acp.UpdateSessionNotification[] = [];
+        const replay = new AcpV2Replay(async params => { sent.push(params); });
+        let finish!: () => void;
+        let historyReady!: () => void;
+        const gate = new Promise<void>(resolve => { finish = resolve; });
+        const ready = new Promise<void>(resolve => { historyReady = resolve; });
+        const operation = replay.run("root", () => replay.withHistory("root", async () => {
+            await replay.notify({sessionId: "root", update: {sessionUpdate: "subagent_update", sessionId: "child"}});
+            await replay.notify({sessionId: "child", update: {sessionUpdate: "subagent_update", sessionId: "empty"}});
+            await replay.notify({sessionId: "child", update: {
+                sessionUpdate: "session_message", messageId: "task", content: [{type: "text", text: "Investigate"}],
+            }});
+            await replay.notify({sessionId: "child", update: {sessionUpdate: "state_update", state: "unknown"}});
+            await replay.notify({sessionId: "root", update: {
+                sessionUpdate: "subagent_update", sessionId: "child", state: {state: "unknown"},
+            }});
+            historyReady();
+            await gate;
+        }));
+        await ready;
+        await replay.notify({sessionId: "root", update: {sessionUpdate: "notice", title: "Live", severity: "info"}});
+        await replay.notify({sessionId: "child", update: {sessionUpdate: "agent_message_chunk",
+            messageId: "answer", content: {type: "text", text: "Live child"}}});
+        await replay.notify({sessionId: "root", update: {sessionUpdate: "subagent_update", sessionId: "new-child"}});
+        await replay.notify({sessionId: "new-child", update: {sessionUpdate: "agent_message_chunk",
+            messageId: "new-answer", content: {type: "text", text: "New child"}}});
+        const request = vi.fn();
+        const waiting = replay.wait("child").then(request);
+        await replay.notify({sessionId: "unrelated", update: {sessionUpdate: "state_update", state: "idle"}});
+        expect(sent.map(params => params.update.sessionUpdate)).toEqual([
+            "subagent_update", "subagent_update", "session_message", "state_update",
+        ]);
+        expect(request).not.toHaveBeenCalled();
+        finish();
+        await operation;
+        await waiting;
+        expect(request).toHaveBeenCalledOnce();
+        await expect(`${JSON.stringify(sent, null, 2)}\n`).toMatchFileSnapshot("data/v2-replay-boundaries.json");
+    });
+
+    it.each(["failure", "cancellation"] as const)("does not certify a replay after %s and releases pending requests", async outcome => {
+        const sent: acp.UpdateSessionNotification[] = [];
+        const replay = new AcpV2Replay(async params => { sent.push(params); });
+        const controller = new AbortController();
+        let waiting!: Promise<void>;
+        const failed = replay.run("session", async () => {
+            waiting = replay.wait("session");
+            // Attach the rejection handler before the replay releases it.
+            void waiting.catch(() => {});
+            await replay.notify({sessionId: "session", update: {sessionUpdate: "state_update", state: "running"}});
+            if (outcome === "failure") throw new Error("History unavailable");
+            controller.abort();
+        }, controller.signal);
+        await expect(failed).rejects.toThrow(outcome === "failure" ? "History unavailable" : "Session replay was cancelled");
+        await expect(waiting).rejects.toMatchObject({code: -32800});
+        expect(sent).toEqual([]);
+        await replay.run("session", async () => {});
+        expect(sent).toEqual([{sessionId: "session", update: {sessionUpdate: "replay_complete"}}]);
+    });
+});
 
 const entities: Array<{name: string; initial: acp.SessionUpdate; next: acp.SessionUpdate}> = [
     {name: "tool", initial: {sessionUpdate: "tool_call_update", toolCallId: "same", title: "Tool", status: "in_progress"},

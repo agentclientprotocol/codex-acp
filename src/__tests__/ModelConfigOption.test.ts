@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import {createModelConfigOption, formatModelDisplayName} from "../ModelConfigOption";
+import {createModelConfigOption, createReasoningEffortConfigOption, formatModelDisplayName} from "../ModelConfigOption";
 import {createTestModel} from "./acp-test-utils";
 
 describe("formatModelDisplayName", () => {
@@ -40,5 +40,15 @@ describe("createModelConfigOption", () => {
                 {value: "gpt-5.3-codex-spark", name: "5.3 Codex Spark"},
             ],
         });
+    });
+});
+
+describe("createReasoningEffortConfigOption", () => {
+    it("preserves the model's effort ordering, including advanced and provider-defined levels", () => {
+        const levels = ["none", "minimal", "low", "medium", "custom-between", "high", "xhigh", "max", "ultra", "persistent"];
+        const efforts = levels.map(reasoningEffort => ({reasoningEffort, description: reasoningEffort}));
+        const option = createReasoningEffortConfigOption(efforts, "high");
+        expect(option).toMatchObject({currentValue: "high", options: levels.map(value => ({value}))});
+        expect(efforts.map(option => option.reasoningEffort)).toEqual(levels);
     });
 });

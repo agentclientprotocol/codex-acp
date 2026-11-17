@@ -34,7 +34,7 @@ export function userMessageText(item: UserMessageItem): string {
 
 /**
  * Reports each view of a message between sessions once, from the side that was observed.
- * Views are linked only when the same text was observed for the same recipient on both sides.
+ * Links a recipient/text match only when it identifies one waiting view.
  */
 export class SubagentMessages {
     private readonly reported = new Set<string>();
@@ -94,5 +94,7 @@ function take(views: Map<string, View[]>, recipientSessionId: string, text: stri
     const waiting = views.get(recipientSessionId);
     const index = waiting?.findIndex(view => view.text === text) ?? -1;
     if (!waiting || index < 0) return null;
+    // Codex provides no shared message ID. Repeated text is not enough to choose a view.
+    if (waiting.some((view, other) => other !== index && view.text === text)) return null;
     return waiting.splice(index, 1)[0] ?? null;
 }

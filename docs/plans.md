@@ -57,5 +57,6 @@ A v1 client without `clientCapabilities.plan` gets:
 ## Not sent
 
 The adapter does not send `plan_removed`, because Codex has no event that ends
-a plan. It does not send `file` plans, because Codex streams plan text rather
-than writing a plan file. Codex's `explanation` of a checklist update is not sent.
+a plan. It omits the optional `path` on Markdown plans, because Codex streams plan
+text rather than reporting a plan file. The schema no longer defines a `file`
+plan type. Codex's `explanation` of a checklist update is not sent.

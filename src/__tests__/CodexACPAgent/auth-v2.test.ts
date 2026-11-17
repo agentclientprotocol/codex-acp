@@ -190,6 +190,13 @@ describe('Auth over ACP v2', () => {
         await expect(dump({logout, codexRequests})).toMatchFileSnapshot('data/auth-v2-logout.json');
     });
 
+    it('returns the same empty result for repeated logout without authenticated state', async () => {
+        const {connection} = await connectV2Client();
+        closeClient = () => connection.close();
+        expect(await connection.agent.request(acpV2.methods.agent.auth.logout, {})).toEqual({});
+        expect(await connection.agent.request(acpV2.methods.agent.auth.logout, {})).toEqual({});
+    });
+
     it('does not answer the v1 auth method names', async () => {
         const {connection, codexRequests} = await connectV2Client();
         closeClient = () => connection.close();
