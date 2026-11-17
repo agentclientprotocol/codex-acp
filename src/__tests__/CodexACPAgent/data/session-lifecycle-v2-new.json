@@ -192,7 +192,8 @@
           }
         },
         "modelProvider": null,
-        "cwd": "/workspace"
+        "cwd": "/workspace",
+        "experimentalRawEvents": true
       }
     }
   ],

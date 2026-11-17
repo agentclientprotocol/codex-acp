@@ -12,6 +12,8 @@ import {
 } from "../AirExtension";
 import {logger} from "../Logger";
 import type {ThreadBackgroundTerminal} from "./BackgroundTerminalApi";
+import {CodexCodeModeTasks} from "./CodexCodeModeTasks";
+import {ClientCapabilities} from "../tool-calls/ClientCapabilities";
 
 type CommandExecutionItem = Extract<ThreadItem, {type: "commandExecution"}>;
 type TerminalState = "completed" | "failed" | "stopped";
@@ -49,7 +51,7 @@ type TerminalSnapshot = {
 const LIVE_POLL_MS = 1_000;
 
 /** One runtime inventory for the AIR extension and the ACP v2 display terminals. */
-export class CodexBackgroundTerminalTasks {
+export class CodexBackgroundTasks {
     /** The live tasks. A task leaves the map when it ends, so the map holds only the running commands. */
     private readonly tasks = new Map<string, Task>();
     /**
@@ -63,6 +65,8 @@ export class CodexBackgroundTerminalTasks {
     private disposed = false;
     private poll: ReturnType<typeof setTimeout> | undefined;
 
+    private readonly codeMode: CodexCodeModeTasks;
+
     constructor(
         readonly enabled: boolean,
         private readonly rootSessionId: string,
@@ -70,13 +74,18 @@ export class CodexBackgroundTerminalTasks {
         private readonly session: ACPSessionConnection,
         private readonly standard = false,
         private readonly standardChildren = false,
-    ) {}
+        capabilities = ClientCapabilities.from({}),
+    ) {
+        this.codeMode = new CodexCodeModeTasks(session, capabilities);
+    }
 
     async handleNotification(
         notification: ServerNotification,
         sessionId: string,
         commandTitle?: string,
     ): Promise<void> {
+        if (this.disposed) return;
+        await this.codeMode.handleNotification(notification, sessionId);
         if (!this.isActive()) return;
         const threadId = notificationThreadId(notification);
         if (threadId === null) return;
@@ -87,6 +96,11 @@ export class CodexBackgroundTerminalTasks {
         }
         if (notification.method === "item/completed" && notification.params.item.type === "commandExecution") {
             await this.observeCommandCompleted(notification.params.item, threadId);
+            return;
+        }
+        if (notification.method === "rawResponseItem/completed"
+            && (notification.params.item.type === "custom_tool_call_output" || notification.params.item.type === "function_call_output")) {
+            await this.reconcile(threadId, sessionId);
             return;
         }
         // The list includes processes still serving their initial tool call. At a turn boundary
@@ -156,11 +170,12 @@ export class CodexBackgroundTerminalTasks {
         }
     }
 
-    prepareForAppServerReplacement(): void {
+    async prepareForAppServerReplacement(): Promise<void> {
         this.appServerGeneration += 1;
         this.appServerQueriesEnabled = false;
         clearTimeout(this.poll);
         this.poll = undefined;
+        await this.codeMode.finishAll("failed");
     }
 
     async recover(threadId: string, sessionId: string, itemIds: ReadonlySet<string>): Promise<void> {
@@ -177,6 +192,7 @@ export class CodexBackgroundTerminalTasks {
     }
 
     async finishAll(state: TerminalState): Promise<void> {
+        await this.codeMode.finishAll(state);
         if (!this.isActive()) return;
         const errors: unknown[] = [];
         for (const task of [...this.tasks.values()]) {
@@ -272,6 +288,7 @@ export class CodexBackgroundTerminalTasks {
     }
 
     clear(): void {
+        this.codeMode.clear();
         this.disposed = true;
         this.prepareForAppServerReplacement();
         this.tasks.clear();
