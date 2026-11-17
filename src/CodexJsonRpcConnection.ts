@@ -10,6 +10,13 @@ import {logger} from "./Logger";
 
 const require = createRequire(import.meta.url);
 
+// Register once for all connections, including app-server restarts.
+process.stderr.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code !== "EPIPE" && error.code !== "ERR_STREAM_DESTROYED") {
+        throw error;
+    }
+});
+
 export interface CodexConnection {
     readonly connection: MessageConnection
     readonly process: ChildProcessWithoutNullStreams;
@@ -91,8 +98,9 @@ export function attachLogs(proc: ChildProcessWithoutNullStreams) {
         return originalWrite(chunk, encoding, callback);
     };
 
-    proc.stderr.on("data", (data) => {
+    proc.stderr.on("data", (data: Buffer) => {
         if (logger.enabled) logger.log(`[ERR] ${data.toString()}`);
+        process.stderr.write(data);
     });
     proc.stdout.on("data", (data: Buffer) => {
         if (logger.enabled) logger.log(`[OUT] ${data.toString()}`);
