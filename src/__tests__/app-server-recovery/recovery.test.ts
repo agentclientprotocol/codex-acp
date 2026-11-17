@@ -401,6 +401,7 @@ describe("app-server recovery", () => {
     it("keeps a collaboration mode chosen while the app-server was down", async () => {
         const fixture = createRecoveryFixture();
         const sessionId = await openSession(fixture);
+        fixture.answers.set("config/read", () => ({config: {plan_mode_reasoning_effort: "high"}, origins: {}, layers: null}));
         await fixture.kill();
 
         await fixture.agent.setSessionConfigOption({sessionId, configId: "collaboration_mode", value: "plan"});
@@ -411,7 +412,7 @@ describe("app-server recovery", () => {
 
         expect(requestsOf(fixture.current(), "thread/settings/update")).toEqual([expect.objectContaining({
             threadId: sessionId,
-            collaborationMode: expect.objectContaining({mode: "plan"}),
+            collaborationMode: expect.objectContaining({mode: "plan", settings: expect.objectContaining({reasoning_effort: "high"})}),
         })]);
     });
 
