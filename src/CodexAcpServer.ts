@@ -1397,6 +1397,7 @@ export class CodexAcpServer {
             agentMode: AgentMode.getInitialAgentMode(
                 availableAgentModes,
                 sessionMetadata.activePermissionProfileId,
+                sessionMetadata.resolvedPermissions ?? null,
             ),
             availableAgentModes,
             collaborationMode: sessionMetadata.collaborationMode,
@@ -3637,6 +3638,7 @@ export class CodexAcpServer {
             agentMode: AgentMode.getInitialAgentMode(
                 availableAgentModes,
                 sessionMetadata.activePermissionProfileId,
+                sessionMetadata.resolvedPermissions ?? null,
             ),
             availableAgentModes,
             collaborationMode: sessionMetadata.collaborationMode,

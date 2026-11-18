@@ -26,7 +26,7 @@ import type {
 import type {ServiceTier} from "./app-server/ServiceTier";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import {ModelId} from "./ModelId";
-import {AgentMode} from "./AgentMode";
+import {AgentMode, type ResolvedPermissions} from "./AgentMode";
 import path from "node:path";
 import {isDeepStrictEqual} from "node:util";
 import {logger} from "./Logger";
@@ -113,6 +113,8 @@ type ResumedThread = {
     materialized: boolean;
     /** The mode that the resume response reports. Null when the thread has no rollout yet. */
     collaborationMode: ModeKind | null;
+    /** The permissions the resume response reports. Null when `thread/read` answered instead. */
+    resolvedPermissions: ResolvedPermissions | null;
 };
 
 /**
@@ -675,6 +677,10 @@ export class CodexAcpClient {
                 itemsBackwardsCursor: response.itemsBackwardsCursor ?? null,
                 materialized: true,
                 collaborationMode: response.collaborationMode?.mode ?? null,
+                resolvedPermissions: {
+                    approvalPolicy: response.approvalPolicy ?? null,
+                    sandboxPolicy: response.sandbox ?? null,
+                },
             };
         } catch (err) {
             if (isThreadActiveWriterError(err)) throw threadActiveWriterRequestError(params.threadId, err);
@@ -702,6 +708,7 @@ export class CodexAcpClient {
                 itemsBackwardsCursor: null,
                 materialized: false,
                 collaborationMode: null,
+                resolvedPermissions: null,
             };
         }
     }
@@ -742,6 +749,7 @@ export class CodexAcpClient {
             skippedMcpServers,
             ...(instructions ? {instructions} : {}),
             activePermissionProfileId: response.materialized ? response.activePermissionProfileId : defaultPermissionProfileId ?? null,
+            ...(response.resolvedPermissions ? {resolvedPermissions: response.resolvedPermissions} : {}),
             ...permissionProfileMetadata,
         }
     }
@@ -827,6 +835,7 @@ export class CodexAcpClient {
             skippedMcpServers,
             ...(instructions ? {instructions} : {}),
             activePermissionProfileId: response.materialized ? response.activePermissionProfileId : defaultPermissionProfileId ?? null,
+            ...(response.resolvedPermissions ? {resolvedPermissions: response.resolvedPermissions} : {}),
             ...permissionProfileMetadata,
         };
     }
@@ -910,6 +919,10 @@ export class CodexAcpClient {
             skippedMcpServers,
             ...(instructions ? {instructions} : {}),
             activePermissionProfileId: response.activePermissionProfile?.id ?? null,
+            resolvedPermissions: {
+                approvalPolicy: response.approvalPolicy ?? null,
+                sandboxPolicy: response.sandbox ?? null,
+            },
             ...permissionProfileMetadata,
         };
     }

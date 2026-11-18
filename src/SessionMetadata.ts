@@ -8,6 +8,7 @@ import type {
     ThreadItemEntry,
     ThreadStatus,
 } from "./app-server/v2";
+import type {ResolvedPermissions} from "./AgentMode";
 import type {SessionInstructions} from "./ClientSystemPrompt";
 
 export type SessionMetadata = {
@@ -23,6 +24,8 @@ export type SessionMetadata = {
     instructions?: SessionInstructions,
     sessionTitle?: string | null,
     activePermissionProfileId?: string | null,
+    /** The permissions Codex resolved for the thread; absent when its response reported none. */
+    resolvedPermissions?: ResolvedPermissions,
     approvalPolicy?: AskForApproval,
     approvalsReviewer?: ApprovalsReviewer,
     permissionProfiles?: PermissionProfileSummary[],

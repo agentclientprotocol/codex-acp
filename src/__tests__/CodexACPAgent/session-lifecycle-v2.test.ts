@@ -7,7 +7,7 @@ import {CodexAcpServer, type SessionFailure} from '../../CodexAcpServer';
 import {CodexAcpClient} from '../../CodexAcpClient';
 import {CodexAppServerClient} from '../../CodexAppServerClient';
 import type {PermissionProfileSummary, SkillsListParams, SkillsListResponse, Thread} from '../../app-server/v2';
-import {MODE_CONFIG_ID} from '../../AgentMode';
+import {AgentMode, MODE_CONFIG_ID} from '../../AgentMode';
 import {FAST_MODE_CONFIG_ID} from '../../FastModeConfig';
 import {createTestModel} from '../acp-test-utils';
 import {createMockConnections} from './test-utils';
@@ -117,6 +117,12 @@ async function connectV2Client(options?: {
     activePermissionProfileId?: string;
     defaultPermissionProfileId?: string;
     serviceTier?: string | null;
+    /** The permissions the mocked thread responses report as resolved. */
+    threadPermissions?: {
+        approvalPolicy: string;
+        approvalsReviewer: string;
+        sandbox: Record<string, unknown>;
+    };
 }) {
     const mocks = createMockConnections();
     const codexRequests: Array<{method: string, params: unknown}> = [];
@@ -148,6 +154,9 @@ async function connectV2Client(options?: {
         }
         if (options?.activePermissionProfileId && ["thread/start", "thread/resume", "thread/fork"].includes(method)) {
             return {...response, activePermissionProfile: {id: options.activePermissionProfileId, extends: null}};
+        }
+        if (options?.threadPermissions && ["thread/start", "thread/resume", "thread/fork"].includes(method)) {
+            return {...response, ...options.threadPermissions};
         }
         return response;
     });
@@ -251,6 +260,29 @@ describe('Session lifecycle over ACP v2', () => {
 
         expect(response.configOptions?.find(option => option.configId === MODE_CONFIG_ID))
             .toMatchObject({type: "select", currentValue: "permission-profile:team-default"});
+    });
+
+    it.each([
+        {operation: "new", replayFrom: undefined},
+        {operation: "resume", replayFrom: null},
+        {operation: "resume", replayFrom: {type: "start"}},
+        {operation: "fork", replayFrom: undefined},
+    ] as const)('starts over v2 $operation in the mode of the permissions Codex resolved', async ({operation, replayFrom}) => {
+        const {connection} = await connectV2Client({
+            threadPermissions: {
+                approvalPolicy: "never",
+                approvalsReviewer: "user",
+                sandbox: {type: "dangerFullAccess"},
+            },
+        });
+        closeClient = () => connection.close();
+
+        const response = await connection.agent.request(acpV2.methods.agent.session[operation], {
+            sessionId, cwd, ...(replayFrom === undefined ? {} : {replayFrom}),
+        });
+
+        expect(response.configOptions?.find(option => option.configId === MODE_CONFIG_ID))
+            .toMatchObject({type: "select", currentValue: AgentMode.AgentFullAccess.id});
     });
 
     describe.each([

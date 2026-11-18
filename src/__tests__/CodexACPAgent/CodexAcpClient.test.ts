@@ -693,6 +693,53 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(codexAcpAgent.getSessionState("thread-id").agentMode).toMatchObject(expected);
     });
 
+    function createResolvedPermissionsFixture() {
+        vi.stubEnv("INITIAL_AGENT_MODE", undefined);
+        const mockFixture = createCodexMockTestFixture();
+        const codexAcpClient = mockFixture.getCodexAcpClient();
+        const codexAcpAgent = mockFixture.getCodexAcpAgent();
+        const codexAppServerClient = mockFixture.getCodexAppServerClient();
+
+        vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
+        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
+        vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({config: {}} as any);
+        vi.spyOn(codexAppServerClient, "listPermissionProfiles").mockResolvedValue({data: [], nextCursor: null});
+        const threadResponse = {
+            thread: {id: "thread-id", turns: [], status: {type: "idle"}},
+            model: "gpt-5",
+            modelProvider: "openai",
+            reasoningEffort: "medium",
+            serviceTier: null,
+            activePermissionProfile: null,
+            approvalPolicy: "never",
+            approvalsReviewer: "user",
+            sandbox: {type: "dangerFullAccess"},
+            collaborationMode: null,
+            itemsBackwardsCursor: null,
+        };
+        vi.spyOn(codexAppServerClient, "threadStart").mockResolvedValue(threadResponse as any);
+        vi.spyOn(codexAppServerClient, "threadResume").mockResolvedValue(threadResponse as any);
+        vi.spyOn(codexAppServerClient, "threadFork").mockResolvedValue(threadResponse as any);
+        vi.spyOn(codexAppServerClient, "threadReadWithHistory").mockResolvedValue({thread: threadResponse.thread} as any);
+        vi.spyOn(codexAppServerClient, "listModels").mockResolvedValue({
+            data: [createTestModel({id: "gpt-5"})],
+            nextCursor: null,
+        });
+        return codexAcpAgent;
+    }
+
+    it.each([
+        "newSession", "loadSession", "resumeSession", "forkSession",
+    ] as const)('starts %s in the mode of the permissions Codex resolved', async method => {
+        const codexAcpAgent = createResolvedPermissionsFixture();
+
+        const session = await codexAcpAgent[method]({cwd: "/workspace", mcpServers: [], sessionId: "thread-id"});
+
+        expect(session.modes?.currentModeId).toBe(AgentMode.AgentFullAccess.id);
+        expect(codexAcpAgent.getSessionState("thread-id").agentMode).toBe(AgentMode.AgentFullAccess);
+    });
+
     it('applies ACP additional directories to resumed and loaded sessions explicitly', async () => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpClient = mockFixture.getCodexAcpClient();
