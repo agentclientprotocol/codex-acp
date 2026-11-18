@@ -73,6 +73,7 @@ import {forkSession as runForkSession} from "./SessionFork";
 import type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 import {runAccountLogin} from "./CodexAccountLogin";
 import {throwIfRequestCancelled, withRequestCancellation} from "./RequestCancellation";
+import {isKeyedPromptId} from "./AcpV2Prompt";
 import {
     isMissingRolloutError,
     isThreadNotMaterializedError,
@@ -857,6 +858,30 @@ export class CodexAcpClient {
         return null;
     }
 
+    /** Read IDs from the same history that backs ACP replay, without publishing any of it. */
+    async readRetainedPromptIds(sessionId: string): Promise<Set<string>> {
+        const ids = new Set<string>();
+        const record = (items: ThreadItem[]) => {
+            for (const item of items) {
+                if (item.type === "userMessage" && item.clientId != null && isKeyedPromptId(item.clientId)) {
+                    ids.add(item.clientId);
+                }
+            }
+        };
+        try {
+            const {thread} = await this.codexClient.threadRead({threadId: sessionId});
+            if (thread.historyMode === "paginated") {
+                for await (const items of this.codexClient.threadItemPages(sessionId)) record(items);
+            } else {
+                const {thread: stored} = await this.codexClient.threadRead({threadId: sessionId, includeTurns: true});
+                for (const turn of stored.turns) record(turn.items);
+            }
+        } catch (error) {
+            if (!isThreadNotMaterializedError(error)) throw error;
+        }
+        return ids;
+    }
+
     /** Lazy history reads let the caller restore verified live delivery before reading snapshots. */
     async readSubagentHistory(threadId: string): Promise<{thread: Thread; items: AsyncIterable<RecordedSubagentEntry[]>}> {
         const {thread} = await this.codexClient.threadRead({threadId});
@@ -904,6 +929,7 @@ export class CodexAcpClient {
             currentModelId: currentModelId,
             models: codexModels,
             collaborationMode: this.getCollaborationMode(response.thread.id),
+            ...(response.thread.status?.type === "active" ? {threadStatus: response.thread.status} : {}),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier ?? null,
             additionalDirectories,

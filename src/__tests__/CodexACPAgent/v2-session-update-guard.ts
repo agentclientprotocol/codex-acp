@@ -52,6 +52,9 @@ export function v2SessionUpdateViolation(update: acpV2.SessionUpdate): string | 
         for (const content of (update as acpV2.ToolCallUpdate).content ?? []) {
             if (content.type !== "diff") continue;
             const diff = content as acpV2.Diff;
+            if (diff.changes.length === 0) {
+                return `'${tag}' diff has no changes`;
+            }
             if (diff._meta != null && DIFF_GIT_PATCH_META_KEY in diff._meta) {
                 return `'${tag}' diff carries the private '${DIFF_GIT_PATCH_META_KEY}' _meta key`;
             }

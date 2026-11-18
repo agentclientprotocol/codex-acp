@@ -141,9 +141,16 @@ describe('elicitation/create over ACP v2', () => {
         const {finishTurn} = await startRunningPrompt(client);
         const response = await client.triggerApproval("mcpServer/elicitation/request", {
             threadId: sessionId, turnId, serverName: "forms", mode: "form", _meta: null, message: "Choose",
-            requestedSchema: {type: "object", properties: {value: {type: "_custom"}, answer: {type: "string"}}},
+            requestedSchema: {type: "object", properties: {
+                value: {type: "_custom"}, answer: {type: "string", pattern: "^[A-Z]", minLength: 1},
+            }},
         });
         expect(response).toEqual({action: "accept", content, _meta: null});
+        const frame = client.wireMessages.find(message => "method" in message && message.method === "elicitation/create");
+        expect(frame).toMatchObject({params: {requestedSchema: {properties: {
+            answer: {type: "string", minLength: 1}, value: {type: "_custom"},
+        }}}});
+        expect(JSON.stringify(frame)).not.toContain("\"pattern\"");
         await finishTurn();
     });
 
@@ -262,9 +269,10 @@ describe('elicitation/create over ACP v2', () => {
         await client.cancel();
         await vi.waitFor(() => expect(capturedSignal!.aborted).toBe(true));
 
-        // A conforming client answers `cancel` once it has seen `session/cancel`.
-        elicitation.resolve({action: "cancel"});
+        // The agent cancels the wire request and stops waiting even before the client answers.
         expect(await elicitationPromise).toEqual({action: "cancel", content: null, _meta: null});
+        expect(client.wireMessages.some(frame => "method" in frame && frame.method === "$/cancel_request")).toBe(true);
+        elicitation.resolve({action: "accept"});
 
         client.emit(itemCompleted(userMessageItem(clientUserMessageId)));
         client.emit(turnFinished("interrupted"));

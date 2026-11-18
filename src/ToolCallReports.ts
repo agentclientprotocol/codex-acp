@@ -31,6 +31,8 @@ export class ToolCallReports {
     private readonly openToolCalls = new Map<string, Map<string, Snapshot>>();
     private readonly finishedToolCalls = new Map<string, Map<string, Snapshot>>();
 
+    constructor(private readonly enforceV2Status = false) {}
+
     /**
      * Also drop the unchanged `_meta` keys. The adapter sets it for AIR in `initialize`.
      * Every other client gets the whole `_meta` of each report, as before the tool call contract.
@@ -47,11 +49,12 @@ export class ToolCallReports {
      * Returns the update to send, without the fields that did not change.
      * Returns `null` when nothing is left to send.
      */
-    prepare(sessionId: string, update: UpdateSessionEvent): UpdateSessionEvent | null {
+    prepare(sessionId: string, update: UpdateSessionEvent, replay = false): UpdateSessionEvent | null {
         if (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") {
             return update;
         }
         const key = `${sessionId}\u0000${update.toolCallId}`;
+        if (!replay) update = this.withLiveStatus(sessionId, update);
         this.trackUnfinished(sessionId, update);
         const prepared = update.sessionUpdate === "tool_call"
             ? this.recordStart(key, update)
@@ -60,6 +63,23 @@ export class ToolCallReports {
             this.finish(key);
         }
         return prepared;
+    }
+
+    /** v2 uses the same status rules for updates and for permission requests' tool-call subjects. */
+    withLiveStatus(sessionId: string, update: ToolCallReport): ToolCallReport {
+        if (!this.enforceV2Status) return update;
+        const key = `${sessionId}\u0000${update.toolCallId}`;
+        const final = this.finishedToolCalls.get(key);
+        if (final && update.status === final.get("status")) {
+            // A duplicate final report can still carry output, but is not a new tool call.
+            return {...update, sessionUpdate: "tool_call_update"};
+        }
+        const previous = this.openToolCalls.get(key)?.get("status");
+        if (!final && !(previous != null && previous !== "pending" && (update.status === "pending" || update.status === null))) {
+            return update;
+        }
+        const {status: _status, ...fields} = update;
+        return {...fields, sessionUpdate: "tool_call_update"};
     }
 
     /**

@@ -122,6 +122,8 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
         }
         case "subagent_update":
             return update;
+        case "cursor_update":
+            throw acp.RequestError.internalError(undefined, "Session cursors are not supported");
         // AIR's private contract is selected independently upstream.
         case "subagent_spawned": {
             const {subagentSessionId, name, task, _meta} = update;

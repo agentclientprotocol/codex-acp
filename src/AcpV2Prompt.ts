@@ -4,6 +4,66 @@ import type {ServerNotification} from "./app-server";
 import {CODEX_PROCESS_EXITED_ERROR_CODE} from "./app-server-recovery/AppServerExit";
 import {readableServiceErrorMessage} from "./ServiceErrorMessage";
 import {ResponseError} from "vscode-jsonrpc";
+import {createHash} from "node:crypto";
+
+// Keep the derivation stable: changing it would make stored receipts look unused.
+const KEYED_PROMPT_ID_PREFIX = "acp-prompt-v1:";
+
+/** Codex stores this ID alongside the user message. Neither replay nor logs need the raw key. */
+export function keyedPromptId(sessionId: string, key: acpV2.IdempotencyKey): string {
+    return KEYED_PROMPT_ID_PREFIX + createHash("sha256").update(JSON.stringify([sessionId, key])).digest("hex");
+}
+
+export function isKeyedPromptId(id: string): boolean {
+    return id.startsWith(KEYED_PROMPT_ID_PREFIX);
+}
+
+/** Lives for one active session, including re-resumes on the same connection. */
+export class AcpV2PromptKeys {
+    private readonly inserted = new Set<string>();
+    private readonly pending = new Map<string, {
+        controller: AbortController;
+        response: Promise<acpV2.PromptResponse>;
+    }>();
+    private historyRead: Promise<void> | null = null;
+
+    async hasRetainedMessage(messageId: string, read: () => Promise<Set<string>>): Promise<boolean> {
+        this.historyRead ??= read().then(ids => {
+            for (const id of ids) this.inserted.add(id);
+        }, error => {
+            // A failed read isn't evidence that the prompt was never inserted.
+            this.historyRead = null;
+            throw error;
+        });
+        await this.historyRead;
+        return this.inserted.has(messageId);
+    }
+
+    submit(
+        messageId: string,
+        signal: AbortSignal | undefined,
+        insert: (signal: AbortSignal) => Promise<acpV2.PromptResponse>,
+    ): Promise<acpV2.PromptResponse> {
+        if (this.inserted.has(messageId)) return Promise.resolve({messageId});
+        let entry = this.pending.get(messageId);
+        if (!entry) {
+            const controller = new AbortController();
+            if (signal?.aborted) controller.abort();
+            const response = insert(controller.signal).then(result => {
+                this.inserted.add(messageId);
+                return result;
+            }).finally(() => this.pending.delete(messageId));
+            entry = {controller, response};
+            this.pending.set(messageId, entry);
+        }
+        if (!signal) return entry.response;
+        const {controller, response} = entry;
+        if (signal.aborted) controller.abort();
+        const withdraw = () => controller.abort();
+        signal.addEventListener("abort", withdraw, {once: true});
+        return response.finally(() => signal.removeEventListener("abort", withdraw));
+    }
+}
 
 /**
  * Lets a prompt report when Codex records its user message. On v2 that moment, not the turn
@@ -69,7 +129,8 @@ export function assertPromptContentSupported(params: {prompt: Array<{type: strin
  */
 export function toV1PromptRequest(params: acpV2.PromptRequest): acp.PromptRequest {
     assertPromptContentSupported(params);
-    return params as acp.PromptRequest;
+    const {idempotencyKey: _key, ...request} = params;
+    return request as acp.PromptRequest;
 }
 
 /**

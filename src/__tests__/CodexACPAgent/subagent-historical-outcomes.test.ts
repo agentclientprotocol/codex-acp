@@ -80,7 +80,7 @@ describe.each([1, 2] as const)("ACP v%s historical child outcomes", version => {
             || entry.update.sessionUpdate === "subagent_update")).toEqual([]);
         expect(h.turnInterruptCalls()).toEqual([]);
         await expect(h.request("session/set_config_option", {sessionId: childId, configId: "model", value: "anything",
-            ...(version === 2 ? {type: "id"} : {})})).rejects.toMatchObject({code: -32600});
+            ...(version === 2 ? {type: "id"} : {})})).rejects.toMatchObject({code: -32602});
         const final = status !== "missing" && status !== "inProgress";
         expect(states()).toHaveLength(final ? 1 : 0);
         if (final) {
@@ -93,6 +93,15 @@ describe.each([1, 2] as const)("ACP v%s historical child outcomes", version => {
                 && (frame.params as {update: {state?: {state: string}}}).update.state?.state === "idle");
             expect(outcome).toBeGreaterThanOrEqual(0);
             expect(response).toBeGreaterThan(outcome);
+            if (version === 2) {
+                const parentBoundary = frames.findIndex(frame => {
+                    if (!("method" in frame) || frame.method !== "session/update") return false;
+                    const params = frame.params as {sessionId: string; update: {sessionUpdate: string}};
+                    return params.sessionId === sessionId && params.update.sessionUpdate === "replay_complete";
+                });
+                expect(parentBoundary).toBeGreaterThan(outcome);
+                expect(stateUpdates().every(entry => entry.update.sessionUpdate === "subagent_update")).toBe(true);
+            }
         }
         expect(JSON.stringify(h.scopedUpdates)).not.toContain("Private backend diagnostic");
         if (paginated) {
