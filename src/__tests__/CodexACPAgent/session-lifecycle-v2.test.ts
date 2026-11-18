@@ -648,7 +648,7 @@ describe('Session lifecycle over ACP v2', () => {
         await connection.agent.request(acpV2.methods.agent.session.resume, {sessionId, cwd, replayFrom: {type: "start"}});
         expect(updates[0]?.update).toEqual({sessionUpdate: "replay_complete"});
         expect(updates.filter(({update}) => update.sessionUpdate === "replay_complete")).toHaveLength(1);
-        expect(updates.at(-1)?.update).toEqual({sessionUpdate: "state_update", state: "idle"});
+        expect(updates.at(-1)?.update).toEqual({sessionUpdate: "state_update", state: "idle", background: []});
     });
 
     it('does not activate an inactive session at replay_complete', async () => {
