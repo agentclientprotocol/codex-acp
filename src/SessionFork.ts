@@ -71,6 +71,8 @@ export async function forkSession(
         additionalDirectories,
         skippedMcpServers,
         activePermissionProfileId: response.activePermissionProfile?.id ?? null,
+        ...(response.sandbox && response.approvalPolicy && response.approvalsReviewer
+            ? {resolvedPermissions: {sandbox: response.sandbox, approvalPolicy: response.approvalPolicy, approvalsReviewer: response.approvalsReviewer}} : {}),
         ...permissionProfileMetadata,
         ...(instructions ? {instructions} : {}),
     };

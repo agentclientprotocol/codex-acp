@@ -109,6 +109,7 @@ type ResumedThread = {
     reasoningEffort: ReasoningEffort | null;
     serviceTier: string | null;
     activePermissionProfileId: string | null;
+    resolvedPermissions?: SessionMetadata["resolvedPermissions"];
     itemsBackwardsCursor: string | null;
     materialized: boolean;
     /** The mode that the resume response reports. Null when the thread has no rollout yet. */
@@ -672,6 +673,8 @@ export class CodexAcpClient {
                 reasoningEffort: response.reasoningEffort,
                 serviceTier: response.serviceTier,
                 activePermissionProfileId: response.activePermissionProfile?.id ?? null,
+                ...(response.sandbox && response.approvalPolicy && response.approvalsReviewer
+                    ? {resolvedPermissions: {sandbox: response.sandbox, approvalPolicy: response.approvalPolicy, approvalsReviewer: response.approvalsReviewer}} : {}),
                 itemsBackwardsCursor: response.itemsBackwardsCursor ?? null,
                 materialized: true,
                 collaborationMode: response.collaborationMode?.mode ?? null,
@@ -742,6 +745,8 @@ export class CodexAcpClient {
             skippedMcpServers,
             ...(instructions ? {instructions} : {}),
             activePermissionProfileId: response.materialized ? response.activePermissionProfileId : defaultPermissionProfileId ?? null,
+            ...(response.resolvedPermissions ? {resolvedPermissions: response.resolvedPermissions} : {}),
+            unmaterialized: !response.materialized,
             ...permissionProfileMetadata,
         }
     }
@@ -827,6 +832,8 @@ export class CodexAcpClient {
             skippedMcpServers,
             ...(instructions ? {instructions} : {}),
             activePermissionProfileId: response.materialized ? response.activePermissionProfileId : defaultPermissionProfileId ?? null,
+            ...(response.resolvedPermissions ? {resolvedPermissions: response.resolvedPermissions} : {}),
+            unmaterialized: !response.materialized,
             ...permissionProfileMetadata,
         };
     }
@@ -910,6 +917,8 @@ export class CodexAcpClient {
             skippedMcpServers,
             ...(instructions ? {instructions} : {}),
             activePermissionProfileId: response.activePermissionProfile?.id ?? null,
+            ...(response.sandbox && response.approvalPolicy && response.approvalsReviewer
+                ? {resolvedPermissions: {sandbox: response.sandbox, approvalPolicy: response.approvalPolicy, approvalsReviewer: response.approvalsReviewer}} : {}),
             ...permissionProfileMetadata,
         };
     }

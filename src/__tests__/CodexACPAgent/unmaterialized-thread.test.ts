@@ -1,4 +1,4 @@
-import {describe, expect, it, vi} from "vitest";
+import {afterEach, describe, expect, it, vi} from "vitest";
 import {createCodexMockTestFixture, createTestModel} from "../acp-test-utils";
 import type {Thread} from "../../app-server/v2";
 
@@ -57,6 +57,53 @@ function createFixture() {
 }
 
 describe("sessions Codex has not materialized on disk", () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it.each(["loadSession", "resumeSession"] as const)(
+        "retains resolved permissions through %s before the first prompt", async method => {
+            vi.stubEnv("INITIAL_AGENT_MODE", undefined);
+            const {fixture, appServer} = createFixture();
+            appServer.threadStart = vi.fn().mockResolvedValue({
+                thread: createLiveThread(), model: "model-id", modelProvider: "openai",
+                reasoningEffort: "medium", serviceTier: null,
+                sandbox: {type: "readOnly", networkAccess: true},
+                approvalPolicy: "never", approvalsReviewer: "user",
+            });
+            appServer.threadResume = vi.fn().mockRejectedValue(NO_ROLLOUT(threadId));
+            appServer.threadRead = vi.fn().mockResolvedValue({thread: createLiveThread()});
+            const turn = {id: "first-turn", items: [], status: "completed", error: null};
+            const turnStart = vi.spyOn(appServer, "turnStart").mockResolvedValue({turn} as any);
+            appServer.awaitTurnCompleted = vi.fn().mockResolvedValue({threadId, turn});
+            const agent = fixture.getCodexAcpAgent();
+
+            const initial = await agent.newSession({cwd: "/test/cwd", mcpServers: []});
+            const reopened = await agent[method]({sessionId: threadId, cwd: "/test/cwd", mcpServers: []});
+            expect(initial.modes?.currentModeId).toBe("configured");
+            expect(reopened.modes?.currentModeId).toBe("configured");
+            await agent.prompt({sessionId: threadId, prompt: [{type: "text", text: "Hello"}]});
+            expect(turnStart.mock.calls[0]![0]).toMatchObject({
+                sandboxPolicy: {type: "readOnly", networkAccess: true},
+                approvalPolicy: "never", approvalsReviewer: "user",
+            });
+        },
+    );
+
+    it("keeps a mode selected by the client before the first prompt", async () => {
+        vi.stubEnv("INITIAL_AGENT_MODE", undefined);
+        const {fixture, appServer} = createFixture();
+        appServer.threadStart = vi.fn().mockResolvedValue({
+            thread: createLiveThread(), model: "model-id", modelProvider: "openai",
+            reasoningEffort: "medium", serviceTier: null,
+            sandbox: {type: "dangerFullAccess"}, approvalPolicy: "never", approvalsReviewer: "user",
+        });
+        appServer.threadResume = vi.fn().mockRejectedValue(NO_ROLLOUT(threadId));
+        appServer.threadRead = vi.fn().mockResolvedValue({thread: createLiveThread()});
+        const agent = fixture.getCodexAcpAgent();
+        await agent.newSession({cwd: "/test/cwd", mcpServers: []});
+        await agent.setSessionMode({sessionId: threadId, modeId: "read-only"});
+        const resumed = await agent.resumeSession({sessionId: threadId, cwd: "/test/cwd", mcpServers: []});
+        expect(resumed.modes?.currentModeId).toBe("read-only");
+    });
     it.each(["loadSession", "resumeSession"] as const)(
         "preserves the default profile through %s before the first prompt", async method => {
             const {fixture, appServer} = createFixture();

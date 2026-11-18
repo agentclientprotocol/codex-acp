@@ -6,6 +6,7 @@ import type {
     SandboxPolicy,
 } from "./app-server/v2";
 import type {SessionConfigOption, SessionMode, SessionModeState} from "@agentclientprotocol/sdk/unstable";
+import {isDeepStrictEqual} from "node:util";
 import {AIR_KIND_KEY, airOnlyMeta} from "./AirExtension";
 
 export const MODE_CONFIG_ID = "mode";
@@ -162,6 +163,7 @@ export class AgentMode {
         permissionProfiles: PermissionProfileSummary[] = [],
         permissionProfileApprovalPolicy: AskForApproval = "on-request",
         permissionProfileApprovalsReviewer: ApprovalsReviewer = "user",
+        resolvedPermissions?: {sandbox: SandboxPolicy, approvalPolicy: AskForApproval, approvalsReviewer: ApprovalsReviewer},
     ): AgentMode[] {
         const profileModes = permissionProfiles
             .filter(profile => profile.allowed && !profile.id.startsWith(":"))
@@ -176,13 +178,23 @@ export class AgentMode {
                 null,
                 profile.id,
             ));
-        return [
+        const modes = [
             AgentMode.ReadOnly,
             AgentMode.WorkspaceWrite,
             AgentMode.Agent,
             AgentMode.AgentFullAccess,
             ...profileModes,
         ];
+        if (resolvedPermissions && !AgentMode.matchResolved(modes, resolvedPermissions)) {
+            modes.push(new AgentMode("configured", "Configured", "Use the permissions resolved by Codex for this session.", null,
+                resolvedPermissions.approvalPolicy, resolvedPermissions.approvalsReviewer, resolvedPermissions.sandbox, null));
+        }
+        return modes;
+    }
+
+    private static matchResolved(modes: AgentMode[], resolved: {sandbox: SandboxPolicy, approvalPolicy: AskForApproval, approvalsReviewer: ApprovalsReviewer}): AgentMode | null {
+        return modes.find(mode => mode.permissionProfileId === null && mode.approvalPolicy === resolved.approvalPolicy
+            && mode.approvalsReviewer === resolved.approvalsReviewer && isDeepStrictEqual(mode.sandboxPolicy, resolved.sandbox)) ?? null;
     }
 
     static find(modeId: string, availableModes: AgentMode[] = AgentMode.all()): AgentMode | null {
@@ -193,6 +205,7 @@ export class AgentMode {
     static getInitialAgentMode(
         availableModes: AgentMode[] = AgentMode.all(),
         activePermissionProfileId: string | null = null,
+        resolvedPermissions?: {sandbox: SandboxPolicy, approvalPolicy: AskForApproval, approvalsReviewer: ApprovalsReviewer},
     ): AgentMode {
         const predefinedAgentMode = process.env["INITIAL_AGENT_MODE"];
         if (predefinedAgentMode) {
@@ -204,6 +217,6 @@ export class AgentMode {
                 return profileMode;
             }
         }
-        return AgentMode.DEFAULT_AGENT_MODE;
+        return (resolvedPermissions && AgentMode.matchResolved(availableModes, resolvedPermissions)) ?? AgentMode.DEFAULT_AGENT_MODE;
     }
 }
