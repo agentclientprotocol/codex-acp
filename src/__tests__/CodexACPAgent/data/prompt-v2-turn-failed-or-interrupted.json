@@ -34,6 +34,7 @@
       },
       {
         "sessionUpdate": {
+          "background": [],
           "state": "running",
           "sessionUpdate": "state_update"
         }
@@ -75,6 +76,7 @@
             "message": "Codex turn failed."
           },
           "stopReason": "error",
+          "background": [],
           "_meta": {
             "quota": {
               "token_count": null,
@@ -122,6 +124,7 @@
       },
       {
         "sessionUpdate": {
+          "background": [],
           "state": "running",
           "sessionUpdate": "state_update"
         }
@@ -153,6 +156,7 @@
       {
         "sessionUpdate": {
           "stopReason": "cancelled",
+          "background": [],
           "_meta": {
             "quota": {
               "token_count": null,

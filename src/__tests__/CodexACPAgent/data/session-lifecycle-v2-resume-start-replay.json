@@ -340,6 +340,7 @@
     {
       "sessionId": "thread-1",
       "update": {
+        "background": [],
         "state": "idle",
         "sessionUpdate": "state_update"
       }

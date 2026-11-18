@@ -3,6 +3,7 @@
     "sessionId": "thread-1:subagent:worker",
     "update": {
       "stopReason": "cancelled",
+      "background": [],
       "state": "idle",
       "sessionUpdate": "state_update"
     }

@@ -1,28 +1,36 @@
 [
   {
-    "state": "requires_action"
+    "state": "requires_action",
+    "background": []
   },
   {
-    "state": "requires_action"
-  },
-  {
-    "state": "idle",
-    "stopReason": "cancelled"
-  },
-  {
-    "state": "running"
-  },
-  {
-    "state": "requires_action"
-  },
-  {
-    "state": "requires_action"
-  },
-  {
-    "state": "requires_action"
+    "state": "requires_action",
+    "background": []
   },
   {
     "state": "idle",
-    "stopReason": "end_turn"
+    "stopReason": "cancelled",
+    "background": []
+  },
+  {
+    "state": "running",
+    "background": []
+  },
+  {
+    "state": "requires_action",
+    "background": []
+  },
+  {
+    "state": "requires_action",
+    "background": []
+  },
+  {
+    "state": "requires_action",
+    "background": []
+  },
+  {
+    "state": "idle",
+    "stopReason": "end_turn",
+    "background": []
   }
 ]

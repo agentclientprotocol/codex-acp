@@ -41,6 +41,7 @@
   {
     "sessionId": "thread-1:subagent:worker",
     "update": {
+      "background": [],
       "state": "running",
       "sessionUpdate": "state_update"
     }

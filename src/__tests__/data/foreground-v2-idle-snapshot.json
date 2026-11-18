@@ -1,6 +1,7 @@
 [
   {
-    "state": "running"
+    "state": "running",
+    "background": []
   },
   {
     "state": "idle",
@@ -14,12 +15,15 @@
       "quota": {
         "total": 3
       }
-    }
+    },
+    "background": []
   },
   {
-    "state": "idle"
+    "state": "idle",
+    "background": []
   },
   {
-    "state": "idle"
+    "state": "idle",
+    "background": []
   }
 ]
