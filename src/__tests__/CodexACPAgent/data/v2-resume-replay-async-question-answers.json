@@ -2,12 +2,37 @@
   {
     "sessionId": "thread-1",
     "update": {
-      "messageId": "answer",
-      "content": {
-        "text": "> Which environment?\n\nStaging\n\nbut only for now",
-        "type": "text"
+      "toolCallId": "async-question-reply:answer",
+      "name": "request_user_input_async",
+      "title": "Answered questions",
+      "kind": "other",
+      "status": "completed",
+      "content": [
+        {
+          "content": {
+            "text": "> Which environment?\n\nStaging\n\nbut only for now",
+            "type": "text"
+          },
+          "type": "content"
+        }
+      ],
+      "rawInput": {
+        "questions": [
+          {
+            "questionItemId": "[\"request_user_input_async\",\"call-question\",0]",
+            "question": "Which environment?"
+          }
+        ]
       },
-      "sessionUpdate": "user_message_chunk"
+      "rawOutput": [
+        {
+          "questionItemId": "[\"request_user_input_async\",\"call-question\",0]",
+          "question": "Which environment?",
+          "answer": "Staging\n\nbut only for now"
+        }
+      ],
+      "_meta": null,
+      "sessionUpdate": "tool_call_update"
     }
   },
   {

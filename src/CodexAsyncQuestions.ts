@@ -7,8 +7,9 @@
  *     [{"answer":"Staging","question":"Which environment?","questionItemId":"[\"request_user_input_async\",\"call_1\",0]"}]
  *     </send_user_message_question_reply>
  *
- * The adapter keeps the form open until the user answers or the session closes. The answer steers the running
- * turn, or starts a new turn when the session is idle. On replay, the reply envelope shows the questions and answers.
+ * The adapter keeps the form open until the user answers or the session closes.
+ * The answer steers the current turn or starts a new turn.
+ * V2 replay shows the questions and answers in a completed tool call.
  *
  * The envelope follows Codex's `codex-rs/context-fragments/src/answered_question.rs`, and its parsing follows
  * `codex-rs/tui/src/async_question_reply.rs`.
@@ -21,6 +22,7 @@ import {buildUserInputSchema, userInputAnswers, userInputAnswerText} from "./Cod
 import type {CodexAcpServer} from "./CodexAcpServer";
 import {clientSupportsFormElicitation} from "./ElicitationCapabilities";
 import {logger} from "./Logger";
+import type {ToolFacts} from "./tool-calls/ToolFacts";
 import {clientSupportsNotices, createSessionNotice} from "./SessionNotice";
 
 const TOOL_NAME = "request_user_input_async";
@@ -74,6 +76,26 @@ export function parseAsyncQuestionReply(text: string): AsyncQuestionReply[] | nu
 export function renderAsyncQuestionReply(text: string): string | null {
     const replies = parseAsyncQuestionReply(text);
     return replies === null ? null : displayReplies(replies);
+}
+
+/** Restores an answer as a completed interaction. Other user input keeps its original representation. */
+export function asyncQuestionReplyHistory(item: ThreadItem & {type: "userMessage"}): ToolFacts | null {
+    if (item.content.length !== 1) return null;
+    const input = item.content[0]!;
+    if (input.type !== "text") return null;
+    const replies = parseAsyncQuestionReply(input.text);
+    if (replies === null) return null;
+    return {
+        toolCallId: `async-question-reply:${item.id}`,
+        report: "start",
+        name: TOOL_NAME,
+        kind: "other",
+        title: "Answered questions",
+        status: "completed",
+        input: {questions: replies.map(({questionItemId, question}) => ({questionItemId, question}))},
+        opaqueResult: replies,
+        result: [{type: "content", content: {type: "text", text: displayReplies(replies)}}],
+    };
 }
 
 function displayReplies(replies: readonly AsyncQuestionReply[]): string {

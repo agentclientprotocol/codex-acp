@@ -172,7 +172,7 @@ import packageJson from "../package.json";
 import {SteerLanding} from "./SteerLanding";
 import {isJetBrains2026_1Client} from "./JBUtils";
 import {clientSupportsNotices, createSessionNotice} from "./SessionNotice";
-import {AsyncQuestionClient, AsyncQuestionElicitations, renderAsyncQuestionReply} from "./CodexAsyncQuestions";
+import {asyncQuestionReplyHistory, AsyncQuestionClient, AsyncQuestionElicitations, renderAsyncQuestionReply} from "./CodexAsyncQuestions";
 import {
     createAgentTextMessageChunk,
     createAgentTextThoughtChunk,
@@ -4404,8 +4404,10 @@ export class CodexAcpServer {
     private async createHistoryUpdates(item: ThreadItem, sessionState: SessionState): Promise<UpdateSessionEvent[]> {
         const renderer = new AcpToolCallRenderer(sessionState.clientCapabilities);
         switch (item.type) {
-            case "userMessage":
-                return this.createUserMessageUpdates(item);
+            case "userMessage": {
+                const answer = this.protocolVersion === 2 ? asyncQuestionReplyHistory(item) : null;
+                return answer === null ? this.createUserMessageUpdates(item) : [renderer.render(answer)];
+            }
             case "hookPrompt":
             case "functionCallOutput":
             case "sleep":
