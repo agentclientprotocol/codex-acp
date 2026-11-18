@@ -1,27 +1,35 @@
 [
   {
-    "state": "running"
+    "state": "running",
+    "background": []
   },
   {
-    "state": "running"
+    "state": "running",
+    "background": []
   },
   {
-    "state": "requires_action"
+    "state": "requires_action",
+    "background": []
   },
   {
-    "state": "requires_action"
+    "state": "requires_action",
+    "background": []
   },
   {
-    "state": "running"
+    "state": "running",
+    "background": []
   },
   {
-    "state": "requires_action"
+    "state": "requires_action",
+    "background": []
   },
   {
-    "state": "running"
+    "state": "running",
+    "background": []
   },
   {
     "state": "idle",
-    "stopReason": "end_turn"
+    "stopReason": "end_turn",
+    "background": []
   }
 ]

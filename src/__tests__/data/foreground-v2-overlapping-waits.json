@@ -1,14 +1,18 @@
 [
   {
-    "state": "running"
+    "state": "running",
+    "background": []
   },
   {
-    "state": "requires_action"
+    "state": "requires_action",
+    "background": []
   },
   {
-    "state": "requires_action"
+    "state": "requires_action",
+    "background": []
   },
   {
-    "state": "requires_action"
+    "state": "requires_action",
+    "background": []
   }
 ]

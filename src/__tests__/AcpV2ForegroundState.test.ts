@@ -30,7 +30,7 @@ describe("ACP v2 aggregate foreground state", () => {
         foreground.dispose();
         gate.resolve();
         await Promise.all([running, queued]);
-        expect(updates).toEqual([{state: "running"}]);
+        expect(updates).toEqual([{state: "running", background: []}]);
     });
 
     it("keeps running while another tool can progress, then tracks which waits still block", async () => {
@@ -130,7 +130,7 @@ describe("ACP v2 aggregate foreground state", () => {
         const controller = new AbortController();
         controller.abort();
         await foreground.withUserAction(undefined, async () => {}, controller.signal);
-        expect(updates).toEqual([{state: "running"}]);
+        expect(updates).toEqual([{state: "running", background: []}]);
     });
 
     it("sends snapshots without replaying completion usage or metadata", async () => {

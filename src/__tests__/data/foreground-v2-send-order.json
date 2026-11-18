@@ -1,12 +1,15 @@
 [
   {
-    "state": "running"
+    "state": "running",
+    "background": []
   },
   {
-    "state": "running"
+    "state": "running",
+    "background": []
   },
   {
     "state": "idle",
-    "stopReason": "cancelled"
+    "stopReason": "cancelled",
+    "background": []
   }
 ]

@@ -24,6 +24,7 @@ export class AcpV2Connection {
     readonly client: AcpV2ClientConnection;
     private isTurnRunning: (sessionId: string) => boolean = () => true;
     private readonly foreground = new Map<string, AcpV2ForegroundState>();
+    private readonly subagentParents = new Map<string, string>();
     private readonly sessionInfo = new Map<string, AcpV2SessionInfo>();
     private sessionDelivery: AcpClientDelivery | null = null;
     private sendElicitationCompletion: (params: unknown) => Promise<void>;
@@ -98,8 +99,28 @@ export class AcpV2Connection {
     }
 
     /** Sends a `state_update`, which only exists on v2 and so needs no rendering. */
-    async updateState(sessionId: string, state: acpV2.StateUpdate): Promise<void> {
-        await this.foregroundFor(sessionId).update(state);
+    async updateState(sessionId: string, state: acpV2.StateUpdate, force = false): Promise<void> {
+        await this.foregroundFor(sessionId).update(state, force);
+    }
+
+    backgroundWork(sessionId: string, key: string, work: acpV2.BackgroundWork | null): Promise<void> {
+        return this.foregroundFor(sessionId).backgroundWork(key, work).then(async () => {
+            const parent = this.subagentParents.get(sessionId);
+            if (parent) await this.backgroundWork(parent, `subagent:${sessionId}`,
+                this.foregroundFor(sessionId).hasWork() ? {type: "subagent", sessionId} : null);
+        });
+    }
+
+    subagentState(child: string, parent: string): Promise<void> {
+        this.subagentParents.set(child, parent);
+        return this.backgroundWork(parent, `subagent:${child}`,
+            this.foregroundFor(child).hasWork() ? {type: "subagent", sessionId: child} : null);
+    }
+
+    async backgroundTerminalExit(sessionId: string, terminalId: string): Promise<void> {
+        if (this.sessionDelivery && !this.sessionDelivery.canPublishSession(sessionId)) return;
+        await this.client.notify(acpV2.methods.client.session.update, {sessionId,
+            update: {sessionUpdate: "terminal_update", terminalId, exitStatus: {exitCode: null, signal: null}}});
     }
 
     startForegroundWork(sessionId: string): Promise<void> {
@@ -141,6 +162,7 @@ export class AcpV2Connection {
     }
 
     forgetSession(sessionId: string): void {
+        this.subagentParents.delete(sessionId);
         this.forgetForegroundState(sessionId);
         this.sessionInfo.get(sessionId)?.dispose();
         this.sessionInfo.delete(sessionId);
@@ -341,9 +363,7 @@ export class ACPSessionConnection {
 
     async updateSubagentState(childSessionId: string, parentSessionId: string, state: acpV2.StateUpdate): Promise<void> {
         if (this.v2Connection) {
-            await this.v2Connection.client.notify(acpV2.methods.client.session.update, {
-                sessionId: childSessionId, update: {sessionUpdate: "state_update", ...state},
-            });
+            await this.v2Connection.updateState(childSessionId, state, true);
         }
         await this.update({sessionUpdate: "subagent_update", sessionId: childSessionId, state}, parentSessionId);
     }
@@ -368,6 +388,20 @@ export class ACPSessionConnection {
             sessionId,
             update: update
         }));
+        if (this.v2Connection && update.sessionUpdate === "subagent_update") {
+            if (update.state !== undefined) {
+                await this.v2Connection.subagentState(update.sessionId, sessionId);
+            }
+        }
+    }
+
+    backgroundTerminal(terminalId: string, running: boolean): Promise<void> {
+        return this.v2Connection?.backgroundWork(this.sessionId, `terminal:${terminalId}`,
+            running ? {type: "terminal", terminalId} : null) ?? Promise.resolve();
+    }
+
+    backgroundTerminalExit(terminalId: string): Promise<void> {
+        return this.v2Connection?.backgroundTerminalExit(this.sessionId, terminalId) ?? Promise.resolve();
     }
 }
 

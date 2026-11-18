@@ -11,6 +11,7 @@
   },
   {
     "sessionUpdate": {
+      "background": [],
       "state": "running",
       "sessionUpdate": "state_update"
     }
@@ -40,6 +41,7 @@
         "message": "/test/cwd is not a git repository"
       },
       "stopReason": "error",
+      "background": [],
       "_meta": {
         "quota": {
           "token_count": null,

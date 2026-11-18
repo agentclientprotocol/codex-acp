@@ -162,7 +162,9 @@ describe.each([1, 2] as const)("ACP v%s historical child outcomes", version => {
             answerPermission();
             await expect(pending).resolves.toEqual({decision: "accept"});
             h.emit(onWorker(turnCompleted("live-turn")));
-            await vi.waitFor(() => expect(states().at(-1)).toEqual({state: "idle", stopReason: "end_turn"}));
+            await vi.waitFor(() => expect(states().at(-1)).toEqual(version === 2
+                ? {state: "idle", stopReason: "end_turn", background: []}
+                : {state: "idle", stopReason: "end_turn"}));
         } finally { answerPermission?.(); }
     });
 

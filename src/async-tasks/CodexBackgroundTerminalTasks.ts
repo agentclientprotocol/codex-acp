@@ -25,6 +25,7 @@ type Task = {
     announcement: Promise<void> | null;
     terminalUpdate: Promise<void> | null;
     terminalPublished: boolean;
+    finalItemSeen: boolean;
     state: "running" | "stopping" | TerminalState;
 };
 
@@ -58,6 +59,7 @@ export class CodexBackgroundTerminalTasks {
         private readonly rootSessionId: string,
         private appServer: CodexAppServerClient,
         private readonly session: ACPSessionConnection,
+        private readonly airEnabled = enabled,
     ) {}
 
     async handleNotification(
@@ -78,9 +80,11 @@ export class CodexBackgroundTerminalTasks {
             return;
         }
         // Codex sends no event when a command moves to the background or its background process exits, so the
-        // adapter lists the background terminals. It does so only while a command of the thread runs. The turn end
-        // does not wait for the list: a background task outlives the turn.
-        if (notification.method === "turn/completed" || (notification.method === "item/started" && this.hasRunningTask(threadId))) {
+        // adapter lists the background terminals. The turn end waits for its list so an idle
+        // snapshot cannot precede a terminal that this turn left running.
+        if (notification.method === "turn/completed") {
+            await this.reconcile(threadId, sessionId);
+        } else if (notification.method === "item/started" && this.hasRunningTask(threadId)) {
             this.refresh(threadId, sessionId);
         }
     }
@@ -105,7 +109,10 @@ export class CodexBackgroundTerminalTasks {
     ): Promise<void> {
         if (!this.isActive()) return;
         const task = this.tasks.get(wireTaskId(this.rootSessionId, threadId, item.id));
-        if (task) await this.finish(task, item.status === "completed" ? "completed" : "failed");
+        if (task) {
+            task.finalItemSeen = true;
+            await this.finish(task, item.status === "completed" ? "completed" : "failed");
+        }
     }
 
     refresh(threadId: string = this.rootSessionId, sessionId: string = this.rootSessionId): void {
@@ -306,7 +313,8 @@ export class CodexBackgroundTerminalTasks {
     }
 
     private async publishSpawn(task: Task): Promise<void> {
-        await this.session.update({
+        if (this.airEnabled) {
+            await this.session.update({
             sessionUpdate: "tool_call_update",
             toolCallId: task.itemId,
             _meta: {
@@ -328,6 +336,8 @@ export class CodexBackgroundTerminalTasks {
             canStop: true,
             toolCallId: task.itemId,
         }, task.sessionId);
+        }
+        await this.session.forSession(task.sessionId).backgroundTerminal(task.itemId, true);
     }
 
     private remember(
@@ -354,6 +364,7 @@ export class CodexBackgroundTerminalTasks {
             announcement: null,
             terminalUpdate: null,
             terminalPublished: false,
+            finalItemSeen: false,
             state: "running",
         };
         this.tasks.set(asyncTaskId, task);
@@ -377,15 +388,19 @@ export class CodexBackgroundTerminalTasks {
             await task.terminalUpdate;
             return;
         }
-        const terminalUpdate = this.session.update({
+        const terminalUpdate = this.airEnabled ? this.session.update({
             sessionUpdate: "async_task_state_update",
             asyncTaskId: task.asyncTaskId,
             state: task.state,
             toolCallId: task.itemId,
-        }, task.sessionId);
+        }, task.sessionId) : Promise.resolve();
         task.terminalUpdate = terminalUpdate;
         try {
             await terminalUpdate;
+            if (!task.finalItemSeen) {
+                await this.session.forSession(task.sessionId).backgroundTerminalExit(task.itemId);
+            }
+            await this.session.forSession(task.sessionId).backgroundTerminal(task.itemId, false);
             task.terminalPublished = true;
             this.forget(task);
         } finally {

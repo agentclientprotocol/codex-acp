@@ -1619,10 +1619,11 @@ export class CodexAcpServer {
 
     private createAsyncTasks(sessionId: string): CodexBackgroundTerminalTasks {
         return new CodexBackgroundTerminalTasks(
-            clientSupportsAirCapability(this.clientCapabilities, AIR_ASYNC_TASKS_KEY),
+            clientSupportsAirCapability(this.clientCapabilities, AIR_ASYNC_TASKS_KEY) || AcpV2Connection.of(this.connection) !== null,
             sessionId,
             this.codexAcpClient.appServerClient,
             new ACPSessionConnection(this.connection, sessionId),
+            clientSupportsAirCapability(this.clientCapabilities, AIR_ASYNC_TASKS_KEY),
         );
     }
 

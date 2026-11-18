@@ -4,6 +4,7 @@
     "message": "Provider unavailable"
   },
   "stopReason": "error",
+  "background": [],
   "_meta": {
     "quota": {
       "token_count": null,

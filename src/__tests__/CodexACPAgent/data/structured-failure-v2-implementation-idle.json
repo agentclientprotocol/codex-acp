@@ -4,6 +4,7 @@
     "message": "Implementation failed"
   },
   "stopReason": "error",
+  "background": [],
   "_meta": {
     "quota": {
       "token_count": null,
