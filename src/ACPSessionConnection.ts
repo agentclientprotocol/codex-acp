@@ -106,8 +106,8 @@ export class AcpV2Connection {
         return this.foregroundFor(sessionId).start();
     }
 
-    snapshotForegroundState(sessionId: string): Promise<void> {
-        return this.foregroundFor(sessionId).snapshot();
+    snapshotForegroundState(sessionId: string, skipIdle = false): Promise<void> {
+        return this.foregroundFor(sessionId).snapshot(skipIdle);
     }
 
     resetSessionInfo(sessionId: string, metadata: Record<string, unknown> | null): void {
@@ -198,7 +198,7 @@ export class AcpV2Connection {
             }
         };
         const params = {sessionId, update};
-        if (this.sessionDelivery) await this.sessionDelivery.withSessionUpdate(params, send);
+        if (this.sessionDelivery) await this.sessionDelivery.withSessionUpdate(params, send, true);
         else await send(params);
     }
 

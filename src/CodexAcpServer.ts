@@ -59,7 +59,9 @@ import {toV1SetSessionConfigOptionRequest, toV2ConfigOptions} from "./AcpV2Confi
 import {toV2AvailableCommands} from "./AcpV2SessionUpdate";
 import {changesSystemPrompt, clientSystemPromptText, toV1SystemPrompt, type SessionInstructions} from "./ClientSystemPrompt";
 import {
+    AcpV2PromptKeys,
     isInsertedUserMessage,
+    keyedPromptId,
     postInsertionFailureText,
     toV1PromptRequest,
     assertPromptContentSupported,
@@ -546,6 +548,7 @@ export class CodexAcpServer {
     private readonly pendingSteerLandings: Map<string, {sessionId: string; prompt: acp.ContentBlock[]}>;
     /** Sessions with a v2 prompt that has not finished yet, including before its turn starts. */
     private readonly v2PromptsInFlight = new Set<string>();
+    private readonly v2PromptKeys = new Map<string, AcpV2PromptKeys>();
     private readonly instructionUpdates = new Set<string>();
     /**
      * Per-session callbacks that abort a v2 `session/prompt` still waiting in the turn-start FIFO
@@ -609,7 +612,7 @@ export class CodexAcpServer {
         if (connection instanceof AcpV2Connection) {
             this.protocolVersion = 2;
             this.v2Connection = connection.client;
-            this.clientDelivery = new AcpClientDelivery(connection.extensionOnlyV1View(), sessionIsClosing);
+            this.clientDelivery = new AcpClientDelivery(connection.extensionOnlyV1View(), sessionIsClosing, 2);
             this.connection = this.clientDelivery.asClientConnection();
             connection.registerView(this.connection);
             connection.setClientDelivery(this.clientDelivery);
@@ -736,7 +739,7 @@ export class CodexAcpServer {
 
     assertSessionMutationAllowed(sessionId: string): void {
         if (this.isRestrictedChild(sessionId)) {
-            throw RequestError.invalidRequest(undefined, "Subagent sessions do not permit client-initiated mutations");
+            throw RequestError.invalidParams(undefined, "Subagent sessions do not permit client-initiated mutations");
         }
     }
 
@@ -769,7 +772,15 @@ export class CodexAcpServer {
     }
 
     captureSessionCreationPublication(sessionId: string): () => void {
-        return this.clientDelivery.captureSessionSetupRelease(sessionId);
+        const release = this.clientDelivery.captureSessionSetupRelease(sessionId);
+        return () => {
+            // A client may drop every update for an unknown session before the response.
+            const v2 = AcpV2Connection.of(this.connection);
+            void v2?.snapshotForegroundState(sessionId, true).catch(error => {
+                logger.error(`Failed to send initial foreground state for session ${sessionId}`, error);
+            });
+            release();
+        };
     }
 
     captureSessionSetupPublication(sessionId: string): () => Promise<void> {
@@ -2016,6 +2027,9 @@ export class CodexAcpServer {
     }
 
     async forkSession(params: WithAcpMcpServers<acp.ForkSessionRequest>): Promise<acp.ForkSessionResponse> {
+        if (params.cursorId != null) {
+            throw RequestError.invalidParams(undefined, "Forking at a session cursor is not supported");
+        }
         clientSystemPromptText(params.systemPrompt);
         this.assertInstructionsReady(params.sessionId);
         return this.sessionIndex.forking(params.sessionId, () => this.createFork(params));
@@ -2138,6 +2152,7 @@ export class CodexAcpServer {
                 this.activePrompts.delete(params.sessionId);
                 this.turnStartQueueTail.delete(params.sessionId);
                 this.queuedV2PromptCancellers.delete(params.sessionId);
+                this.v2PromptKeys.delete(params.sessionId);
                 this.steeringQueues.delete(params.sessionId);
                 if (sessionState) {
                     sessionState.asyncTasks.clear();
@@ -4654,54 +4669,73 @@ export class CodexAcpServer {
      * turn run on in the background. A Codex prompt is inserted when Codex records its user
      * message; a locally handled command has no Codex turn, so it is inserted right away.
      */
-    async promptV2(params: acpV2.PromptRequest, signal?: AbortSignal): Promise<acpV2.PromptResponse> {
-        this.assertInstructionsReady(params.sessionId);
-        const sessionId = params.sessionId;
-        if (this.clientDelivery.sessionSetupReady(sessionId)) {
-            throw new RequestError(-32002, `Session ${sessionId} is not active`, {sessionId});
+    promptV2(params: acpV2.PromptRequest, signal?: AbortSignal): Promise<acpV2.PromptResponse> {
+        try {
+            const {sessionId, idempotencyKey} = params;
+            this.assertInstructionsReady(sessionId);
+            if (this.clientDelivery.sessionSetupReady(sessionId)) {
+                throw new RequestError(-32002, `Session ${sessionId} is not active`, {sessionId});
+            }
+            const request = toV1PromptRequest(params);
+            const sessionState = this.getSessionState(sessionId);
+            if (this.sessionIsClosing(sessionId)) {
+                throw RequestError.invalidRequest(`Session ${sessionId} is closing`);
+            }
+            if (idempotencyKey == null) {
+                return this.insertPromptV2(request, randomUUID(), signal);
+            }
+            const messageId = keyedPromptId(sessionId, idempotencyKey);
+            const keys = this.v2PromptKeys.get(sessionId) ?? new AcpV2PromptKeys();
+            this.v2PromptKeys.set(sessionId, keys);
+            const findRetained = () => keys.hasRetainedMessage(messageId, () => sessionState.threadHasHistory
+                ? this.runWithProcessCheck(() => this.codexAcpClient.readRetainedPromptIds(sessionId))
+                : Promise.resolve(new Set<string>()));
+            return keys.submit(messageId, signal, sharedSignal => this.insertPromptV2(request, messageId, sharedSignal, findRetained));
+        } catch (error) {
+            return Promise.reject(error);
         }
-        const request = toV1PromptRequest(params);
-        const sessionState = this.getSessionState(sessionId);
-        if (this.sessionIsClosing(sessionId)) {
-            throw RequestError.invalidRequest(`Session ${sessionId} is closing`);
-        }
+    }
+
+    private async insertPromptV2(
+        request: acp.PromptRequest,
+        messageId: string,
+        signal?: AbortSignal,
+        findRetained?: () => Promise<boolean>,
+    ): Promise<acpV2.PromptResponse> {
+        throwIfRequestCancelled(signal);
+        const {sessionId} = request;
         // A prompt overlapping a running one is queued behind it rather than rejected: take this
         // session's place in the shared turn-start FIFO now (before any await), then wait. Nothing
-        // observable (response, user message, states) happens until this prompt reaches the front.
+        // observable happens until it reaches the front, unless the ID already exists in history.
         const reservation = this.acquireTurnStartReservation(sessionId);
-        if (reservation.needsWait) {
-            // `session/cancel`/`session/close` drop this prompt while it waits here: race the
-            // FIFO wait against a cancellation signal so the client sees `-32800` right away,
-            // instead of only once the running turn ahead of it actually finishes. A
-            // `$/cancel_request` for this specific request goes through the same canceller, so it
-            // only drops this prompt and leaves the rest of the queue untouched.
-            let cancelled = false;
-            let markCancelled: () => void = () => { cancelled = true; };
-            const cancelSignal = new Promise<void>((resolve) => {
-                markCancelled = () => { cancelled = true; resolve(); };
-            });
-            const unregister = this.registerQueuedV2PromptCanceller(sessionId, markCancelled);
-            const onRequestCancelled = () => markCancelled();
-            if (signal) {
-                if (signal.aborted) {
-                    onRequestCancelled();
-                } else {
-                    signal.addEventListener("abort", onRequestCancelled, {once: true});
+        if (reservation.needsWait || findRetained) {
+            const drop = new AbortController();
+            const waiting = signal ? AbortSignal.any([signal, drop.signal]) : drop.signal;
+            const unregister = this.registerQueuedV2PromptCanceller(sessionId, () => drop.abort());
+            try {
+                if (findRetained && await withRequestCancellation(findRetained(), waiting)) {
+                    // A retry doesn't wait for unrelated work, but its slot can't let a new prompt jump the queue.
+                    void reservation.wait.then(() => reservation.release());
+                    return {messageId};
                 }
-            }
-            await Promise.race([reservation.wait, cancelSignal]);
-            unregister();
-            signal?.removeEventListener("abort", onRequestCancelled);
-            if (cancelled) {
-                // Still release in the FIFO's own order once it is actually this prompt's turn,
-                // so anything queued behind it does not start while the current turn is still
-                // being interrupted.
+                if (reservation.needsWait) await withRequestCancellation(reservation.wait, waiting);
+                throwIfRequestCancelled(waiting);
+            } catch (error) {
                 void reservation.wait.then(() => reservation.release());
-                throw RequestError.requestCancelled(undefined, `Session ${sessionId} was cancelled before the prompt was inserted`);
+                if (waiting.aborted) {
+                    throw RequestError.requestCancelled(undefined, `Session ${sessionId} was cancelled before the prompt was inserted`);
+                }
+                throw error;
+            } finally {
+                unregister();
             }
         }
+        // For keyed prompts we only honor request cancellation while the submission is held.
+        // Once dispatched, Codex can still insert the message (even if interrupted), so answer
+        // all attempts from the actual insertion result rather than prematurely forgetting the key.
+        const inFlightSignal = findRetained === undefined ? signal : undefined;
+        const sessionState = this.getSessionState(sessionId);
         const promptKind = this.availableCommands.classifyPrompt(request.prompt);
-        const messageId = randomUUID();
         const session = new ACPSessionConnection(this.connection, sessionId);
         let failure: acpV2.Error | null = null;
         const generation = this.getSessionGeneration(sessionId);
@@ -4758,11 +4792,11 @@ export class CodexAcpServer {
                 }
                 reject(RequestError.requestCancelled(undefined, "The prompt request was cancelled before it was inserted"));
             };
-            if (signal) {
-                if (signal.aborted) {
+            if (inFlightSignal) {
+                if (inFlightSignal.aborted) {
                     dropPendingRequest();
                 } else {
-                    signal.addEventListener("abort", dropPendingRequest, {once: true});
+                    inFlightSignal.addEventListener("abort", dropPendingRequest, {once: true});
                 }
             }
             const onInserted = async () => {
@@ -4872,7 +4906,7 @@ export class CodexAcpServer {
                     await sendIdle(this.failedPromptResponse(sessionId));
                 },
             ).finally(() => {
-                signal?.removeEventListener("abort", dropPendingRequest);
+                inFlightSignal?.removeEventListener("abort", dropPendingRequest);
                 reservation.release();
                 if (!this.sessions.has(sessionId)) AcpV2Connection.of(this.connection)?.forgetForegroundState(sessionId);
             });

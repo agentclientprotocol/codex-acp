@@ -48,9 +48,9 @@ describe.each([1, 2] as const)("ACP v%s direct child cancellation", version => {
         await connect();
         await start();
         await start("sibling");
-        await expect(h.request("session/close", {sessionId: id("worker")})).rejects.toMatchObject({code: -32600});
+        await expect(h.request("session/close", {sessionId: id("worker")})).rejects.toMatchObject({code: -32602});
         await expect(h.request("session/prompt", {sessionId: id("worker"), prompt: [{type: "text", text: "No"}]}))
-            .rejects.toMatchObject({code: -32600});
+            .rejects.toMatchObject({code: -32602});
         await h.cancel(id("worker"));
         await vi.waitFor(() => expect(h.turnInterruptCalls()).toEqual([{threadId: "worker", turnId: "worker-turn"}]));
         expect(roster().some(update => update.state != null && (update.state as {state: string}).state === "idle")).toBe(false);

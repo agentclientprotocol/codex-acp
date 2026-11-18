@@ -37,10 +37,10 @@ export class AcpV2ForegroundState {
     }
 
     /** Snapshots never repeat completion usage or failure metadata. */
-    snapshot(): Promise<void> {
+    snapshot(skipIdle = false): Promise<void> {
         switch (this.activity) {
             case "idle":
-                return this.publish({state: "idle"});
+                return skipIdle ? this.sending : this.publish({state: "idle"});
             case "running":
                 return this.publish({state: "running"});
             case "requires_action":

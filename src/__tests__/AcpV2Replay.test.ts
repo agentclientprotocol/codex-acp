@@ -19,13 +19,13 @@ describe("V2 replay boundaries", () => {
                 sessionUpdate: "session_message", messageId: "task", content: [{type: "text", text: "Investigate"}],
             }});
             await replay.notify({sessionId: "child", update: {sessionUpdate: "state_update", state: "unknown"}});
-            await replay.notify({sessionId: "root", update: {
-                sessionUpdate: "subagent_update", sessionId: "child", state: {state: "unknown"},
-            }});
             historyReady();
             await gate;
         }));
         await ready;
+        await replay.notify({sessionId: "root", update: {
+            sessionUpdate: "subagent_update", sessionId: "child", state: {state: "unknown"},
+        }});
         await replay.notify({sessionId: "root", update: {sessionUpdate: "notice", title: "Live", severity: "info"}});
         await replay.notify({sessionId: "child", update: {sessionUpdate: "agent_message_chunk",
             messageId: "answer", content: {type: "text", text: "Live child"}}});
@@ -105,7 +105,8 @@ describe("V2 replay initialization", () => {
     it.each(entities)("clears empty $name metadata in the snapshot itself", ({initial}) => {
         for (const meta of [undefined, null, {}]) {
             const updates = toV2ReplayUpdates({...initial, ...(meta === undefined ? {} : {_meta: meta})}, new Set());
-            expect(updates).toEqual([{...initial, _meta: null}]);
+            expect(updates).toEqual([{...initial, _meta: null,
+                ...(initial.sessionUpdate === "compaction_update" ? {summary: []} : {})}]);
             expect(metadataAfter(updates)).toEqual({});
         }
     });
@@ -127,10 +128,40 @@ describe("V2 replay initialization", () => {
         expect(toV2ReplayUpdates(chunk, initialized)).toEqual([chunk]);
     });
 
-    it("does not reset plan, output-chunk or session metadata", () => {
+    const text = {type: "text", text: "Part"} as const;
+    const chunks: Array<{chunk: acp.SessionUpdate; primer: acp.SessionUpdate}> = [
+        {chunk: {sessionUpdate: "session_message_chunk", messageId: "same", content: text},
+            primer: {sessionUpdate: "session_message", messageId: "same", content: []}},
+        {chunk: {sessionUpdate: "tool_call_content_chunk", toolCallId: "same", content: {type: "content", content: text}},
+            primer: {sessionUpdate: "tool_call_update", toolCallId: "same", content: []}},
+        {chunk: {sessionUpdate: "terminal_output_chunk", terminalId: "same", data: "T0s="},
+            primer: {sessionUpdate: "terminal_update", terminalId: "same", output: {data: ""}}},
+        {chunk: {sessionUpdate: "compaction_summary_chunk", compactionId: "same", content: text},
+            primer: {sessionUpdate: "compaction_update", compactionId: "same", status: "in_progress", summary: []}},
+    ];
+    it.each(chunks)("primes $chunk.sessionUpdate once without applying chunk metadata to the entity", ({chunk, primer}) => {
+        const initialized = new Set<string>();
+        const part = {...chunk, _meta: {value: null}};
+        expect(toV2ReplayUpdates(part, initialized)).toEqual([{...primer, _meta: null}, part]);
+        expect(toV2ReplayUpdates(part, initialized)).toEqual([part]);
+        const snapshotted = new Set<string>();
+        toV2ReplayUpdates(primer, snapshotted);
+        expect(toV2ReplayUpdates(part, snapshotted)).toEqual([part]);
+    });
+
+    it("primes a replayed terminal after a header that did not initialize output", () => {
+        const initialized = new Set<string>();
+        const header = {sessionUpdate: "terminal_update", terminalId: "terminal", command: "echo OK"} as const;
+        const chunk = {sessionUpdate: "terminal_output_chunk", terminalId: "terminal", data: "T0s="} as const;
+        expect(toV2ReplayUpdates(header, initialized)).toEqual([{...header, _meta: null}]);
+        expect(toV2ReplayUpdates(chunk, initialized)).toEqual([
+            {sessionUpdate: "terminal_update", terminalId: "terminal", output: {data: ""}}, chunk,
+        ]);
+    });
+
+    it("does not reset plan or session metadata", () => {
         const updates: acp.SessionUpdate[] = [
             {sessionUpdate: "plan_update", plan: {type: "markdown", planId: "plan", content: "Plan"}, _meta: {value: null}},
-            {sessionUpdate: "terminal_output_chunk", terminalId: "terminal", data: "T0s=", _meta: {value: null}},
             {sessionUpdate: "session_info_update", title: "Current", _meta: {value: null}},
         ];
         for (const update of updates) expect(toV2ReplayUpdates(update, new Set())).toEqual([update]);

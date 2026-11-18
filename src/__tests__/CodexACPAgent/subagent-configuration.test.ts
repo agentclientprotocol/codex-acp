@@ -127,7 +127,7 @@ describe.each([1, 2] as const)("ACP v%s child configuration snapshots", version 
         const configuration = h.scopedUpdates.findIndex(entry => entry.sessionId === childId && entry.update.sessionUpdate === "config_option_update");
         expect(configuration).toBeGreaterThan(announcement);
         await expect(h.request("session/set_config_option", {sessionId: childId, configId: "model", value: "child-beta",
-            ...(version === 2 ? {type: "id"} : {})})).rejects.toMatchObject({code: -32600});
+            ...(version === 2 ? {type: "id"} : {})})).rejects.toMatchObject({code: -32602});
         expect(h.agent.getSessionState(sessionId).currentModelId).toBe(parent);
         await expect(JSON.stringify(configurations(h), null, 2)).toMatchFileSnapshot(`data/child-configuration-v${version}.json`);
     });

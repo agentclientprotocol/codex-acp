@@ -254,7 +254,9 @@ function createRouter(
         .onRequest(SESSION_ARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent(ctx.params).sessionIndex.setArchived(ctx.params, true))
         .onRequest(SESSION_UNARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent(ctx.params).sessionIndex.setArchived(ctx.params, false))
         .onRequest(SESSION_LIST_SUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.subscribeList(ctx.params))
-        .onRequest(SESSION_LIST_UNSUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.unsubscribeList(ctx.params));
+        .onRequest(SESSION_LIST_UNSUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.unsubscribeList(ctx.params))
+        // SDK 2.8.0 defaults unimplemented tool/terminal cancel methods to -32602.
+        .onRequest("*", ({method}) => { throw acpV2.RequestError.methodNotFound(method); });
 
     return acpV2.agentProtocolRouter().withV1(v1Agent).withV2(v2Agent);
 }

@@ -1,17 +1,23 @@
 import * as acp from "@agentclientprotocol/sdk/unstable";
 import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
+import {isRecord} from "./permissions/json";
 
 /**
- * `elicitation/create`'s request/response, and `elicitation/complete`'s notification, are
- * share field and method names between v1 and v2 -- unlike
- * `session/request_permission`, there is no shape to render, only the type import differs per
- * version. v2 responses allow arbitrary JSON content values. Keep them intact through the
- * v1-typed view and validate with the v2 response guards in shared consumers.
+ * V2 form string properties follow MCP's string schema, which has no `pattern`.
+ * Keep the v1 form intact and omit that keyword only on the v2 wire.
  */
 export function toV2CreateElicitationRequest(request: acp.CreateElicitationRequest): acpV2.CreateElicitationRequest {
-    return request as unknown as acpV2.CreateElicitationRequest;
+    const v2 = request as unknown as acpV2.CreateElicitationRequest;
+    if (request.mode !== "form" || !isRecord(request.requestedSchema) || !isRecord(request.requestedSchema["properties"])) return v2;
+    const properties = Object.fromEntries(Object.entries(request.requestedSchema["properties"]).map(([key, property]) => {
+        if (!isRecord(property) || property["type"] !== "string" || !("pattern" in property)) return [key, property];
+        const {pattern: _pattern, ...rest} = property;
+        return [key, rest];
+    }));
+    return {...request, requestedSchema: {...request.requestedSchema, properties}} as unknown as acpV2.CreateElicitationRequest;
 }
 
+/** V2 responses keep arbitrary JSON values through the v1-typed view. */
 export function toV1CreateElicitationResponse(response: acpV2.CreateElicitationResponse): acp.CreateElicitationResponse {
     return response as unknown as acp.CreateElicitationResponse;
 }

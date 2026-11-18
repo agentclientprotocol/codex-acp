@@ -751,7 +751,8 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         if (!child || state === undefined || this.retired) return;
         await this.ensureAnnounced(child);
         if (this.retired) return;
-        await this.session.updateSubagentState(child.sessionId, child.parentSessionId, state);
+        // This is a historical association on the parent, not a live child state_update.
+        await this.session.update({sessionUpdate: "subagent_update", sessionId: child.sessionId, state}, child.parentSessionId);
     }
 
     childSessionIds(): string[] { return [...this.children.values()].map(child => child.sessionId); }
