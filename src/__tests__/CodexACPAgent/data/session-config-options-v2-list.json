@@ -1,6 +1,54 @@
 {
   "configOptions": [
     {
+      "configId": "model",
+      "name": "Model",
+      "description": "Model Codex uses for the session",
+      "category": "model",
+      "type": "select",
+      "currentValue": "fast-model",
+      "options": [
+        {
+          "value": "fast-model",
+          "name": "Fast model",
+          "description": "Frontier"
+        },
+        {
+          "value": "slow-model",
+          "name": "Slow model",
+          "description": "slow-model model"
+        }
+      ]
+    },
+    {
+      "configId": "reasoning_effort",
+      "name": "Reasoning effort",
+      "description": "How much reasoning effort the model should use",
+      "category": "thought_level",
+      "type": "select",
+      "currentValue": "medium",
+      "options": [
+        {
+          "value": "low",
+          "name": "Low",
+          "description": "Fast"
+        },
+        {
+          "value": "medium",
+          "name": "Medium",
+          "description": "Balanced"
+        }
+      ]
+    },
+    {
+      "configId": "fast-mode",
+      "name": "Fast mode",
+      "description": "1.5x speed, increased usage",
+      "category": "speed",
+      "type": "boolean",
+      "currentValue": false
+    },
+    {
       "configId": "mode",
       "name": "Mode",
       "description": "Approval and sandboxing preset for the session",
@@ -80,54 +128,6 @@
           "description": "Plan before making changes"
         }
       ]
-    },
-    {
-      "configId": "model",
-      "name": "Model",
-      "description": "Model Codex uses for the session",
-      "category": "model",
-      "type": "select",
-      "currentValue": "fast-model",
-      "options": [
-        {
-          "value": "fast-model",
-          "name": "Fast model",
-          "description": "Frontier"
-        },
-        {
-          "value": "slow-model",
-          "name": "Slow model",
-          "description": "slow-model model"
-        }
-      ]
-    },
-    {
-      "configId": "reasoning_effort",
-      "name": "Reasoning effort",
-      "description": "How much reasoning effort the model should use",
-      "category": "thought_level",
-      "type": "select",
-      "currentValue": "medium",
-      "options": [
-        {
-          "value": "low",
-          "name": "Low",
-          "description": "Fast"
-        },
-        {
-          "value": "medium",
-          "name": "Medium",
-          "description": "Balanced"
-        }
-      ]
-    },
-    {
-      "configId": "fast-mode",
-      "name": "Fast mode",
-      "description": "1.5x speed, increased usage",
-      "category": "speed",
-      "type": "boolean",
-      "currentValue": false
     }
   ]
 }
