@@ -79,6 +79,61 @@ describe.each([1, 2] as const)("ACP v%s direct child cancellation", version => {
         expect(cancellable("sibling")).toBe(true);
     });
 
+    it.each(["child", "parent"])("retries a %s cancel while Codex registers the child turn", async target => {
+        await connect();
+        if (target === "parent") h.emit(turnStarted());
+        await start();
+        let attempts = 0;
+        h.setCodexResponse("turn/interrupt", async params => {
+            if ((params as {threadId: string}).threadId === "worker" && ++attempts === 1) {
+                throw new Error("no active turn to interrupt");
+            }
+            return {};
+        });
+
+        await h.cancel(target === "child" ? id("worker") : sessionId);
+        await vi.waitFor(() => expect(h.turnInterruptCalls().filter(call => call.threadId === "worker")).toEqual([
+            {threadId: "worker", turnId: "worker-turn"},
+            {threadId: "worker", turnId: "worker-turn"},
+        ]));
+    });
+
+    it("keeps a retry on the observed child turn when Codex reports a different active ID", async () => {
+        await connect();
+        await start();
+        let attempts = 0;
+        h.setCodexResponse("turn/interrupt", async () => {
+            if (++attempts === 1) throw new Error("expected active turn id worker-turn but found older-turn");
+            return {};
+        });
+
+        await h.cancel(id("worker"));
+        await vi.waitFor(() => expect(h.turnInterruptCalls()).toEqual([
+            {threadId: "worker", turnId: "worker-turn"},
+            {threadId: "worker", turnId: "worker-turn"},
+        ]));
+    });
+
+    it("drops a pending retry when the child starts another turn", async () => {
+        await connect();
+        await start();
+        let reject!: (reason: Error) => void;
+        const held = new Promise<never>((_, fail) => { reject = fail; });
+        h.setCodexResponse("turn/interrupt", async () => held);
+
+        const cancellation = h.agent.cancel({sessionId: id("worker")});
+        try {
+            await vi.waitFor(() => expect(h.turnInterruptCalls()).toHaveLength(1));
+            h.emit(on("worker", turnCompleted("worker-turn")));
+            h.emit(on("worker", turnStarted("next-turn")));
+            await flush(h);
+        } finally {
+            reject(new Error("no active turn to interrupt"));
+            await cancellation;
+        }
+        expect(h.turnInterruptCalls()).toEqual([{threadId: "worker", turnId: "worker-turn"}]);
+    });
+
     it("withdraws only selected requests and rejects an accepted late reply", async () => {
         const answers = new Map<string, () => void>();
         await connect({onRequestPermission: request => new Promise(resolve => {

@@ -813,7 +813,8 @@ export class CodexAcpServer {
                 const turnId = turn.turnId;
                 if (turnId === null) return;
                 router.closeWorkRequests(turn.threadId, turnId);
-                await this.codexAcpClient.turnInterrupt({threadId: turn.threadId, turnId});
+                await this.requestTurnInterrupt(session, turn.threadId, turnId, requireStopped ? "Close" : "Cancel",
+                    () => router.isCurrentTurn(turn.threadId, turnId));
             } catch (error) {
                 // A child can finish independently while close is in flight.
                 if (isNoActiveTurnError(error) || isThreadNotFoundError(error) || isThreadNotLoadedError(error)) return;
@@ -4586,14 +4587,16 @@ export class CodexAcpServer {
      * interrupt", and once it registers a later turn under a different id, "expected active turn
      * id <completionTurnId> but found <Y>". Both are retried, with the id recomputed on every
      * attempt so a `turn/started` that arrives between retries is picked up.
-     * Retries belong to that prompt, not to a newer prompt that starts while a reply is pending.
+     * Retries belong to the original prompt or observed subagent turn.
      */
     private async requestTurnInterrupt(
         sessionState: SessionState,
         threadId: string,
         completionTurnId: string,
         requestName: "Cancel" | "Close",
+        ownsChildTurn?: () => boolean,
     ): Promise<void> {
+        if (ownsChildTurn && !ownsChildTurn()) return;
         if (this.recovery !== null && !this.turnAppServerIsLive(threadId)) {
             // The turn died with its app-server. A restarted app-server has no such turn.
             logger.log(`${requestName} - turnInterrupt skipped: the app-server of the turn is gone`, {sessionId: threadId});
@@ -4602,9 +4605,10 @@ export class CodexAcpServer {
         const activePrompt = this.activePrompts.get(sessionState.sessionId);
         const ownsRegisteredTurn = activePrompt?.currentTurn?.threadId === threadId
             && activePrompt.currentTurn.turnId === completionTurnId;
-        const stillOwnsPrompt = () => ownsRegisteredTurn && activePrompt !== undefined
-            && this.activePrompts.get(sessionState.sessionId) === activePrompt;
-        let turnId = ownsRegisteredTurn ? codexRunningTurnId(sessionState, completionTurnId) : completionTurnId;
+        const stillOwnsTurn = ownsChildTurn ?? (() => ownsRegisteredTurn && activePrompt !== undefined
+            && this.activePrompts.get(sessionState.sessionId) === activePrompt);
+        let turnId = !ownsChildTurn && ownsRegisteredTurn
+            ? codexRunningTurnId(sessionState, completionTurnId) : completionTurnId;
         for (let attempt = 0; ; attempt++) {
             try {
                 await this.runWithProcessCheck(() => this.codexAcpClient.turnInterrupt({
@@ -4619,12 +4623,13 @@ export class CodexAcpServer {
             } catch (err) {
                 const mismatch = parseExpectedActiveTurnMismatch(err);
                 const isMismatch = mismatch !== null
-                    && mismatch.expected === sessionState.currentTurnId
+                    && mismatch.expected === (ownsChildTurn ? completionTurnId : sessionState.currentTurnId)
                     && mismatch.found !== "";
-                const retryable = stillOwnsPrompt()
+                const retryable = stillOwnsTurn()
                     && (isNoActiveTurnError(err) || isMismatch)
                     && attempt < NO_ACTIVE_TURN_RETRY_DELAYS_MS.length;
                 if (!retryable) {
+                    if (ownsChildTurn) throw err;
                     logger.error(`${requestName} - turnInterrupt failed`, err);
                     return;
                 }
@@ -4634,11 +4639,12 @@ export class CodexAcpServer {
                 // to completion and answer `end_turn`, which ACP forbids after a
                 // `session/cancel`.
                 await new Promise(resolve => setTimeout(resolve, NO_ACTIVE_TURN_RETRY_DELAYS_MS[attempt]!));
-                if (!stillOwnsPrompt()) return;
-                // Recompute after the wait: a `turn/started` may have landed in the meantime, and
-                // `interruptTurnId` always wins once it is set. Otherwise fall back to the id Codex
-                // just reported as active, or to the id we started with.
-                turnId = sessionState.interruptTurnId ?? (isMismatch ? mismatch!.found : completionTurnId);
+                if (!stillOwnsTurn()) return;
+                // Prompted turns can pick up a replacement ID from Codex. A child cancel stays
+                // bound to the turn selected by the router.
+                if (!ownsChildTurn) {
+                    turnId = sessionState.interruptTurnId ?? (isMismatch ? mismatch!.found : completionTurnId);
+                }
                 logger.log(`${requestName} - turn not interruptible yet, retrying`, {
                     sessionId: threadId,
                     currentTurnId: turnId,
@@ -5864,10 +5870,12 @@ export class CodexAcpServer {
     async cancel(params: acp.CancelNotification): Promise<void> {
         const child = this.subagentAssociations.get(params.sessionId);
         if (child && this.usesStandardSubagents()) {
-            const router = this.sessions.get(child.rootSessionId)?.subagents;
-            if (router instanceof StandardSubagentEventRouter) {
+            const parent = this.sessions.get(child.rootSessionId);
+            const router = parent?.subagents;
+            if (parent && router instanceof StandardSubagentEventRouter) {
                 await router.cancelChild(params.sessionId, (threadId, turnId) =>
-                    this.codexAcpClient.turnInterrupt({threadId, turnId}));
+                    this.requestTurnInterrupt(parent, threadId, turnId, "Cancel",
+                        () => router.isCurrentTurn(threadId, turnId)));
             }
             return;
         }
