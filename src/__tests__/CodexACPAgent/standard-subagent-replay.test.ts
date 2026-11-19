@@ -10,7 +10,7 @@ import {expectConformingV2SessionUpdates} from "./v2-session-update-guard";
 const worker = "worker";
 const childId = `${sessionId}:subagent:${worker}`;
 const message = (id: string, text: string): ThreadItem => ({
-    type: "agentMessage", id, text, phase: null, memoryCitation: null, delivery: null, questions: null,
+    type: "agentMessage", id, text, phase: null, moderation: null, memoryCitation: null, delivery: null, questions: null,
 });
 function activity(id = worker, path = "/root/worker"): Extract<ThreadItem, {type: "subAgentActivity"}> {
     return {type: "subAgentActivity", id: `activity-${id}`, agentThreadId: id, agentPath: path,

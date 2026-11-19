@@ -15,7 +15,7 @@ import type {ThreadItem} from "../../app-server/v2";
 const airCapabilities = {_meta: {jetbrains: {air: {version: 1}}}};
 
 function agentMessage(text: string, phase: "commentary" | "final_answer" | null): ThreadItem {
-    return {type: "agentMessage", id: `msg-${phase}`, text, phase, memoryCitation: null, delivery: null, questions: null};
+    return {type: "agentMessage", id: `msg-${phase}`, text, phase, moderation: null, memoryCitation: null, delivery: null, questions: null};
 }
 
 /** The `promptSuggestions` values of the session info updates the client received, in order. */

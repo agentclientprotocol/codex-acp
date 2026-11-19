@@ -184,7 +184,7 @@ describe("session notices", () => {
         const appServer = fixture.getCodexAppServerClient();
         const model = createTestModel();
         vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
-        vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(client, "getAccount").mockResolvedValue({account: null, userId: null, requiresOpenaiAuth: false});
         vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
         vi.spyOn(appServer, "listModels").mockResolvedValue({data: [model], nextCursor: null});
         const thread = createThread();
@@ -329,9 +329,9 @@ function createThread(): Thread {
         gitInfo: null,
         name: null,
         turns: [{...createTurn("completed"), items: [
-            {type: "agentMessage", id: "before-compaction", text: "Before compaction.", phase: null, memoryCitation: null, delivery: null, questions: null},
+            {type: "agentMessage", id: "before-compaction", text: "Before compaction.", phase: null, moderation: null, memoryCitation: null, delivery: null, questions: null},
             {type: "contextCompaction", id: "history-compaction"},
-            {type: "agentMessage", id: "after-compaction", text: "After compaction.", phase: null, memoryCitation: null, delivery: null, questions: null},
+            {type: "agentMessage", id: "after-compaction", text: "After compaction.", phase: null, moderation: null, memoryCitation: null, delivery: null, questions: null},
         ]}],
     };
 }

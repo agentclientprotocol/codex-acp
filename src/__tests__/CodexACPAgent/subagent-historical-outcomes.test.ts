@@ -12,7 +12,7 @@ const childId = `${sessionId}:subagent:${worker}`;
 const spawn: ThreadItem = {type: "subAgentActivity", id: "spawn", kind: "started",
     agentThreadId: worker, agentPath: "/root/worker", model: null, reasoningEffort: null};
 const answer: ThreadItem = {type: "agentMessage", id: "retained", text: "Retained answer",
-    phase: null, memoryCitation: null, delivery: null, questions: null};
+    phase: null, moderation: null, memoryCitation: null, delivery: null, questions: null};
 const onWorker = (event: ServerNotification): ServerNotification =>
     ({...event, params: {...event.params, threadId: worker}} as ServerNotification);
 

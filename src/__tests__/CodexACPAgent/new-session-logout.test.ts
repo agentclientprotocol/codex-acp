@@ -75,10 +75,12 @@ describe("New session logout handling", () => {
         const getAccountSpy = vi.spyOn(codexAcpClient, "getAccount")
             .mockResolvedValueOnce({
                 account: { type: "apiKey" },
+                userId: null,
                 requiresOpenaiAuth: false,
             })
             .mockResolvedValueOnce({
                 account: null,
+                userId: null,
                 requiresOpenaiAuth: true,
             });
 
