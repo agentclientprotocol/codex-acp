@@ -221,8 +221,8 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
         expect(declaration).toMatchObject({sessionId: rootId, update: {
             sessionUpdate: "subagent_update", sessionId: childSessionId, title: "Researcher", capabilities: {},
         }});
-        expect(updates).toContainEqual({sessionId: childSessionId,
-            update: {sessionUpdate: "state_update", state: "idle", stopReason: "end_turn"}});
+        expect(updates).toContainEqual({sessionId: rootId,
+            update: {sessionUpdate: "subagent_update", sessionId: childSessionId, state: {state: "idle", stopReason: "end_turn"}}});
         expect(updates.some(({update}) => update.sessionUpdate.startsWith("_subagent")
             || update.sessionUpdate.startsWith("_async_task"))).toBe(false);
     });

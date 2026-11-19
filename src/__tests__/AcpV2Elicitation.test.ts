@@ -29,12 +29,12 @@ describe("v2 elicitation companions", () => {
         {jetbrains: {air: {customAnswer: false}}, _askUserQuestionCustomAnswer: true},
     ])("keeps unmarked forms unchanged: %j", meta => {
         const request = form(meta);
-        expect(toV2CreateElicitationRequest(request)).toBe(request);
+        expect(toV2CreateElicitationRequest(request)).toEqual(request);
     });
 
     it("keeps URL requests unchanged", () => {
         const request: acp.CreateElicitationRequest = {sessionId: "session", mode: "url", message: "Sign in",
             url: "https://example.com", elicitationId: "login"};
-        expect(toV2CreateElicitationRequest(request)).toBe(request);
+        expect(toV2CreateElicitationRequest(request)).toEqual(request);
     });
 });

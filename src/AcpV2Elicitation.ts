@@ -33,3 +33,14 @@ export function toV2CreateElicitationRequest(request: acp.CreateElicitationReque
 export function toV1CreateElicitationResponse(response: acpV2.CreateElicitationResponse): acp.CreateElicitationResponse {
     return response as unknown as acp.CreateElicitationResponse;
 }
+
+/** Use the broader response contract when consuming responses through the shared typed view. */
+export function toV2CreateElicitationResponse(response: acp.CreateElicitationResponse): acpV2.CreateElicitationResponse {
+    return response as unknown as acpV2.CreateElicitationResponse;
+}
+
+/** A session-scoped elicitation carries `sessionId`; a request-scoped one carries `requestId` instead. */
+export function elicitationSessionId(request: acp.CreateElicitationRequest): string | undefined {
+    const sessionId = (request as {sessionId?: unknown}).sessionId;
+    return typeof sessionId === "string" ? sessionId : undefined;
+}

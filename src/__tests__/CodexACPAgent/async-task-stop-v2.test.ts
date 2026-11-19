@@ -49,8 +49,9 @@ async function spawnAsyncTask(client: {emit: (n: ServerNotification) => void}) {
     await settle();
     client.emit(itemStarted(commandItem()));
     await settle();
-    // A second `item/started` triggers the terminal-list sync that publishes the spawn.
-    client.emit(itemStarted(reasoningItem));
+    // Codex yields a process handle while the foreground turn continues.
+    client.emit({method: "rawResponseItem/completed", params: {threadId: sessionId, turnId: "turn-1",
+        item: {type: "function_call_output", call_id: "command-1", output: JSON.stringify({session_id: 42, output: ""})}}});
     await settle();
 }
 
@@ -115,6 +116,8 @@ describe('background terminal controls on ACP v2', () => {
         ];
         client.setCodexResponse("thread/backgroundTerminals/list", async () => ({data: terminals, nextCursor: null}));
         await spawnAsyncTask(client);
+        client.emit({method: "rawResponseItem/completed", params: {threadId: sessionId, turnId: "turn-1",
+            item: {type: "function_call_output", call_id: "command-2", output: JSON.stringify({session_id: 43, output: ""})}}});
         await client.waitForNotifications();
         const background = terminals.map(terminal => ({type: "terminal", terminalId: terminal.itemId}));
         const states = () => client.scopedUpdates.filter(entry => entry.sessionId === sessionId
@@ -150,13 +153,14 @@ describe('background terminal controls on ACP v2', () => {
             const frames = client.wireMessages.slice(wireStart);
             const response = frames.findIndex(frame => "result" in frame);
             const control = frames.findIndex((frame, index) => {
-                if (index <= response || !("method" in frame) || frame.method !== "session/update") return false;
+                if (!("method" in frame) || frame.method !== "session/update") return false;
                 const {update} = frame.params as {update: {sessionUpdate: string; terminalId?: string; capabilities?: {cancel?: unknown}}};
                 return update.sessionUpdate === "terminal_update" && update.terminalId === "command-2"
                     && update.capabilities?.cancel != null;
             });
             expect(response).toBeGreaterThanOrEqual(0);
-            expect(control).toBeGreaterThan(response);
+            expect(control).toBeGreaterThanOrEqual(0);
+            expect(control).toBeLessThan(response);
         });
         const completionStart = client.scopedUpdates.length;
         client.emit({method: "item/completed", params: {threadId: sessionId, turnId: "turn-1", completedAtMs: 0,
@@ -220,10 +224,12 @@ describe('background terminal controls on ACP v2', () => {
         client.emit({method: "item/completed", params: {threadId: sessionId, turnId: "turn-1", completedAtMs: 0,
             item: commandItem({status: "completed", exitCode: 0, aggregatedOutput: "late output"})}});
         await client.waitForNotifications();
-        expect(client.scopedUpdates.map(entry => entry.update)).toContainEqual({
-            sessionUpdate: "terminal_update", terminalId: "command-1", exitStatus: {exitCode: 0}, capabilities: null,
+        const completed = client.scopedUpdates.map(entry => entry.update);
+        expect(completed).toContainEqual(expect.objectContaining({
+            sessionUpdate: "terminal_update", terminalId: "command-1", exitStatus: {exitCode: 0, signal: null},
             output: {data: Buffer.from("late output").toString("base64")},
-        });
+        }));
+        expect(completed).toContainEqual({sessionUpdate: "terminal_update", terminalId: "command-1", capabilities: null});
     });
 
     it('isolates equal root and child terminal IDs and preserves a refused Stop', async () => {
@@ -247,6 +253,8 @@ describe('background terminal controls on ACP v2', () => {
         for (const item of [commandItem(), reasoningItem]) {
             client.emit({method: "item/started", params: {threadId: childThread, turnId: "child-turn", startedAtMs: 0, item}});
         }
+        client.emit({method: "rawResponseItem/completed", params: {threadId: childThread, turnId: "child-turn",
+            item: {type: "function_call_output", call_id: "command-1", output: JSON.stringify({session_id: 43, output: ""})}}});
         await client.waitForNotifications();
         await vi.waitFor(() => expect(client.scopedUpdates).toContainEqual({sessionId: childId,
             update: {sessionUpdate: "state_update", state: "running", background: [{type: "terminal", terminalId: "command-1"}]}}));

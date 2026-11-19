@@ -364,11 +364,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         await h.cancel();
         await flush(h);
         const childInterrupt = {threadId: worker, turnId: "child-turn"};
-        if (version === 1) {
-            await vi.waitFor(() => expect(h.turnInterruptCalls()).toContainEqual(childInterrupt));
-        } else {
-            expect(h.turnInterruptCalls()).not.toContainEqual(childInterrupt);
-        }
+        await vi.waitFor(() => expect(h.turnInterruptCalls()).toContainEqual(childInterrupt));
         expect(childUpdates().slice(before)).toEqual([]);
         h.emit(onWorker(turnCompleted("child-turn")));
         await snapshot("cancel");
@@ -472,7 +468,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         } finally { release(); }
     });
 
-    it.skipIf(version !== 2)("publishes state before the setup response and controls after it without waiting for unrelated requests", async () => {
+    it.skipIf(version !== 2)("publishes replay before the setup response and live controls after it without waiting for unrelated requests", async () => {
         await connect();
         h.emit(turnStarted());
         h.emit(itemStarted(activityItem()));
@@ -499,7 +495,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         const response = frames.findIndex(frame => "result" in frame);
         const state = frames.findIndex(frame => "method" in frame && frame.method === "session/update"
             && (frame.params as {sessionId: string; update: {sessionUpdate: string}}).sessionId === childId
-            && (frame.params as {update: {sessionUpdate: string}}).update.sessionUpdate === "state_update");
+            && (frame.params as {update: {sessionUpdate: string}}).update.sessionUpdate === "replay_complete");
         expect(response).toBeGreaterThanOrEqual(0);
         expect(state).toBeGreaterThanOrEqual(0);
         expect(response).toBeGreaterThan(state);

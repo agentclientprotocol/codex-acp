@@ -145,8 +145,6 @@ export function toV2ToolCallContent(content: acp.ToolCallContent): acpV2.ToolCal
         case "terminal":
         case "session":
             return content;
-        case "session":
-            return content;
         case "diff":
             return {type: "diff", ...toV2Diff(content)};
     }

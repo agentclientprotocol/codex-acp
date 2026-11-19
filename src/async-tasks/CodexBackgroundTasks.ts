@@ -100,7 +100,7 @@ export class CodexBackgroundTasks {
         }
         if (notification.method === "rawResponseItem/completed"
             && (notification.params.item.type === "custom_tool_call_output" || notification.params.item.type === "function_call_output")) {
-            await this.reconcile(threadId, sessionId);
+            await this.discoverYieldedTerminal(notification.params.item.output, threadId, sessionId);
             return;
         }
         // The list includes processes still serving their initial tool call. At a turn boundary
@@ -111,6 +111,26 @@ export class CodexBackgroundTasks {
         } else if (this.enabled && (notification.method === "turn/completed"
             || (notification.method === "item/started" && this.hasRunningTask(threadId)))) {
             void this.reconcile(threadId, sessionId, false);
+        }
+    }
+
+    private async discoverYieldedTerminal(output: unknown, threadId: string, sessionId: string): Promise<void> {
+        if (typeof output !== "string") return;
+        let processId: unknown;
+        try {
+            processId = (JSON.parse(output) as {session_id?: unknown} | null)?.session_id;
+        } catch { return; }
+        if (typeof processId !== "string" && typeof processId !== "number") return;
+        try {
+            const snapshot = await this.listAll(threadId);
+            if (snapshot === null || !this.queryIsCurrent(snapshot.generation)) return;
+            const terminal = snapshot.terminals.find(item => item.processId === String(processId));
+            if (!terminal || this.ended.has(wireTaskId(this.rootSessionId, threadId, terminal.itemId))) return;
+            const task = this.remember(threadId, sessionId, terminal);
+            if (this.enabled) await this.announce(task);
+            if (this.reportsStandard(sessionId)) await this.publishStandard(task, snapshot.generation);
+        } catch (error) {
+            if (this.isActive()) logger.error(`Failed to discover yielded terminal for ${threadId}`, error);
         }
     }
 
@@ -237,7 +257,9 @@ export class CodexBackgroundTasks {
     async stop(taskId: string): Promise<boolean> {
         if (!this.isActive()) return false;
         const task = this.tasks.get(taskId);
-        if (!task || task.publication !== "published") return false;
+        if (!task) return false;
+        if (this.standard) return this.cancelTerminal(task.sessionId, task.itemId);
+        if (task.publication !== "published") return false;
         return this.stopTask(task);
     }
 

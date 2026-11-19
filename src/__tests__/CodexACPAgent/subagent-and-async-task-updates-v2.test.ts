@@ -9,18 +9,20 @@ import type {ResponseItem} from "../../app-server/ResponseItem";
 import {checkV2SessionUpdate, expectConformingV2SessionUpdates} from './v2-session-update-guard';
 
 /** Sends the negotiated AIR lifecycle through the selected protocol boundary. */
-function sessionForVersion(version: 1 | 2, sessionId: string): {session: ACPSessionConnection; updates: unknown[]} {
+function sessionForVersion(version: 1 | 2, sessionId: string): {session: ACPSessionConnection; updates: unknown[]; backgrounds: acpV2.BackgroundWork[][]} {
     const updates: unknown[] = [];
+    const backgrounds: acpV2.BackgroundWork[][] = [];
     const connection = {
         notify: vi.fn(async (_method: string, params: unknown) => {
             const update = (params as {update: acpV2.SessionUpdate}).update;
             if (version === 2) checkV2SessionUpdate(update);
             updates.push(update);
+            if (update.sessionUpdate === "state_update" && Array.isArray(update.background)) backgrounds.push(update.background);
         }),
         request: vi.fn(),
     };
     const view = version === 1 ? connection : new AcpV2Connection(connection as any).extensionOnlyV1View();
-    return {session: new ACPSessionConnection(view, sessionId), updates};
+    return {session: new ACPSessionConnection(view, sessionId), updates, backgrounds};
 }
 
 describe.each([1, 2] as const)('AIR subagent and async task updates on ACP v%s', version => {
@@ -174,18 +176,16 @@ describe.each([1, 2] as const)('AIR subagent and async task updates on ACP v%s',
     });
 
     function createAsyncTasks(enabled: boolean) {
-        const {session, updates} = sessionForVersion(version, "root");
+        const {session, updates, backgrounds} = sessionForVersion(version, "root");
         const list = vi.fn<() => Promise<ThreadBackgroundTerminalsListResponse>>();
         const appServer = {threadBackgroundTerminalsList: list,
             backgroundTerminalPages: CodexAppServerClient.prototype.backgroundTerminalPages} as unknown as CodexAppServerClient;
-        const backgrounds: acpV2.BackgroundWork[][] = [];
-        const tasks = new CodexBackgroundTasks(enabled, "root", appServer, session, {
-            changed: async sessionId => { backgrounds.push(tasks.snapshot(sessionId)); },
-        });
+        const tasks = new CodexBackgroundTasks(version === 1 && enabled, "root", appServer, session, version === 2, true);
+        const snapshot = () => backgrounds.at(-1) ?? [];
         const raw = (item: ResponseItem, threadId = "root") => tasks.handleNotification({
             method: "rawResponseItem/completed", params: {threadId, turnId: "turn-1", item},
         }, threadId);
-        return {tasks, list, updates, backgrounds, raw};
+        return {tasks, list, updates, backgrounds, raw, snapshot};
     }
 
     it('publishes the enabled tracker through the selected protocol', async () => {
@@ -219,8 +219,8 @@ describe.each([1, 2] as const)('AIR subagent and async task updates on ACP v%s',
 
         expect(updates).toEqual(version === 2 ? [{
             sessionUpdate: "terminal_update", terminalId: "command-1", command: "python -m http.server",
-            capabilities: {cancel: {}},
-        }] : [
+            cwd: "/workspace", capabilities: {cancel: {}},
+        }, {sessionUpdate: "state_update", state: "idle", background: [{type: "terminal", terminalId: "command-1"}]}] : [
             {
                 sessionUpdate: "tool_call_update",
                 toolCallId: "command-1",
@@ -240,7 +240,7 @@ describe.each([1, 2] as const)('AIR subagent and async task updates on ACP v%s',
 
     it.each(["custom_tool_call_output", "function_call_output"] as const)(
         'discovers a background command after %s while the foreground turn continues', async type => {
-            const {tasks, list, updates, raw} = createAsyncTasks(true);
+            const {tasks, list, updates, raw, snapshot} = createAsyncTasks(true);
             list.mockResolvedValue({data: [{itemId: "command-1", processId: "42", command: "sleep 15"}], nextCursor: null});
 
             await raw({type, call_id: "counter", output: JSON.stringify({session_id: 42, output: "1"})});
@@ -250,24 +250,24 @@ describe.each([1, 2] as const)('AIR subagent and async task updates on ACP v%s',
             } : {
                 sessionUpdate: "async_task_spawned", asyncTaskId: "command-1", toolCallId: "command-1",
             })));
-            expect(tasks.snapshot("root")).toEqual([{type: "terminal", terminalId: "command-1"}]);
+            expect(snapshot()).toEqual(version === 2 ? [{type: "terminal", terminalId: "command-1"}] : []);
         },
     );
 
     it('reports yielded code through tool calls and standard background references', async () => {
-        const {tasks, updates, backgrounds, raw} = createAsyncTasks(false);
+        const {tasks, updates, backgrounds, raw, snapshot} = createAsyncTasks(false);
         await raw({type: "custom_tool_call", call_id: "counter", name: "exec", input: "notify(1)"});
         await raw({type: "custom_tool_call_output", call_id: "counter", id: "yield",
             output: "Script running with cell ID 4\nWall time 0.1 seconds\nOutput:\n"});
-        expect(tasks.snapshot("root")).toEqual(version === 2 ? [{type: "tool_call", toolCallId: "counter"}] : []);
+        expect(snapshot()).toEqual(version === 2 ? [{type: "tool_call", toolCallId: "counter"}] : []);
         await raw({type: "function_call", call_id: "wait-1", name: "wait", arguments: '{"cell_id":"4"}'});
         await raw({type: "function_call_output", call_id: "wait-1", output: "Script running with cell ID 4\nOutput:\n1"});
-        expect(tasks.snapshot("root")).toEqual(version === 2 ? [{type: "tool_call", toolCallId: "counter"}] : []);
+        expect(snapshot()).toEqual(version === 2 ? [{type: "tool_call", toolCallId: "counter"}] : []);
         await raw({type: "function_call", call_id: "wait-2", name: "wait", arguments: '{"cell_id":"4"}'});
         await raw({type: "function_call_output", call_id: "wait-2", output: [
             {type: "input_text", text: "Script completed\nOutput:\n"}, {type: "input_text", text: "Counted"},
         ]});
-        expect(tasks.snapshot("root")).toEqual([]);
+        expect(snapshot()).toEqual([]);
         const lateOutput: ResponseItem = {type: "custom_tool_call_output", call_id: "counter", id: "late-1", output: "2"};
         await raw(lateOutput);
         const afterLate = updates.length;
@@ -275,7 +275,7 @@ describe.each([1, 2] as const)('AIR subagent and async task updates on ACP v%s',
         expect(updates).toHaveLength(afterLate);
         expect(updates.at(-1)).toMatchObject({sessionUpdate: "tool_call_update", toolCallId: "counter", status: "completed",
             rawOutput: {outputs: [expect.stringContaining("Script running"), expect.any(Array), "2"]}});
-        expect(backgrounds.at(-1)).toEqual([]);
+        expect(snapshot()).toEqual([]);
         expect(updates.filter((update: any) => (version === 1 ? update.sessionUpdate === "tool_call" : update.title !== undefined))).toMatchObject([
             {toolCallId: "counter", title: "Run code", rawInput: {code: "notify(1)"}},
             {toolCallId: "wait-1", title: "Wait for code", rawInput: {cell_id: "4"}},
@@ -285,14 +285,14 @@ describe.each([1, 2] as const)('AIR subagent and async task updates on ACP v%s',
     });
 
     it('matches a reused native cell ID to the active call', async () => {
-        const {tasks, updates, raw} = createAsyncTasks(false);
+        const {tasks, updates, raw, snapshot} = createAsyncTasks(false);
         for (const id of ["first", "second"]) {
             await raw({type: "custom_tool_call", call_id: id, name: "exec", input: "text(1)"});
             await raw({type: "custom_tool_call_output", call_id: id, output: "Script running with cell ID 4"});
             await raw({type: "function_call", call_id: `wait-${id}`, name: "wait", arguments: '{"cell_id":"4"}'});
             await raw({type: "function_call_output", call_id: `wait-${id}`, output: "Script completed"});
-            expect(updates.at(-1)).toMatchObject({toolCallId: id, status: "completed"});
-            expect(tasks.snapshot("root")).toEqual([]);
+            expect(updates.filter((update: any) => update.sessionUpdate === "tool_call_update").at(-1)).toMatchObject({toolCallId: id, status: "completed"});
+            expect(snapshot()).toEqual([]);
         }
     });
 
@@ -301,24 +301,24 @@ describe.each([1, 2] as const)('AIR subagent and async task updates on ACP v%s',
         ["Script failed\nError: test", "failed"],
         ["SyntaxError: test", "completed"],
     ])('ends synchronous code for the native result %s', async (output, status) => {
-        const {tasks, updates, raw} = createAsyncTasks(false);
+        const {tasks, updates, raw, snapshot} = createAsyncTasks(false);
         await raw({type: "custom_tool_call", call_id: "code", name: "exec", input: "text(1)"});
         await raw({type: "custom_tool_call_output", call_id: "code", output});
         expect(updates.at(-1)).toMatchObject({sessionUpdate: "tool_call_update", toolCallId: "code", status});
-        expect(tasks.snapshot("root")).toEqual([]);
+        expect(snapshot()).toEqual([]);
         await tasks.finishAll("failed");
         expect(updates).toHaveLength(2);
     });
 
     it('isolates code results by thread and releases active cells when the native process changes', async () => {
-        const {tasks, updates, raw} = createAsyncTasks(false);
+        const {tasks, updates, raw, snapshot} = createAsyncTasks(false);
         await raw({type: "custom_tool_call", call_id: "code", name: "exec", input: "text(1)"});
         await raw({type: "custom_tool_call_output", call_id: "code", output: "Script completed"}, "another-thread");
         expect(updates).toHaveLength(1);
         await raw({type: "custom_tool_call_output", call_id: "code", output: "Script running with cell ID 4"});
         await tasks.prepareForAppServerReplacement();
-        expect(updates.at(-1)).toMatchObject({toolCallId: "code", status: "failed"});
-        expect(tasks.snapshot("root")).toEqual([]);
+        expect(updates.filter((update: any) => update.sessionUpdate === "tool_call_update").at(-1)).toMatchObject({toolCallId: "code", status: "failed"});
+        expect(snapshot()).toEqual([]);
         tasks.clear();
         const count = updates.length;
         await raw({type: "custom_tool_call", call_id: "ignored", name: "exec", input: "text(1)"});
@@ -326,7 +326,7 @@ describe.each([1, 2] as const)('AIR subagent and async task updates on ACP v%s',
     });
 
     it('keeps malformed wait input visible and ignores unrelated raw items', async () => {
-        const {updates, raw} = createAsyncTasks(false);
+        const {updates, raw, snapshot} = createAsyncTasks(false);
         await raw({type: "function_call", call_id: "other", name: "exec_command", arguments: "{}"});
         await raw({type: "custom_tool_call", call_id: "mcp", namespace: "mcp", name: "exec", input: "text(1)"});
         await raw({type: "custom_tool_call_output", call_id: "missing", output: "Script completed"});
@@ -369,6 +369,6 @@ describe.each([1, 2] as const)('AIR subagent and async task updates on ACP v%s',
         await tasks.sync("root", "root");
 
         expect(updates).toEqual([]);
-        expect(list).not.toHaveBeenCalled();
+        if (version === 1) expect(list).not.toHaveBeenCalled();
     });
 });

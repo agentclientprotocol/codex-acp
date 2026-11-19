@@ -485,12 +485,15 @@ export async function settle() {
     await new Promise(resolve => setTimeout(resolve, 20));
 }
 
-/** The `state_update`s in the transcript, in wire order. */
-export function stateUpdates(transcript: TranscriptEntry[]): Array<{state: string, stopReason?: unknown}> {
-    return transcript.flatMap(entry => "sessionUpdate" in entry && entry.sessionUpdate.sessionUpdate === "state_update"
+/** Foreground transitions in wire order. Background snapshots can repeat the foreground state. */
+export function stateUpdates(transcript: TranscriptEntry[], includeSnapshots = false): Array<{state: string, stopReason?: unknown}> {
+    const states = transcript.flatMap(entry => "sessionUpdate" in entry && entry.sessionUpdate.sessionUpdate === "state_update"
         ? [{...entry.sessionUpdate} as {state: string, stopReason?: unknown}]
         : [])
         .map(({state, stopReason}) => stopReason === undefined ? {state} : {state, stopReason});
+    if (includeSnapshots) return states;
+    return states.filter((state, index) => index === 0 || state.state !== states[index - 1]!.state
+        || state.stopReason !== states[index - 1]!.stopReason);
 }
 
 /** Index of the first transcript entry matching the predicate. */

@@ -15,7 +15,8 @@ again at the root.
 A shell process that outlives its Codex turn is listed by the existing display
 `terminalId`, not by a process handle or a duplicate tool call. Codex's process
 inventory also contains processes still serving foreground calls, so the
-adapter uses the turn boundary to confirm detachment. It rechecks the list
+adapter uses the turn boundary to confirm detachment. A tool result with a
+`session_id` also confirms that the matching process has yielded. It rechecks the list
 while it has live terminals. A missing process gets an exit with an unknown
 status if Codex didn't report the exit. List errors don't turn running
 processes into exits.
@@ -52,7 +53,8 @@ terminal:
   stop operation for arbitrary model tool calls.
 
 ACP v1 does not have these updates or this method. The [AIR async task
-extension](air-extensions.md#async-tasks) remains available independently.
+extension](air-extensions.md#async-tasks) remains available on ACP v1.
+On ACP v2, its Stop method remains an alias for standard terminal cancellation.
 
 Code-mode `exec` and `wait` calls appear as ordinary tool calls on ACP v1 and v2.
 A yielded cell appears in the ACP v2 background list as `{type: "tool_call", toolCallId}`.

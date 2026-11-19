@@ -377,10 +377,15 @@ const v2ConnectionsByView = new WeakMap<AcpClientConnection, AcpV2Connection>();
 
 type BackgroundItem =
     | {type: "terminal"; terminalId: string}
+    | {type: "tool_call"; toolCallId: string}
     | {type: "subagent"; sessionId: string};
 
 function backgroundKey(item: BackgroundItem): string {
-    return item.type === "terminal" ? `terminal:${item.terminalId}` : `subagent:${item.sessionId}`;
+    switch (item.type) {
+        case "terminal": return `terminal:${item.terminalId}`;
+        case "tool_call": return `tool_call:${item.toolCallId}`;
+        case "subagent": return `subagent:${item.sessionId}`;
+    }
 }
 
 function rejectStandardMethod(method: string): Promise<never> {
