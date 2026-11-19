@@ -403,7 +403,8 @@ export class ACPSessionConnection {
     }
 
     setBackgroundItem(item: BackgroundItem, present: boolean): Promise<void> {
-        return this.v2Connection?.setBackgroundItem(this.sessionId, item, present) ?? Promise.resolve();
+        if (!this.v2Connection) return Promise.resolve();
+        return this.v2Connection.setBackgroundItem(this.sessionId, item, present);
     }
 
     hasBackgroundItem(item: BackgroundItem): boolean {
@@ -423,9 +424,10 @@ export class ACPSessionConnection {
     }
 
     updateTerminal(terminal: acpV2.TerminalUpdate): Promise<void> {
-        return this.v2Connection?.client.notify(acpV2.methods.client.session.update, {
+        if (!this.v2Connection) return Promise.resolve();
+        return this.v2Connection.client.notify(acpV2.methods.client.session.update, {
             sessionId: this.sessionId, update: {sessionUpdate: "terminal_update", ...terminal},
-        }) ?? Promise.resolve();
+        });
     }
 
     async updateSubagentState(
