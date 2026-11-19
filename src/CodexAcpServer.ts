@@ -4316,11 +4316,12 @@ export class CodexAcpServer {
                     ?? (input.text.length > 0 ? [{ type: "text", text: input.text }] : []);
             }
             case "image":
+            case "audio":
                 return [{
                     type: "text",
                     text: "url" in input
-                        ? this.formatUriAsLink("image", input.url)
-                        : `image:${input.fileId}`,
+                        ? this.formatUriAsLink(input.type, input.url)
+                        : `${input.type}:${input.fileId}`,
                 }];
             case "localImage":
             case "localAudio":
@@ -4334,8 +4335,6 @@ export class CodexAcpServer {
             }
             case "skill":
                 return [{ type: "text", text: `skill:${input.name} (${input.path})` }];
-            case "audio":
-                return [{type: "text", text: this.formatUriAsLink("audio", input.url)}];
         }
     }
 

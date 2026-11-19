@@ -251,7 +251,7 @@ describe("CodexACPAgent - an unavailable account read", () => {
             await initialize(fixture);
 
             await loadAfterGrace(fixture);
-            read.resolve({account: null, requiresOpenaiAuth: true});
+            read.resolve({account: null, userId: null, requiresOpenaiAuth: true});
             await drainScheduledWork();
 
             expect(authStatusUpdates(fixture)).toEqual([NONE_STATUS]);

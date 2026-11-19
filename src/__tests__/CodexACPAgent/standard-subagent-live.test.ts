@@ -408,6 +408,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
     it("replays parent history and empty child associations without inventing a gap or current runtime", async () => {
         await connect();
         const item: ThreadItem = {type: "agentMessage", id: "parent-answer", text: "Parent history", phase: null,
+            moderation: null,
             memoryCitation: null, delivery: null, questions: null};
         history(h, [activityItem(), item], "foreign-root");
         await load();
