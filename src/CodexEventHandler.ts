@@ -486,9 +486,13 @@ export class CodexEventHandler {
         await this.finishCompactionsForNotification(notification);
         const closingChildren = this.subagents.closingChildSessions(notification);
         for (const child of closingChildren) {
+            // Discover processes that outlived the child turn before finalizing its foreground tools.
+            await this.sessionState.asyncTasks.reconcile(child.threadId, child.sessionId);
             if (this.subagents instanceof StandardSubagentEventRouter) {
                 const turnId = notification.method === "turn/completed" ? notification.params.turn.id : undefined;
-                for (const update of this.subagents.openToolCalls(child.threadId)?.finishOutstanding(turnId) ?? []) {
+                for (const update of this.subagents.openToolCalls(child.threadId)?.finishOutstanding(
+                    turnId, id => this.session.forSession(child.sessionId).hasBackgroundItem({type: "terminal", terminalId: id}),
+                ) ?? []) {
                     await this.session.update(update, child.sessionId);
                 }
             }
@@ -496,7 +500,6 @@ export class CodexEventHandler {
                 child.state === "cancelled" ? "cancelled" : "failed",
                 child.sessionId,
             );
-            await this.sessionState.asyncTasks.reconcile(child.threadId, child.sessionId);
         }
         const handledBySubagents = await this.subagents.handle(notification);
         for (const buffered of this.subagents.takeBufferedNotifications()) {
@@ -510,7 +513,9 @@ export class CodexEventHandler {
             && notification.params.item.type === "commandExecution") {
             updateEvent = await this.createUpdateEvent(notification);
         }
-        if (!handledBySubagents) {
+        const finishTerminal = this.session.protocolVersion === 2 && notification.method === "item/completed"
+            && notification.params.item.type === "commandExecution";
+        if (!handledBySubagents && !finishTerminal) {
             await this.sessionState.asyncTasks.handleNotification(
                 notification,
                 this.subagents.notificationSessionId(notification),
@@ -522,6 +527,9 @@ export class CodexEventHandler {
         if (updateEvent === undefined) updateEvent = await this.createUpdateEvent(notification);
         if (updateEvent) {
             await this.publishUpdate(updateEvent, this.subagents.notificationSessionId(notification));
+        }
+        if (finishTerminal) {
+            await this.sessionState.asyncTasks.handleNotification(notification, this.subagents.notificationSessionId(notification));
         }
     }
 
@@ -632,9 +640,14 @@ export class CodexEventHandler {
                 this.completeRetryIncidentOnTurnProgress(notification.params.threadId);
                 this.openToolCalls(notification.params.threadId).complete(notification.params.item.id);
                 return await this.completeItemEvent(notification.params);
-            case "turn/plan/updated":
+            case "turn/plan/updated": {
                 this.completeRetryIncidentOnTurnProgress(notification.params.threadId);
-                return await this.updatePlan(notification.params);
+                const update = this.updatePlan(notification.params);
+                if (this.session.protocolVersion !== 2 || notification.params.plan.length !== 0 || update.sessionUpdate !== "plan_update") return update;
+                // Baseline v2 clients can clear the checklist even if they don't act on plan_removed.
+                await this.publishUpdate(update, this.subagents.notificationSessionId(notification));
+                return {sessionUpdate: "plan_removed", planId: update.plan.planId};
+            }
             case "turn/diff/updated":
                 if (notification.params.threadId === this.sessionState.sessionId) {
                     this.completeRetryIncidentOnTurnProgress(notification.params.threadId);
@@ -668,7 +681,8 @@ export class CodexEventHandler {
                 this.sessionState.currentTurnId = null;
                 this.sessionState.interruptTurnId = null;
                 if (this.session.protocolVersion === 2 && notification.params.turn.status === "failed") {
-                    for (const update of this.sessionState.openToolCalls.finishOutstanding()) {
+                    for (const update of this.sessionState.openToolCalls.finishOutstanding(undefined,
+                        id => this.session.hasBackgroundItem({type: "terminal", terminalId: id}))) {
                         await this.session.update(update, this.subagents.notificationSessionId(notification));
                     }
                 }
@@ -709,9 +723,15 @@ export class CodexEventHandler {
                 return this.createCodexSessionInfoUpdate({
                     closed: true,
                 });
-            case "item/commandExecution/outputDelta":
+            case "item/commandExecution/outputDelta": {
                 this.completeRetryIncidentOnTurnProgress(notification.params.threadId);
-                return this.renderer.render(this.streamsFor(notification.params.threadId).commands.outputDelta(notification.params.itemId, notification.params.delta));
+                const commands = this.streamsFor(notification.params.threadId).commands;
+                if (this.session.forSession(this.subagents.notificationSessionId(notification))
+                    .hasBackgroundItem({type: "terminal", terminalId: notification.params.itemId})) {
+                    commands.observeTerminal(notification.params.itemId);
+                }
+                return this.renderer.render(commands.outputDelta(notification.params.itemId, notification.params.delta));
+            }
             case "item/mcpToolCall/progress":
                 this.completeRetryIncidentOnTurnProgress(notification.params.threadId);
                 // AIR does not show MCP progress.
@@ -1043,8 +1063,14 @@ export class CodexEventHandler {
                 return this.renderer.render(DynamicToolReporter.completed(event.item));
             case "mcpToolCall":
                 return this.renderer.render(McpToolReporter.completed(event.item));
-            case "commandExecution":
-                return this.renderer.render(this.streamsFor(event.threadId).commands.completed(event.item, true));
+            case "commandExecution": {
+                const commands = this.streamsFor(event.threadId).commands;
+                if (this.session.forSession(this.subagents.notificationSessionId({method: "item/completed", params: event}))
+                    .hasBackgroundItem({type: "terminal", terminalId: event.item.id})) {
+                    commands.observeTerminal(event.item.id);
+                }
+                return this.renderer.render(commands.completed(event.item, true));
+            }
             case "imageView":
                 if (this.streamsFor(event.threadId).emittedImageViewItems.delete(event.item.id)) {
                     return null;
@@ -1144,7 +1170,7 @@ export class CodexEventHandler {
         this.openToolCalls(threadId).start(item.id, hasTerminal, turnId);
     }
 
-    private async updatePlan(event: TurnPlanUpdatedNotification): Promise<UpdateSessionEvent> {
+    private updatePlan(event: TurnPlanUpdatedNotification): UpdateSessionEvent {
         const plan: PlanEntry[] = event.plan.map(value => ({
                 status: value.status == "inProgress" ? "in_progress" : value.status,
                 content: value.step,

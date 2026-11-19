@@ -102,11 +102,11 @@ JetBrains AIR clients keep an older private contract instead. Without either con
 
 See [docs/subagent-sessions.md](docs/subagent-sessions.md) for both contracts, `session/load` replay, and the fallback.
 
-### Background terminal tasks
+### Background work
 
-Codex can keep a shell command running after a turn continues. AIR clients can show this work in the Async Tasks panel and stop one command.
+ACP v2 shows detached children and background terminals in the session's `background` list. Clients can stop a listed terminal without cancelling the foreground turn.
 
-See [AIR extensions](docs/air-extensions.md#async-tasks) for the capability, lifecycle events, and stop request.
+See [Background work](docs/background-work.md) for the v2 lifecycle and cancel methods, or [AIR async tasks](docs/air-extensions.md#async-tasks) for the existing AIR extension.
 
 ## License
 

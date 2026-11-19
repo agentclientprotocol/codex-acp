@@ -104,7 +104,7 @@ describeIntegration("integration: ACP v2 foreground state", () => {
                 expect(updates.some(({update}) => update.sessionUpdate === "available_commands_update")).toBe(false);
                 await vi.waitFor(() => {
                     expect(updates.filter(({update}) => update.sessionUpdate === "state_update").map(({update}) => update))
-                        .toEqual([{sessionUpdate: "state_update", state: "idle"}]);
+                        .toEqual([{sessionUpdate: "state_update", state: "idle", background: []}]);
                 });
                 const replayedMessages = updates.some(({update}) => update.sessionUpdate === "user_message"
                     || update.sessionUpdate === "user_message_chunk");

@@ -57,7 +57,7 @@ it("publishes non-idle state from the Codex thread/start result without a turn e
         expect(response).toBeGreaterThanOrEqual(0);
         await vi.waitFor(() => expect(h.wireMessages.slice(response + 1)).toContainEqual(expect.objectContaining({
             method: "session/update",
-            params: {sessionId, update: {sessionUpdate: "state_update", state: "running"}},
+            params: {sessionId, update: {sessionUpdate: "state_update", state: "running", background: []}},
         })));
     } finally { h.connection.close(); }
 });

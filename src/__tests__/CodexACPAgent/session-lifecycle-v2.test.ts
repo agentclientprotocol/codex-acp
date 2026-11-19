@@ -474,7 +474,7 @@ describe('Session lifecycle over ACP v2', () => {
         const response = await connection.agent.request(acpV2.methods.agent.session.resume, {
             sessionId, cwd, ...(replayFrom === undefined ? {} : {replayFrom}),
         });
-        expect(updates.at(-1)?.update).toEqual({sessionUpdate: "state_update", state: "idle"});
+        expect(updates.at(-1)?.update).toEqual({sessionUpdate: "state_update", state: "idle", background: []});
         // Commands are in the response; current info and foreground state are notified.
         const sessionUpdates = await waitForSessionUpdates(updates, ["session_info_update", "session_info_update", "state_update"]);
 
@@ -636,7 +636,7 @@ describe('Session lifecycle over ACP v2', () => {
         // resolves; nothing should still be pending afterwards.
         const replayedUpdates = [...updates];
         expect(agent().getSessionState(sessionId)).toBeTruthy();
-        expect(replayedUpdates.at(-1)?.update).toEqual({sessionUpdate: "state_update", state: "idle"});
+        expect(replayedUpdates.at(-1)?.update).toEqual({sessionUpdate: "state_update", state: "idle", background: []});
 
         await expect(dump({response, codexRequests, updates: replayedUpdates}))
             .toMatchFileSnapshot('data/session-lifecycle-v2-resume-start-replay.json');
@@ -648,7 +648,7 @@ describe('Session lifecycle over ACP v2', () => {
         await connection.agent.request(acpV2.methods.agent.session.resume, {sessionId, cwd, replayFrom: {type: "start"}});
         expect(updates[0]?.update).toEqual({sessionUpdate: "replay_complete"});
         expect(updates.filter(({update}) => update.sessionUpdate === "replay_complete")).toHaveLength(1);
-        expect(updates.at(-1)?.update).toEqual({sessionUpdate: "state_update", state: "idle"});
+        expect(updates.at(-1)?.update).toEqual({sessionUpdate: "state_update", state: "idle", background: []});
     });
 
     it('does not activate an inactive session at replay_complete', async () => {

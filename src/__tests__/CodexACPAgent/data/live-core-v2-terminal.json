@@ -21,6 +21,7 @@
   {
     "sessionId": "thread-1:subagent:worker",
     "update": {
+      "background": [],
       "state": "running",
       "sessionUpdate": "state_update"
     }
@@ -30,6 +31,7 @@
     "update": {
       "sessionId": "thread-1:subagent:worker",
       "state": {
+        "background": [],
         "state": "running"
       },
       "sessionUpdate": "subagent_update"
@@ -76,6 +78,34 @@
   {
     "sessionId": "thread-1:subagent:worker",
     "update": {
+      "sessionUpdate": "replay_complete"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "background": [],
+      "state": "running",
+      "sessionUpdate": "state_update"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "capabilities": {
+        "cancel": {}
+      },
+      "state": {
+        "background": [],
+        "state": "running"
+      },
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
       "terminalId": "terminal",
       "data": "U3RpbGwgc3RyZWFtaW5n",
       "sessionUpdate": "terminal_output_chunk"
@@ -98,33 +128,6 @@
       "toolCallId": "terminal",
       "status": "completed",
       "sessionUpdate": "tool_call_update"
-    }
-  },
-  {
-    "sessionId": "thread-1:subagent:worker",
-    "update": {
-      "state": "running",
-      "sessionUpdate": "state_update"
-    }
-  },
-  {
-    "sessionId": "thread-1",
-    "update": {
-      "sessionId": "thread-1:subagent:worker",
-      "state": {
-        "state": "running"
-      },
-      "sessionUpdate": "subagent_update"
-    }
-  },
-  {
-    "sessionId": "thread-1",
-    "update": {
-      "sessionId": "thread-1:subagent:worker",
-      "capabilities": {
-        "cancel": {}
-      },
-      "sessionUpdate": "subagent_update"
     }
   },
   {

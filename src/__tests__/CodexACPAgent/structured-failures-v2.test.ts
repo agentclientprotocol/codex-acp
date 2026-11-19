@@ -84,7 +84,7 @@ describe("standard ACP v2 terminal failures", () => {
         await expect(dump(idle)).toMatchFileSnapshot(`data/structured-failure-v2-provider-${air ? "air" : "plain"}.json`);
 
         await client.request("session/resume", {sessionId, cwd});
-        expect(lastIdle(client)).toEqual({sessionUpdate: "state_update", state: "idle"});
+        expect(lastIdle(client)).toEqual({sessionUpdate: "state_update", state: "idle", background: []});
     });
 
     it.each([false, true])("explains an unreachable ChatGPT backend as a connection failure (%s)", async air => {

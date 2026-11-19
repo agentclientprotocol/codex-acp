@@ -38,10 +38,11 @@ export class CodexSessionToolCalls {
     }
 
     /** Fails every still-open tool call and ends its terminal, if it had one. */
-    finishOutstanding(turnId?: string): UpdateSessionEvent[] {
+    finishOutstanding(turnId?: string, keepTerminal?: (terminalId: string) => boolean): UpdateSessionEvent[] {
         const updates: UpdateSessionEvent[] = [];
         for (const [itemId, {hasTerminal, turnId: owner}] of this.open) {
             if (turnId !== undefined && owner !== undefined && owner !== turnId) continue;
+            if (hasTerminal && keepTerminal?.(itemId)) continue;
             updates.push({
                 sessionUpdate: "tool_call_update",
                 toolCallId: itemId,

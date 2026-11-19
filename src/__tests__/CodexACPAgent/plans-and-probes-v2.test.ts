@@ -126,6 +126,26 @@ describe('Plans, compaction, notices and commands over ACP v2', () => {
         await expect(dump(updates)).toMatchFileSnapshot('data/plans-v2-structured.json');
     });
 
+    it("clears the checklist on an explicit empty replacement without removing Markdown plans", async () => {
+        const {connection, updates, startPrompt, send} = await connectV2Client();
+        closeClient = () => connection.close();
+        await startPrompt();
+        await send([
+            planUpdated([{step: "Done", status: "completed"}]),
+            {method: "item/completed", params: {threadId: sessionId, turnId, completedAtMs: 0,
+                item: {type: "plan", id: "markdown", text: "A different plan"}}},
+            planUpdated([]),
+        ]);
+        await vi.waitFor(() => expect(updates).toHaveLength(4));
+        expect(updates.map(({update}) => update)).toEqual([
+            {sessionUpdate: "plan_update", plan: {type: "items", planId: "codex-structured-plan",
+                entries: [{content: "Done", priority: "medium", status: "completed"}]}},
+            {sessionUpdate: "plan_update", plan: {type: "markdown", planId: "markdown", content: "A different plan"}},
+            {sessionUpdate: "plan_update", plan: {type: "items", planId: "codex-structured-plan", entries: []}},
+            {sessionUpdate: "plan_removed", planId: "codex-structured-plan"},
+        ]);
+    });
+
     it('sends the narrative plan as a markdown plan_update without a plan capability', async () => {
         const {connection, updates, startPrompt, send} = await connectV2Client();
         closeClient = () => connection.close();
