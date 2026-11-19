@@ -346,6 +346,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
 
     it("cascades parent cancellation without inventing a child ending", async () => {
         await connect();
+        h.emit(turnStarted());
         h.emit(itemStarted(activityItem()));
         h.emit(onWorker(turnStarted("child-turn")));
         await flush(h);
@@ -457,6 +458,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
 
     it.skipIf(version !== 2)("publishes snapshots after the setup response without waiting for unrelated requests", async () => {
         await connect();
+        h.emit(turnStarted());
         h.emit(itemStarted(activityItem()));
         h.emit(onWorker(turnStarted("child-turn")));
         await flush(h);

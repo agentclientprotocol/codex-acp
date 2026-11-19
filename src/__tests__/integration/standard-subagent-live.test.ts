@@ -160,6 +160,19 @@ describeIntegration("integration: live standard subagents", () => {
                 await vi.waitFor(() => expect(updates.slice(boundary).some(entry =>
                     state(entry)?.state === "idle" && state(entry)?.stopReason === "cancelled"), stderr).toBe(true), {timeout: 15_000});
                 await request("session/prompt", {sessionId, prompt: [{type: "text", text: "Continue independently"}]});
+            } else if (ending === "cancel" && version === 2) {
+                // The parent's final turn released the child. Parent cancel must not interrupt it.
+                await vi.waitFor(() => expect(updates.some(entry => entry.sessionId === sessionId
+                    && entry.update.sessionUpdate === "state_update" && entry.update.state === "idle"
+                    && entry.update.background?.some((item: {type: string; sessionId?: string}) =>
+                        item.type === "subagent" && item.sessionId === childId)), stderr).toBe(true), {timeout: 15_000});
+                const boundary = updates.length;
+                await context.notify("session/cancel", {sessionId});
+                await request("session/list", {});
+                releaseChild();
+                await vi.waitFor(() => expect(updates.slice(boundary).some(entry =>
+                    state(entry)?.state === "idle" && state(entry)?.stopReason === "end_turn"), stderr).toBe(true), {timeout: 15_000});
+                expect(updates.slice(boundary).some(entry => state(entry)?.stopReason === "cancelled")).toBe(false);
             } else {
                 const boundary = updates.length;
                 if (ending === "cancel") await context.notify("session/cancel", {sessionId});

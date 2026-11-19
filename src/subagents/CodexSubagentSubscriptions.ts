@@ -5,6 +5,7 @@ import type {
 } from "../CodexAppServerClient";
 import type {ServerNotification} from "../app-server";
 import type {Thread} from "../app-server/v2";
+import {logger} from "../Logger";
 import {isRootAgentPath} from "./CodexAgentPath";
 
 export type SubagentInteraction = <T>(
@@ -15,6 +16,7 @@ type Subscription = {
     rootSessionId: string;
     supportsSubagents: boolean;
     dispatch(event: ServerNotification): void;
+    handleNotification(event: ServerNotification): void | Promise<void>;
     enqueueInteraction(event: ServerNotification): void;
     approvalHandler: ApprovalHandler;
     elicitationHandler: ElicitationHandler;
@@ -62,9 +64,14 @@ export class CodexSubagentSubscriptions {
         this.sessions.delete(rootSessionId);
     }
 
-    redispatch(rootSessionId: string, notifications: ServerNotification[]): void {
+    /** Already on the notification lane; buffered events precede later live events. */
+    async drain(rootSessionId: string, notifications: ServerNotification[]): Promise<void> {
         const session = this.sessions.get(rootSessionId);
-        if (session) for (const notification of notifications) session.current.dispatch(notification);
+        if (!session) return;
+        for (const notification of notifications) {
+            try { await session.current.handleNotification(notification); }
+            catch (error) { logger.error("Error handling buffered Codex session notification", error); }
+        }
     }
 
     isChildThread(threadId: string): boolean {

@@ -1381,6 +1381,7 @@ export class CodexAcpClient {
             rootSessionId: sessionId,
             supportsSubagents,
             dispatch,
+            handleNotification: eventHandler,
             enqueueInteraction: (event) => {
                 // Child observation uses the same serialized, error-reporting queue
                 // as ordinary session notifications; callers intentionally do not
@@ -1396,9 +1397,13 @@ export class CodexAcpClient {
         });
     }
 
-    redispatchSessionNotifications(sessionId: string, notifications: ServerNotification[], after?: () => Promise<void>): void {
-        this.subagents.redispatch(sessionId, notifications);
-        if (after) this.enqueueSessionNotification(sessionId, after);
+    async publishSessionSetup(
+        sessionId: string, release: () => ServerNotification[], after: () => Promise<void>,
+    ): Promise<void> {
+        await this.enqueueSessionTransition(sessionId, async () => {
+            await this.subagents.drain(sessionId, release());
+            await after();
+        });
     }
 
     /** Completion includes async publication, not just invoking its callback. */

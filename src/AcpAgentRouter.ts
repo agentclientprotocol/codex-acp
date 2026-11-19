@@ -235,6 +235,7 @@ function createRouter(
         .onRequest(acpV2.methods.agent.session.resume, (ctx) => setup(ctx.params.sessionId, ctx.requestId, () => getAgentForPaths(ctx.params).resumeSessionV2(ctx.params, ctx.signal), ctx.signal))
         .onRequest(acpV2.methods.agent.session.fork, (ctx) => createdSetup(ctx.requestId, () => getAgentForPaths(ctx.params).forkSessionV2(ctx.params)))
         .onRequest(acpV2.methods.agent.session.close, (ctx) => getAgent(ctx.params).closeSession(ctx.params))
+        .onRequest(acpV2.methods.agent.terminal.cancel, (ctx) => getAgent().cancelTerminalV2(ctx.params))
         // No `session/set_mode`: v2 removed the modes API; modes are config options.
         .onRequest(acpV2.methods.agent.session.setConfigOption, (ctx) => getAgent(ctx.params).setSessionConfigOptionV2(ctx.params))
         .onRequest(acpV2.methods.agent.session.setTitle, (ctx) => getAgent(ctx.params).sessionIndex.setTitle(ctx.params))

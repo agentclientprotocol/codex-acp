@@ -20,12 +20,8 @@ describe.each([1, 2] as const)("ACP v%s SDK upgrade capabilities", version => {
                 await expect(h.request(method, {sessionId})).rejects.toMatchObject({code: -32601});
             }
             if (version === 2) {
-                expect(h.setupUpdates.filter(update => update.sessionUpdate === "state_update")
-                    .every(update => !("background" in update))).toBe(true);
-                for (const method of ["tool_call/cancel", "terminal/cancel"]) {
-                    await expect(h.request(method, {sessionId, toolCallId: "tool", terminalId: "terminal"}))
-                        .rejects.toMatchObject({code: -32601});
-                }
+                await expect(h.request("tool_call/cancel", {sessionId, toolCallId: "tool"})).rejects.toMatchObject({code: -32601});
+                await expect(h.request("terminal/cancel", {sessionId, terminalId: "unknown"})).rejects.toMatchObject({code: -32602});
             }
         } finally { h.connection.close(); }
     });

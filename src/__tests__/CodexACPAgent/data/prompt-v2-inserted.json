@@ -31,6 +31,7 @@
   },
   {
     "sessionUpdate": {
+      "background": [],
       "state": "running",
       "sessionUpdate": "state_update"
     }
@@ -74,6 +75,7 @@
   {
     "sessionUpdate": {
       "stopReason": "end_turn",
+      "background": [],
       "_meta": {
         "quota": {
           "token_count": null,

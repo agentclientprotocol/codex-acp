@@ -27,7 +27,8 @@ describe("Subagent cleanup ownership", () => {
         } as unknown as CodexAppServerClient;
         const subscriptions = new CodexSubagentSubscriptions(client);
         subscriptions.subscribe({
-            rootSessionId: "root", supportsSubagents: false, dispatch: vi.fn(), enqueueInteraction: vi.fn(),
+            rootSessionId: "root", supportsSubagents: false, dispatch: vi.fn(), handleNotification: vi.fn(),
+            enqueueInteraction: vi.fn(),
             approvalHandler: {} as never, elicitationHandler: {} as never,
             waitForRootNotifications: async () => {}, waitForChildSession: async () => null,
         });

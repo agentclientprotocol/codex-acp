@@ -4,6 +4,7 @@
     "message": "Try again later."
   },
   "stopReason": "error",
+  "background": [],
   "_meta": {
     "quota": {
       "token_count": null,

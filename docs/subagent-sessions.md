@@ -21,7 +21,7 @@ Without either contract, a subagent stays an ordinary tool call on the root sess
 - A child keeps one session ID across assignments, idle periods, and replay.
 - `title` comes from the Codex agent path or thread name.
 - `description` is the role that Codex assigned to the child (`agentRole`). It is omitted when Codex reports no role. It never holds the task prompt.
-- `capabilities.cancel` is advertised only while the child's current turn can be interrupted. `session/cancel` with the child's ID interrupts that work and its observed descendants. Every other Client request for a child session is rejected.
+- `capabilities.cancel` is advertised only while the child's current turn can be interrupted. `session/cancel` with the child's ID interrupts that work. On v2 it skips listed [background work](background-work.md); a child terminal with its own `capabilities.cancel` can be stopped with `terminal/cancel` without interrupting the child turn. Other client-initiated requests for a child session are rejected.
 - `state` reports `running`, `requires_action`, `idle` with a `stopReason`, or `unknown` when observability is lost. A v2 Client also gets the same `state_update` on the child session. There is no terminal child state.
 - `cwd` is reported as described in [Directories](#directories).
 

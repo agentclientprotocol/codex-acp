@@ -297,6 +297,11 @@ describe.each([1, 2] as const)("ACP v%s recorded child replay", version => {
         await flush(h);
         const updates = h.scopedUpdates.slice(before).filter(entry => entry.sessionId === childId);
         expect(JSON.stringify(updates)).not.toContain("BeforeAfter");
+        if (version === 2) {
+            expect(updates.map(entry => entry.update)).toContainEqual({
+                sessionUpdate: "terminal_output_chunk", terminalId: "command", data: Buffer.from("After").toString("base64"),
+            });
+        }
         expect(gap()).toHaveLength(1);
         await expect(JSON.stringify(updates, null, 2)).toMatchFileSnapshot(`data/subagent-replay-v${version}-running-tool.json`);
     });

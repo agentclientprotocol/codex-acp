@@ -4,6 +4,7 @@
     "message": "Provider unavailable"
   },
   "stopReason": "error",
+  "background": [],
   "state": "idle",
   "sessionUpdate": "state_update"
 }
