@@ -76,6 +76,12 @@ describe.each([1, 2] as const)("ACP v%s direct child cancellation", version => {
         await start("coordinator");
         await start("worker", "worker-turn", "/root/coordinator/worker");
         await start("sibling");
+        if (version === 2) {
+            h.emit(on("coordinator", turnCompleted("coordinator-turn")));
+            await flush(h);
+            h.emit(on("coordinator", turnStarted("coordinator-next")));
+            await flush(h);
+        }
         const approval = h.triggerApproval("item/commandExecution/requestApproval", {
             threadId: "worker", turnId: "worker-turn", itemId: "descendant-approval", command: "echo ok", cwd,
             commandActions: [], reason: null, availableDecisions: ["accept", "decline"],
@@ -83,7 +89,7 @@ describe.each([1, 2] as const)("ACP v%s direct child cancellation", version => {
         try {
             await vi.waitFor(() => expect(answer).toBeDefined());
             await h.cancel(id("coordinator"));
-            const expected = [{threadId: "coordinator", turnId: "coordinator-turn"}];
+            const expected = [{threadId: "coordinator", turnId: version === 1 ? "coordinator-turn" : "coordinator-next"}];
             if (version === 1) expected.push({threadId: "worker", turnId: "worker-turn"});
             await vi.waitFor(() => expect(h.turnInterruptCalls()).toEqual(expected));
             expect(cancellable("sibling")).toBe(true);

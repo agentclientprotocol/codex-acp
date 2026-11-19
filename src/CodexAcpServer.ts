@@ -1643,7 +1643,7 @@ export class CodexAcpServer {
         const existing = this.sessions.get(sessionId)?.asyncTasks;
         if (this.protocolVersion === 2 && existing) return existing;
         return new CodexBackgroundTasks(
-            clientSupportsAirCapability(this.clientCapabilities, AIR_ASYNC_TASKS_KEY),
+            this.protocolVersion === 1 && clientSupportsAirCapability(this.clientCapabilities, AIR_ASYNC_TASKS_KEY),
             sessionId,
             this.codexAcpClient.appServerClient,
             new ACPSessionConnection(this.connection, sessionId),

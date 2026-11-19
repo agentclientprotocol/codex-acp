@@ -118,6 +118,10 @@ describe('session/cancel and session/close over ACP v2', () => {
         client.emit(itemStarted({type: "subAgentActivity", id: "spawn-descendant", kind: "started", agentThreadId: "descendant",
             agentPath: "/root/worker/descendant", model: null, reasoningEffort: null}));
         client.emit({method: "turn/started", params: {threadId: "descendant", turn: createTurn("inProgress", "descendant-turn")}});
+        client.emit(turnCompleted());
+        await client.promptRunFinished();
+        client.emit(turnStarted("unrelated-turn"));
+        await client.waitForNotifications();
         const approval = client.triggerApproval(CommandExecutionApprovalRequest.method, {
             ...commandApprovalParams(), threadId: "worker", turnId: "worker-turn",
         });
@@ -128,9 +132,9 @@ describe('session/cancel and session/close over ACP v2', () => {
             await vi.waitFor(() => expect(permissionSignal).toBeDefined());
             await vi.waitFor(() => expect(descendantSignal).toBeDefined());
             await client.cancel();
-            await vi.waitFor(() => expect(client.turnInterruptCalls()).toEqual([{threadId: sessionId, turnId}]));
-            client.emit(turnFinished("interrupted"));
-            await client.promptRunFinished();
+            await vi.waitFor(() => expect(client.turnInterruptCalls()).toEqual([{threadId: sessionId, turnId: "unrelated-turn"}]));
+            client.emit(turnFinished("interrupted", "unrelated-turn"));
+            await client.waitForNotifications();
             expect(permissionSignal!.aborted).toBe(false);
             expect(descendantSignal!.aborted).toBe(false);
             permission.resolve({outcome: {outcome: "selected", optionId}});
