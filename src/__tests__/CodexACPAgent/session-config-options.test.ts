@@ -92,12 +92,14 @@ describe("Session config options", () => {
         vi.unstubAllEnvs();
     });
 
-    it("exposes mode, model, reasoning_effort and fast-mode in the new session response", async () => {
+    it("exposes config options in order in the new session response", async () => {
         const {fast, slow} = buildModels();
         const {response} = await createSession("fast-model[medium]", [fast, slow]);
 
         const ids = response.configOptions?.map(o => o.id);
-        expect(ids).toEqual([MODE_CONFIG_ID, COLLABORATION_MODE_CONFIG_ID, MODEL_CONFIG_ID, REASONING_EFFORT_CONFIG_ID, "fast-mode"]);
+        expect(ids).toEqual([
+            MODEL_CONFIG_ID, REASONING_EFFORT_CONFIG_ID, "fast-mode", MODE_CONFIG_ID, COLLABORATION_MODE_CONFIG_ID,
+        ]);
 
         const modelOption = response.configOptions?.find(o => o.id === MODEL_CONFIG_ID);
         expect(modelOption).toMatchObject({
@@ -165,7 +167,7 @@ describe("Session config options", () => {
         const {codexAcpAgent, response} = await createSession("custom-model[high]", [fast, slow]);
 
         const ids = response.configOptions?.map(o => o.id);
-        expect(ids).toEqual([MODE_CONFIG_ID, COLLABORATION_MODE_CONFIG_ID, MODEL_CONFIG_ID]);
+        expect(ids).toEqual([MODEL_CONFIG_ID, MODE_CONFIG_ID, COLLABORATION_MODE_CONFIG_ID]);
 
         const modelOption = response.configOptions?.find(o => o.id === MODEL_CONFIG_ID);
         expect(modelOption).toMatchObject({

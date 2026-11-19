@@ -62,6 +62,8 @@ Only these differences are allowed:
   no output after a tool call ended, a terminal status for a replayed image generation,
   and the command as the title of a command approval.
 - Feature changes for every client: the `/mcp` command has a new description and an input hint.
+  Session `configOptions` list model, reasoning effort, fast mode, permissions mode, and collaboration mode
+  in that order, omitting unavailable options.
 - The client gets no AIR-only key.
   That is no `_meta.jetbrains.air` key and none of the earlier keys in [Removed keys](#removed-keys).
 - The output of a command arrives once, in the chunks or in `content`, as [Zed conventions](#zed-conventions) describe.

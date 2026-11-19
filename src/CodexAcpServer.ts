@@ -3415,13 +3415,7 @@ export class CodexAcpServer {
         const recommendedModelId = useRecommendedValue
             ? sessionState.availableModels.find(model => model.isDefault)?.id
             : undefined;
-        const configOptions = [
-            sessionState.agentMode.toConfigOption(
-                sessionState.clientCapabilities.airClient,
-                sessionState.availableAgentModes,
-            ),
-            createCollaborationModeConfigOption(sessionState.collaborationMode),
-        ];
+        const configOptions: Array<acp.SessionConfigOption> = [];
         // A gateway that lists none of the Codex models leaves no model to offer, so there is no model option at all.
         if (sessionState.availableModels.length > 0) {
             configOptions.push(createModelConfigOption(sessionState.availableModels, currentModelId.model, recommendedModelId));
@@ -3435,12 +3429,19 @@ export class CodexAcpServer {
                 ),
             );
         }
-      if (sessionState.currentModelSupportsFast) {
-        configOptions.push(createFastModeConfigOption(
-          sessionState.fastModeEnabled,
-          this.booleanConfigOptionsSupported,
-        ));
-      }
+        if (sessionState.currentModelSupportsFast) {
+            configOptions.push(createFastModeConfigOption(
+                sessionState.fastModeEnabled,
+                this.booleanConfigOptionsSupported,
+            ));
+        }
+        configOptions.push(
+            sessionState.agentMode.toConfigOption(
+                sessionState.clientCapabilities.airClient,
+                sessionState.availableAgentModes,
+            ),
+            createCollaborationModeConfigOption(sessionState.collaborationMode),
+        );
         return configOptions;
     }
 

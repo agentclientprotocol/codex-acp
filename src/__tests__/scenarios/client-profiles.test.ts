@@ -766,7 +766,8 @@ describe("AIR", () => {
             ]);
         const newSession = response("air", "command-output-stdin", "session/new");
         expect(air(newSession["modes"]["availableModes"][0]["_meta"])).toEqual({version: 1, kind: "standard"});
-        expect(air(newSession["configOptions"][0]["options"][0]["_meta"])).toEqual({version: 1, kind: "standard"});
+        const mode = newSession["configOptions"].find((option: acp.SessionConfigOption) => option.id === "mode");
+        expect(air(mode["options"][0]["_meta"])).toEqual({version: 1, kind: "standard"});
         const commands = updates("air", "history-replay")
             .find(update => update["sessionUpdate"] === "available_commands_update")!["availableCommands"];
         expect(air(commands[0]["_meta"])).toEqual({
