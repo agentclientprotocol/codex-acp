@@ -1,4 +1,5 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
+import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import {ResponseError} from "vscode-jsonrpc/node";
 import {
     createCodexMockTestFixture,
@@ -390,7 +391,10 @@ describe("CodexACPAgent - an unavailable account read", () => {
         await initialize(fixture);
 
         await expect(fixture.getCodexAcpAgent().loadSession({sessionId: SESSION_ID, cwd: "/test/project", mcpServers: []}))
-            .rejects.toThrow("workspace routing discovery unauthorized (401)");
+            .rejects.toMatchObject({
+                code: RequestError.authRequired().code,
+                message: "Authentication required: workspace routing discovery unauthorized (401)",
+            });
     });
 
     it("keeps the sessions and pushes nothing when an auth refresh read is unavailable", async () => {
@@ -486,7 +490,10 @@ describe("CodexACPAgent - an unavailable account read", () => {
         await initialize(fixture);
 
         await expect(fixture.getCodexAcpAgent().loadSession({sessionId: SESSION_ID, cwd: "/test/project", mcpServers: []}))
-            .rejects.toThrow("workspace routing discovery unauthorized (401)");
+            .rejects.toMatchObject({
+                code: RequestError.authRequired().code,
+                message: "Authentication required: workspace routing discovery unauthorized (401)",
+            });
         // The read of `initialize` pushes the none status. The load pushes nothing more.
         expect(authStatusUpdates(fixture)).toEqual([NONE_STATUS]);
         expect(appServer.accountLogout).not.toHaveBeenCalled();
