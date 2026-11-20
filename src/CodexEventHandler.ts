@@ -12,7 +12,6 @@ import {ACPSessionConnection, type AcpClientConnection, type UpdateSessionEvent}
 import {normalizeSessionTitle} from "./SessionTitle";
 import type {
     AccountRateLimitsUpdatedNotification,
-    AccountUpdatedNotification,
     AgentMessageDeltaNotification,
     CodexErrorInfo,
     ConfigWarningNotification,
@@ -263,8 +262,6 @@ export class CodexEventHandler {
     private latestRootTurnId: string | null = null;
     private readonly collectTurnDiffs: boolean;
     private readonly subagents: SubagentEventRouter;
-    /** Connection-level `authStatus` sink; the app-server account push feeds it. */
-    private readonly onAccountUpdated: ((notification: AccountUpdatedNotification) => void) | undefined;
 
     constructor(
         connection: AcpClientConnection,
@@ -272,12 +269,10 @@ export class CodexEventHandler {
         supportsTypedSessionFailures: boolean,
         sessionFailureIds: SessionFailureIds,
         subagents: SubagentEventRouter,
-        onAccountUpdated: ((notification: AccountUpdatedNotification) => void) | undefined,
         collectTurnDiffs: boolean,
         private readonly supportsCompaction: boolean,
         private readonly supportsNotices: boolean,
     ) {
-        this.onAccountUpdated = onAccountUpdated;
         this.sessionState = sessionState;
         this.supportsTypedSessionFailures = supportsTypedSessionFailures;
         this.sessionFailureIds = sessionFailureIds;
@@ -744,7 +739,7 @@ export class CodexEventHandler {
                 this.handleRateLimitsUpdated(notification.params);
                 return null;
             case "account/updated":
-                this.onAccountUpdated?.(notification.params);
+                // The connection observes this even when it has no sessions.
                 return null;
             case "configWarning":
                 return await this.createConfigWarningEvent(notification.params);
