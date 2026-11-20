@@ -63,6 +63,7 @@ function oauthReauthParams(overrides: Partial<McpServerElicitationRequestParams 
         threadId: sessionId,
         turnId,
         serverName: "auth-server",
+        environmentId: null,
         mode: "url",
         _meta: null,
         message: "Please authorize access",
@@ -140,7 +141,7 @@ describe('elicitation/create over ACP v2', () => {
         closeClient = () => client.connection.close();
         const {finishTurn} = await startRunningPrompt(client);
         const response = await client.triggerApproval("mcpServer/elicitation/request", {
-            threadId: sessionId, turnId, serverName: "forms", mode: "form", _meta: null, message: "Choose",
+            threadId: sessionId, turnId, serverName: "forms", environmentId: null, mode: "form", _meta: null, message: "Choose",
             requestedSchema: {type: "object", properties: {
                 value: {type: "_custom"}, answer: {type: "string", pattern: "^[A-Z]", minLength: 1},
             }},

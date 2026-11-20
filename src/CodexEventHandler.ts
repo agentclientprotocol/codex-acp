@@ -802,6 +802,7 @@ export class CodexEventHandler {
             case "thread/readState/changed":
             case "thread/prediction/updated":
             case "thread/deleted":
+            case "thread/search/partial": // ACP does not request streaming thread search.
             case "thread/reverted":
             case "thread/queue/changed":
             case "project/changed":

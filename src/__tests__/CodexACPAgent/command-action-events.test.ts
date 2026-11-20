@@ -299,6 +299,7 @@ describe('CodexEventHandler - command action events', () => {
                 startedAtMs: 0,
                 item: {
                     type: "mcpToolCall",
+                    environmentId: null,
                     id: "call-id",
                     server: "server-name",
                     tool: "tool-name",
@@ -332,6 +333,7 @@ describe('CodexEventHandler - command action events', () => {
                     startedAtMs: 0,
                     item: {
                         type: "mcpToolCall",
+                        environmentId: null,
                         id: "call-id",
                         server: "ijproxy",
                         tool: "read_file",
@@ -364,6 +366,7 @@ describe('CodexEventHandler - command action events', () => {
                     completedAtMs: 0,
                     item: {
                         type: "mcpToolCall",
+                        environmentId: null,
                         id: "call-id",
                         server: "ijproxy",
                         tool: "read_file",
@@ -401,6 +404,7 @@ describe('CodexEventHandler - command action events', () => {
                     startedAtMs: 0,
                     item: {
                         type: "mcpToolCall",
+                        environmentId: null,
                         id: "call-id",
                         server: "server-name",
                         tool: "tool-name",
@@ -442,6 +446,7 @@ describe('CodexEventHandler - command action events', () => {
                     completedAtMs: 0,
                     item: {
                         type: "mcpToolCall",
+                        environmentId: null,
                         id: "call-id",
                         server: "server-name",
                         tool: "tool-name",
