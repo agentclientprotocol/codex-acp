@@ -78,6 +78,7 @@ Clients can [query authentication status](docs/auth-status.md) before starting a
 - `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `workspace-write`, `agent`, `agent-full-access`, or `permission-profile:<profile-id>`.
 - `NO_BROWSER` - hide browser-based ChatGPT auth when set.
 - `APP_SERVER_LOGS` - directory for adapter logs.
+- `CODEX_RPC_TIMEOUT_MS` - wait for one Codex app-server JSON-RPC request before it fails (default `60000`, or `15000` for `turn/interrupt`).
 
 ## Development
 
