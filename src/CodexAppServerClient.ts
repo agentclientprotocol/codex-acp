@@ -678,7 +678,7 @@ export class CodexAppServerClient {
     }
 
     async threadStart(params: ThreadStartParams): Promise<ExperimentalThreadStartResponse> {
-        return await this.sendRequest({ method: "thread/start", params: withRawToolEvents(params) });
+        return await this.sendRequest({ method: "thread/start", params: params });
     }
 
     async threadSetName(params: ThreadSetNameParams): Promise<ThreadSetNameResponse> {
@@ -1571,9 +1571,4 @@ async function withHistoryTimeout<T>(page: Promise<T>, method: string, threadId:
     } finally {
         clearTimeout(timer);
     }
-}
-
-/** The native experimental field is absent from bindings generated without `--experimental`. */
-function withRawToolEvents<T>(params: T): T & {experimentalRawEvents: true} {
-    return {...params, experimentalRawEvents: true};
 }
