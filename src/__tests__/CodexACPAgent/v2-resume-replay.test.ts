@@ -337,7 +337,7 @@ describe('ACP v2 resume replay: review-mode ids, reviewer-prompt hiding, primers
             itemsView: "full",
             items: [
                 {...commandExecutionItem("command", "completed"), aggregatedOutput: "Recorded output"},
-                {type: "mcpToolCall", id: "mcp", server: "docs", tool: "lookup", status: "completed",
+                {type: "mcpToolCall", id: "mcp", server: "docs", environmentId: null, tool: "lookup", status: "completed",
                     arguments: {}, appContext: null, mcpAppUi: null, pluginId: null, readOnlyHint: null,
                     result: null, error: null, durationMs: null},
                 {type: "contextCompaction", id: "compaction"},
