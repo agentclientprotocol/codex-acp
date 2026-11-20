@@ -12,8 +12,6 @@ import {
 } from "../AirExtension";
 import {logger} from "../Logger";
 import type {ThreadBackgroundTerminal} from "./BackgroundTerminalApi";
-import {CodexCodeModeTasks} from "./CodexCodeModeTasks";
-import {ClientCapabilities} from "../tool-calls/ClientCapabilities";
 
 type CommandExecutionItem = Extract<ThreadItem, {type: "commandExecution"}>;
 type TerminalState = "completed" | "failed" | "stopped";
@@ -65,8 +63,6 @@ export class CodexBackgroundTasks {
     private disposed = false;
     private poll: ReturnType<typeof setTimeout> | undefined;
 
-    private readonly codeMode: CodexCodeModeTasks;
-
     constructor(
         readonly enabled: boolean,
         private readonly rootSessionId: string,
@@ -74,18 +70,13 @@ export class CodexBackgroundTasks {
         private readonly session: ACPSessionConnection,
         private readonly standard = false,
         private readonly standardChildren = false,
-        capabilities = ClientCapabilities.from({}),
-    ) {
-        this.codeMode = new CodexCodeModeTasks(session, capabilities);
-    }
+    ) {}
 
     async handleNotification(
         notification: ServerNotification,
         sessionId: string,
         commandTitle?: string,
     ): Promise<void> {
-        if (this.disposed) return;
-        await this.codeMode.handleNotification(notification, sessionId);
         if (!this.isActive()) return;
         const threadId = notificationThreadId(notification);
         if (threadId === null) return;
@@ -98,39 +89,14 @@ export class CodexBackgroundTasks {
             await this.observeCommandCompleted(notification.params.item, threadId);
             return;
         }
-        if (notification.method === "rawResponseItem/completed"
-            && (notification.params.item.type === "custom_tool_call_output" || notification.params.item.type === "function_call_output")) {
-            await this.discoverYieldedTerminal(notification.params.item.output, threadId, sessionId);
-            return;
-        }
         // The list includes processes still serving their initial tool call. At a turn boundary
         // a surviving process is known to be detached. Publish its terminal before reporting idle.
         if (this.reportsStandard(sessionId) && notification.method === "turn/completed"
-            && notification.params.turn.status !== "inProgress" && this.hasRunningTask(threadId)) {
+            && notification.params.turn.status !== "inProgress") {
             await this.reconcile(threadId, sessionId);
         } else if (this.enabled && (notification.method === "turn/completed"
             || (notification.method === "item/started" && this.hasRunningTask(threadId)))) {
             void this.reconcile(threadId, sessionId, false);
-        }
-    }
-
-    private async discoverYieldedTerminal(output: unknown, threadId: string, sessionId: string): Promise<void> {
-        if (typeof output !== "string") return;
-        let processId: unknown;
-        try {
-            processId = (JSON.parse(output) as {session_id?: unknown} | null)?.session_id;
-        } catch { return; }
-        if (typeof processId !== "string" && typeof processId !== "number") return;
-        try {
-            const snapshot = await this.listAll(threadId);
-            if (snapshot === null || !this.queryIsCurrent(snapshot.generation)) return;
-            const terminal = snapshot.terminals.find(item => item.processId === String(processId));
-            if (!terminal || this.ended.has(wireTaskId(this.rootSessionId, threadId, terminal.itemId))) return;
-            const task = this.remember(threadId, sessionId, terminal);
-            if (this.enabled) await this.announce(task);
-            if (this.reportsStandard(sessionId)) await this.publishStandard(task, snapshot.generation);
-        } catch (error) {
-            if (this.isActive()) logger.error(`Failed to discover yielded terminal for ${threadId}`, error);
         }
     }
 
@@ -190,12 +156,11 @@ export class CodexBackgroundTasks {
         }
     }
 
-    async prepareForAppServerReplacement(): Promise<void> {
+    prepareForAppServerReplacement(): void {
         this.appServerGeneration += 1;
         this.appServerQueriesEnabled = false;
         clearTimeout(this.poll);
         this.poll = undefined;
-        await this.codeMode.finishAll("failed");
     }
 
     async recover(threadId: string, sessionId: string, itemIds: ReadonlySet<string>): Promise<void> {
@@ -212,7 +177,6 @@ export class CodexBackgroundTasks {
     }
 
     async finishAll(state: TerminalState): Promise<void> {
-        await this.codeMode.finishAll(state);
         if (!this.isActive()) return;
         const errors: unknown[] = [];
         for (const task of [...this.tasks.values()]) {
@@ -310,7 +274,6 @@ export class CodexBackgroundTasks {
     }
 
     clear(): void {
-        this.codeMode.clear();
         this.disposed = true;
         this.prepareForAppServerReplacement();
         this.tasks.clear();

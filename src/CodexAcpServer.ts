@@ -1649,7 +1649,6 @@ export class CodexAcpServer {
             new ACPSessionConnection(this.connection, sessionId),
             this.protocolVersion === 2,
             this.usesStandardSubagents(),
-            this.capabilities,
         );
     }
 
@@ -2470,7 +2469,7 @@ export class CodexAcpServer {
 
             logger.log("Restarting Codex app-server for provider update", {sessionCount: this.sessions.size});
             for (const session of this.sessions.values()) {
-                await session.asyncTasks.prepareForAppServerReplacement();
+                session.asyncTasks.prepareForAppServerReplacement();
             }
             await this.finishAllAsyncTasks("stopped", "before the provider restart");
             const replacement = await this.restartCodexClient();

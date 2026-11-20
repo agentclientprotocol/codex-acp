@@ -34,8 +34,7 @@
           }
         },
         "modelProvider": null,
-        "cwd": "/workspace",
-        "experimentalRawEvents": true
+        "cwd": "/workspace"
       }
     }
   ]
