@@ -36,6 +36,12 @@ export class CommandReporter {
     /** Commands that already sent output or stdin chunks to a client that is not AIR. */
     private readonly standardStreamedCommands = new Set<string>();
 
+    /** Resume may reannounce a live terminal without replaying its original command start. */
+    observeTerminal(itemId: string): void {
+        this.nonTerminalCommands.delete(itemId);
+        this.terminalCommands.add(itemId);
+    }
+
     started(item: CommandItem): ToolFacts {
         if (commandUsesTerminal(item)) {
             this.nonTerminalCommands.delete(item.id);

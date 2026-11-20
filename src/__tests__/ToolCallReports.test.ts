@@ -1,6 +1,22 @@
 import {describe, expect, it} from "vitest";
 import {ToolCallReports} from "../ToolCallReports";
 
+describe("v2 tool-call status", () => {
+    it("keeps a call from returning to pending or changing status after its final report", () => {
+        const reports = new ToolCallReports(true);
+        const update = {sessionUpdate: "tool_call_update", toolCallId: "call"} as const;
+        reports.prepare("s", {...update, status: "in_progress"});
+        for (const status of ["pending", null] as const) {
+            expect(reports.prepare("s", {...update, status})).toBeNull();
+        }
+        expect(reports.prepare("s", {...update, status: "completed"})).toEqual({...update, status: "completed"});
+        expect(reports.prepare("s", {...update, status: "failed", title: "New title"}))
+            .toEqual({...update, title: "New title"});
+        expect(reports.prepare("s", {...update, sessionUpdate: "tool_call", status: "in_progress", title: "New title"})).toBeNull();
+        expect(reports.unfinished("s")).toEqual([]);
+    });
+});
+
 describe("ToolCallReports", () => {
     it("removes fields that did not change since the start", () => {
         const reports = new ToolCallReports();

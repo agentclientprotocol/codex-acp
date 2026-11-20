@@ -48,9 +48,9 @@ describe.each([1, 2] as const)("ACP v%s direct child cancellation", version => {
         await connect();
         await start();
         await start("sibling");
-        await expect(h.request("session/close", {sessionId: id("worker")})).rejects.toMatchObject({code: -32600});
+        await expect(h.request("session/close", {sessionId: id("worker")})).rejects.toMatchObject({code: -32602});
         await expect(h.request("session/prompt", {sessionId: id("worker"), prompt: [{type: "text", text: "No"}]}))
-            .rejects.toMatchObject({code: -32600});
+            .rejects.toMatchObject({code: -32602});
         await h.cancel(id("worker"));
         await vi.waitFor(() => expect(h.turnInterruptCalls()).toEqual([{threadId: "worker", turnId: "worker-turn"}]));
         expect(roster().some(update => update.state != null && (update.state as {state: string}).state === "idle")).toBe(false);
@@ -220,7 +220,7 @@ describe.each([1, 2] as const)("ACP v%s direct child cancellation", version => {
             await h.cancel(id("worker"));
             await flush(h);
             expect(h.turnInterruptCalls()).toEqual([]);
-            expect(grants()).toBe(beforeGrants);
+            expect(grants()).toBe(beforeGrants + (version === 2 ? 1 : 0));
         } finally { release(); }
         await pending;
         await vi.waitFor(() => expect(grants()).toBe(beforeGrants + 1));
@@ -229,7 +229,11 @@ describe.each([1, 2] as const)("ACP v%s direct child cancellation", version => {
             && typeof frame.result === "object" && "configOptions" in frame.result);
         const grant = frames.findIndex(frame => "method" in frame && frame.method === "session/update"
             && (frame.params as {update: {capabilities?: {cancel?: object}}}).update.capabilities?.cancel != null);
-        expect(grant).toBeGreaterThan(response);
+        if (version === 1) expect(grant).toBeGreaterThan(response);
+        else {
+            expect(grant).toBeGreaterThanOrEqual(0);
+            expect(grant).toBeLessThan(response);
+        }
         await h.cancel(id("worker"));
         await vi.waitFor(() => expect(h.turnInterruptCalls()).toHaveLength(1));
     });
@@ -250,7 +254,8 @@ describe.each([1, 2] as const)("ACP v%s direct child cancellation", version => {
         await flush(h);
         await h.cancel(id("worker"));
         await flush(h);
-        expect(grants()).toBe(beforeGrants);
+        // V2 includes the tentative snapshot before the response, but its control never becomes effective.
+        expect(grants()).toBe(beforeGrants + (version === 2 ? 1 : 0));
         expect(h.turnInterruptCalls()).toEqual([]);
     });
 

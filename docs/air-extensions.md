@@ -62,6 +62,9 @@ Only these differences are allowed:
   no output after a tool call ended, a terminal status for a replayed image generation,
   and the command as the title of a command approval.
 - Feature changes for every client: the `/mcp` command has a new description and an input hint.
+  The adapter advertises [`auth.status`](auth-status.md) and sends `auth/status_update` alongside the legacy `_auth/status_update`.
+  Session `configOptions` list model, reasoning effort, fast mode, permissions mode, and collaboration mode
+  in that order, omitting unavailable options.
 - The client gets no AIR-only key.
   That is no `_meta.jetbrains.air` key and none of the earlier keys in [Removed keys](#removed-keys).
 - The output of a command arrives once, in the chunks or in `content`, as [Zed conventions](#zed-conventions) describe.
@@ -1028,15 +1031,14 @@ Recovery never removes the transcript record.
 
 ## Native subagent sessions
 
-The adapter implements the draft [ACP subagent RFD](https://github.com/agentclientprotocol/agent-client-protocol/pull/1992).
-[Subagent sessions](subagent-sessions.md) describes the lifecycle.
+AIR keeps the private subagent contract that predates the ACP Subagent Sessions RFD.
+[Subagent sessions](subagent-sessions.md#air-legacy-contract) describes its lifecycle and the standard contract of other clients.
 This section covers only the AIR bridge.
 
-- The canonical client field is `clientCapabilities.subagents: {}`.
-- Released ACP SDKs can strip that draft field.
-  AIR can instead declare `nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`.
-- Either signal enables native subagent sessions. New clients must prefer the canonical field.
-- The agent always advertises `agentCapabilities.sessionCapabilities.subagents`. It advertises `nativeSubagentSessions` to AIR.
+- AIR declares `nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`, or on v1 `clientCapabilities.subagents: {}`.
+- Either signal enables native subagent sessions for AIR.
+- The agent advertises `agentCapabilities.sessionCapabilities.subagents` and `nativeSubagentSessions` to AIR only.
+  A client that is not AIR gets neither, because the RFD defines no Agent-side capability.
 - Without either signal, a Codex subagent stays an ordinary tool call.
   AIR gets `_meta.jetbrains.air.subagent: true` on a spawn. Another client gets the tool call without `_meta`.
 

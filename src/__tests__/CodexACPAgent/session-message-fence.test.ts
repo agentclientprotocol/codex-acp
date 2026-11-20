@@ -103,7 +103,7 @@ describe("Post-close session delivery", () => {
                     "method" in frame && frame.method === "session/update"
                         ? [(frame.params as {update: {sessionUpdate: string; state?: string}}).update] : [])
                     .filter(update => update.sessionUpdate === "state_update");
-                expect(states).toEqual([{sessionUpdate: "state_update", state: "idle"}]);
+                expect(states).toEqual([{sessionUpdate: "state_update", state: "idle", background: []}]);
             }
             announce();
             await h.waitForNotifications();

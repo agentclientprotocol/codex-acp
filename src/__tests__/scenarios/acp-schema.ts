@@ -18,6 +18,7 @@ ajv.addSchema(JSON.parse(fs.readFileSync(
 /** The ACP type of each recorded message. */
 const MESSAGE_TYPES: Record<string, string> = {
     "notify session/update": "SessionNotification",
+    "notify auth/status_update": "AuthStatusUpdateNotification",
     "request session/request_permission": "RequestPermissionRequest",
     "request elicitation/create": "CreateElicitationRequest",
     "notify elicitation/complete": "CompleteElicitationNotification",

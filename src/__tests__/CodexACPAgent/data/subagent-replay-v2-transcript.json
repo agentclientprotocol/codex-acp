@@ -22,9 +22,7 @@
   {
     "sessionId": "thread-1:subagent:worker",
     "update": {
-      "stopReason": "end_turn",
-      "state": "idle",
-      "sessionUpdate": "state_update"
+      "sessionUpdate": "replay_complete"
     }
   }
 ]

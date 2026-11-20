@@ -1,4 +1,5 @@
-import type {Account, AccountUpdatedNotification} from "./app-server/v2";
+import type {AuthStatusResponse} from "@agentclientprotocol/sdk/unstable";
+import type {Account, AccountUpdatedNotification, GetAccountResponse} from "./app-server/v2";
 import type {AuthMode} from "./app-server/AuthMode";
 import type {PlanType} from "./app-server/PlanType";
 
@@ -6,9 +7,9 @@ import type {PlanType} from "./app-server/PlanType";
  * `authStatus` — interim `_meta`-based ACP extension that reports the auth
  * identity of the connection (the agent process serving this ACP connection).
  *
- * Push only. There is one carrier, connection-scoped and never per session: the
- * notification `_auth/status_update` with `{authStatus}`. The client sends
- * nothing; there is no request method to pull the value.
+ * The legacy extension pushes `_auth/status_update` with `{authStatus}`.
+ * ACP v1 and v2 also expose the same observation through `auth/status` and
+ * `auth/status_update`. All three are connection-scoped.
  *
  * The agent pushes:
  * - once after `initialize`, as soon as it knows its identity, including
@@ -28,8 +29,7 @@ import type {PlanType} from "./app-server/PlanType";
  * "not reported". `kind: "none"` is not that case: it is a known logged-out
  * state, and it is reported.
  *
- * The payload moves to first-class protocol fields once the upstream
- * auth-identity RFD lands; this extension is retired then.
+ * Older clients can keep using the extension without knowing about `auth.status`.
  */
 export const AUTH_STATUS_UPDATE_METHOD = "_auth/status_update";
 export const AUTH_STATUS_META_KEY = "authStatus";
@@ -74,6 +74,24 @@ export type AuthStatusCapability = {}
 
 export function authStatusCapability(): AuthStatusCapability {
     return {};
+}
+
+/** Only display fields reach ACP; in particular don't copy the account/read result or gateway config. */
+export function toAcpAuthStatus(identity: AuthStatus, read: Pick<GetAccountResponse, "account" | "requiresOpenaiAuth">): AuthStatusResponse {
+    if (identity.kind === "none") {
+        return {state: read.requiresOpenaiAuth ? "unauthenticated" : "not_required"};
+    }
+    const organization = identity.kind === "account" && read.account?.type === "chatgpt" ? read.account.workspaceName : null;
+    return {
+        state: "authenticated",
+        accounts: [{
+            label: identity.label,
+            active: true,
+            ...(identity.detail && {description: identity.detail}),
+            ...(identity.account?.email && {email: identity.account.email}),
+            ...(organization && {organization}),
+        }],
+    };
 }
 
 const NOT_LOGGED_IN_LABEL = "Not logged in";

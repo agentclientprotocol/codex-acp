@@ -1,5 +1,37 @@
 # Changelog
 
+## [2.8.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.7.0...v2.8.0) (2026-11-19)
+
+
+### Features
+
+* report ACP v2 background work and cancel individual terminals ([#777](https://github.com/agentclientprotocol/codex-acp/issues/777)) ([74dffa0](https://github.com/agentclientprotocol/codex-acp/commit/74dffa08b1f7d75ca584a353d038e56e983b69d8))
+* support MCP-over-ACP in the Codex adapter ([#771](https://github.com/agentclientprotocol/codex-acp/issues/771)) ([b9503ae](https://github.com/agentclientprotocol/codex-acp/commit/b9503aef790c5ca473348fb5580de9869bb5174a))
+
+
+### Bug Fixes
+
+* align adapter with ACP SDK 2.7 and current protocol rules ([#769](https://github.com/agentclientprotocol/codex-acp/issues/769)) ([887aab6](https://github.com/agentclientprotocol/codex-acp/commit/887aab698f29fa92f6736c1c4701fc79bd2a5391))
+* align adapter with ACP SDK 2.8 and current protocol rules ([#775](https://github.com/agentclientprotocol/codex-acp/issues/775)) ([0a17129](https://github.com/agentclientprotocol/codex-acp/commit/0a17129cecc0f3c6577e91db81178f0141de8b00))
+* avoid stack overflow when snapshotting deeply nested JSON ([#742](https://github.com/agentclientprotocol/codex-acp/issues/742)) ([06425cc](https://github.com/agentclientprotocol/codex-acp/commit/06425ccae69f83bc0324b0e44e250b039f7d0b86))
+* put model settings first in session config options ([#778](https://github.com/agentclientprotocol/codex-acp/issues/778)) ([3645fab](https://github.com/agentclientprotocol/codex-acp/commit/3645fabfc9c7a5bf465131ba3cd3e9496bc27e97))
+* update codex to 0.170.0 ([#780](https://github.com/agentclientprotocol/codex-acp/issues/780)) ([77b12a1](https://github.com/agentclientprotocol/codex-acp/commit/77b12a199a81307e10020de284edb0f5b46541d8))
+
+## [2.7.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.6.0...v2.7.0) (2026-11-16)
+
+
+### Features
+
+* report delegated tasks as session messages and reference children from tool calls ([#760](https://github.com/agentclientprotocol/codex-acp/issues/760)) ([6567651](https://github.com/agentclientprotocol/codex-acp/commit/656765115f82253c79f87918abb77189c114a799))
+* send structured plans as items plan_update when the client supports it ([#752](https://github.com/agentclientprotocol/codex-acp/issues/752)) ([ab7a968](https://github.com/agentclientprotocol/codex-acp/commit/ab7a968e982a95d8a765c1e6c6682a520d4f7638))
+* show the retry cause as details of the AIR retry warning ([#755](https://github.com/agentclientprotocol/codex-acp/issues/755)) ([e981b3c](https://github.com/agentclientprotocol/codex-acp/commit/e981b3c8c5236e715311964b1cb0044cc6fd54c3))
+
+
+### Bug Fixes
+
+* Map priority mode to fast ([#327](https://github.com/agentclientprotocol/codex-acp/issues/327)) ([52cc518](https://github.com/agentclientprotocol/codex-acp/commit/52cc518a371eb0a23d4d23ebe1dd1c657461b25c))
+* report hooks that block or stop Codex ([#767](https://github.com/agentclientprotocol/codex-acp/issues/767)) ([bcf0e92](https://github.com/agentclientprotocol/codex-acp/commit/bcf0e925ae2222daa899aeec06e32e3ffd4c84eb))
+
 ## [2.6.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.5.0...v2.6.0) (2026-11-06)
 
 

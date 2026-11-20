@@ -11,6 +11,13 @@
   {
     "sessionId": "thread-1:subagent:worker",
     "update": {
+      "sessionUpdate": "replay_complete"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "background": [],
       "state": "idle",
       "sessionUpdate": "state_update"
     }
@@ -20,6 +27,7 @@
     "update": {
       "sessionId": "thread-1:subagent:worker",
       "state": {
+        "background": [],
         "state": "idle"
       },
       "sessionUpdate": "subagent_update"
@@ -46,6 +54,7 @@
   {
     "sessionId": "thread-1:subagent:worker",
     "update": {
+      "background": [],
       "state": "running",
       "sessionUpdate": "state_update"
     }
@@ -55,6 +64,7 @@
     "update": {
       "sessionId": "thread-1:subagent:worker",
       "state": {
+        "background": [],
         "state": "running"
       },
       "sessionUpdate": "subagent_update"
@@ -63,6 +73,7 @@
   {
     "sessionId": "thread-1:subagent:worker",
     "update": {
+      "background": [],
       "state": "requires_action",
       "sessionUpdate": "state_update"
     }
@@ -72,6 +83,7 @@
     "update": {
       "sessionId": "thread-1:subagent:worker",
       "state": {
+        "background": [],
         "state": "requires_action"
       },
       "sessionUpdate": "subagent_update"

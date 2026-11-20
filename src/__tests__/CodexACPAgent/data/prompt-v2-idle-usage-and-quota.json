@@ -8,6 +8,7 @@
     "cachedReadTokens": 400,
     "cachedWriteTokens": 0
   },
+  "background": [],
   "_meta": {
     "quota": {
       "token_count": {

@@ -23,7 +23,7 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 - Typed warnings and errors through the opt-in [AIR session failure extension](docs/air-extensions.md#session-failure).
 - All AIR extensions, capabilities, and `_meta` keys: [AIR extensions](docs/air-extensions.md).
 - A per-turn [agent file-change report](docs/air-extensions.md#agent-file-change-report) after capability negotiation.
-- Client-provided MCP servers over command-based stdio config and HTTP transport.
+- Client-provided MCP servers over stdio, HTTP, or the existing ACP connection ([MCP-over-ACP](docs/mcp-over-acp.md)).
 - Slash commands: `/status`, `/mcp` (with `/mcp reconnect`), `/skills`, `/goal`, `/review`, `/review-branch`, `/review-commit`, `/compact`, and `/logout`, as well as configured skills.
 
 ## Installation
@@ -65,6 +65,8 @@ The adapter advertises ACP auth methods during initialization. Clients can authe
 - API key via `CODEX_API_KEY` or `OPENAI_API_KEY`.
 - A custom OpenAI-compatible gateway, when the client opts in to the gateway auth capability.
 
+Clients can [query authentication status](docs/auth-status.md) before starting a session.
+
 ## Runtime options
 
 - `CODEX_API_KEY` - API key used when the API-key auth method is selected. Takes precedence over `OPENAI_API_KEY`.
@@ -96,15 +98,17 @@ See [readme-dev.md](readme-dev.md) for local client configuration, binary packag
 
 ### Subagent sessions
 
-Subagent sessions follow the draft [ACP subagent RFD](https://github.com/agentclientprotocol/agent-client-protocol/pull/1992) and are enabled only after bilateral capability negotiation during `initialize`. Without native negotiation, the subagent lifecycle stays an ordinary ACP tool call.
+Codex subagents are reported as ACP child sessions that follow the ACP [Subagent Sessions RFD](https://agentclientprotocol.com/rfds/subagents). A v1 client opts in with `clientCapabilities.subagents: {}` during `initialize`. A v2 client gets them without negotiation. The adapter announces each child with `subagent_update`, reports delegated tasks as `session_message`, and references children from collaboration tool calls with `session` content. A client can cancel a child's current work with `session/cancel`.
 
-See [docs/subagent-sessions.md](docs/subagent-sessions.md) for the negotiation, lifecycle events, `session/load` reconstruction, and legacy fallback details.
+JetBrains AIR clients keep an older private contract instead. Without either contract, the subagent lifecycle stays an ordinary ACP tool call.
 
-### Background terminal tasks
+See [docs/subagent-sessions.md](docs/subagent-sessions.md) for both contracts, `session/load` replay, and the fallback.
 
-Codex can keep a shell command running after a turn continues. AIR clients can show this work in the Async Tasks panel and stop one command.
+### Background work
 
-See [AIR extensions](docs/air-extensions.md#async-tasks) for the capability, lifecycle events, and stop request.
+ACP v2 shows detached children and background terminals in the session's `background` list. Clients can stop a listed terminal without cancelling the foreground turn.
+
+See [Background work](docs/background-work.md) for the v2 lifecycle and cancel methods, or [AIR async tasks](docs/air-extensions.md#async-tasks) for the existing AIR extension.
 
 ## License
 

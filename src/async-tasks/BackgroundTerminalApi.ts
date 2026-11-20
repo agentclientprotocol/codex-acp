@@ -3,6 +3,7 @@ export type ThreadBackgroundTerminal = {
     itemId: string;
     processId: string;
     command: string;
+    cwd?: string;
 };
 
 export type ThreadBackgroundTerminalsListParams = {

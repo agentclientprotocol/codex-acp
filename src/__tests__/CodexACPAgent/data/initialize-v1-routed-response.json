@@ -7,7 +7,8 @@
   },
   "agentCapabilities": {
     "auth": {
-      "logout": {}
+      "logout": {},
+      "status": {}
     },
     "providers": {},
     "loadSession": true,
@@ -23,11 +24,10 @@
       "fork": {},
       "title": {},
       "additionalDirectories": {},
-      "subagents": {},
       "systemPrompt": {}
     },
     "mcpCapabilities": {
-      "acp": false,
+      "acp": true,
       "http": true,
       "sse": false
     },

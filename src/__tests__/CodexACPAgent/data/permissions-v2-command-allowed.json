@@ -1,6 +1,7 @@
 [
   {
     "sessionUpdate": {
+      "background": [],
       "state": "requires_action",
       "sessionUpdate": "state_update"
     }

@@ -4,9 +4,7 @@ import type {StandardSubagentUpdate, SubagentSpawnedUpdate, SubagentStateUpdate}
 
 /** Updates the adapter emits, including its existing AIR subagent contract. */
 export type AcpSessionUpdate =
-    | Exclude<SessionNotification["update"], {
-        sessionUpdate: "subagent_update" | "session_message" | "session_message_chunk";
-    }>
+    | Exclude<SessionNotification["update"], {sessionUpdate: "subagent_update"}>
     | SubagentSpawnedUpdate
     | SubagentStateUpdate
     | StandardSubagentUpdate
@@ -16,7 +14,7 @@ export type AcpSessionNotification = Omit<SessionNotification, "update"> & {
     update: AcpSessionUpdate;
 };
 
-/** The only cast needed until the ACP SDK publishes the extension updates. */
+/** The only cast needed for AIR's private updates, which the ACP SDK does not type. */
 export function asSdkSessionNotification(
     notification: AcpSessionNotification,
 ): SessionNotification {

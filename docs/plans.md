@@ -54,8 +54,15 @@ A v1 client without `clientCapabilities.plan` gets:
 - each Markdown plan as one `agent_message_chunk` with the item id as
   `messageId`, when the plan item completes. Replay sends the same chunk.
 
-## Not sent
+## Removal
 
-The adapter does not send `plan_removed`, because Codex has no event that ends
-a plan. It does not send `file` plans, because Codex streams plan text rather
-than writing a plan file. Codex's `explanation` of a checklist update is not sent.
+An explicit empty checklist from `turn/plan/updated` clears
+`codex-structured-plan`. On v1 the adapter sends the same checklist update as
+usual, with empty `entries`. On v2 it sends an empty `items` update, then
+`plan_removed`, so clients without support for plan removal still clear the
+checklist.
+
+Completion does not remove a plan. Codex has no equivalent removal event for
+Markdown plan items. Markdown plans omit `path` because Codex streams plan text
+rather than reporting a plan file. The schema no longer defines a `file` plan
+type. Codex's `explanation` of a checklist update is not sent.

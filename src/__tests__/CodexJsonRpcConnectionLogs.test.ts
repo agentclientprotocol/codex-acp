@@ -70,6 +70,17 @@ describe("attachLogs", () => {
         ]);
     });
 
+    it("sends the MCP bearer header to Codex but redacts it from the trace", () => {
+        vi.spyOn(logger, "enabled", "get").mockReturnValue(true);
+        const log = vi.spyOn(logger, "log").mockImplementation(() => {});
+        const proc = fakeProcess();
+        const wire = JSON.stringify({config: {mcp_servers: {tools: {http_headers: {Authorization: "Bearer test-only"}}}}}) + "\n";
+        proc.stdin.write(wire);
+
+        expect(proc.stdin.read().toString()).toBe(wire);
+        expect(log.mock.calls).toEqual([[`[IN] ${wire.replace("test-only", "[REDACTED]")}`]]);
+    });
+
     it("writes the traffic to the log file when APP_SERVER_LOGS is set", async () => {
         const directory = fs.mkdtempSync(path.join(os.tmpdir(), "app-server-logs-"));
         try {

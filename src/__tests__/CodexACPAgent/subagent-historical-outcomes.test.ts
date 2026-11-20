@@ -12,7 +12,7 @@ const childId = `${sessionId}:subagent:${worker}`;
 const spawn: ThreadItem = {type: "subAgentActivity", id: "spawn", kind: "started",
     agentThreadId: worker, agentPath: "/root/worker", model: null, reasoningEffort: null};
 const answer: ThreadItem = {type: "agentMessage", id: "retained", text: "Retained answer",
-    phase: null, memoryCitation: null, delivery: null, questions: null};
+    phase: null, moderation: null, memoryCitation: null, delivery: null, questions: null};
 const onWorker = (event: ServerNotification): ServerNotification =>
     ({...event, params: {...event.params, threadId: worker}} as ServerNotification);
 
@@ -40,8 +40,9 @@ describe.each([1, 2] as const)("ACP v%s historical child outcomes", version => {
     const stateUpdates = () => h.scopedUpdates.filter(entry => entry.update.sessionUpdate === "subagent_update"
         && entry.update.sessionId === childId && entry.update.state != null
         || entry.sessionId === childId && entry.update.sessionUpdate === "state_update");
-    const gap = () => h.scopedUpdates.some(entry => entry.update.sessionUpdate === "agent_thought_chunk"
-        && entry.update.messageId === `${sessionId}:subagent-history-gap`);
+    const gap = () => h.scopedUpdates.some(entry => version === 1
+        ? entry.update.sessionUpdate === "agent_thought_chunk" && entry.update.messageId === `${sessionId}:subagent-history-gap`
+        : entry.update.sessionUpdate === "notice" && entry.update.title === "Some recorded child history is unavailable or incomplete.");
 
     function history(turns: Turn[], paginated = false) {
         const reads: Array<{threadId: string; includeTurns?: boolean}> = [];
@@ -79,7 +80,7 @@ describe.each([1, 2] as const)("ACP v%s historical child outcomes", version => {
             || entry.update.sessionUpdate === "subagent_update")).toEqual([]);
         expect(h.turnInterruptCalls()).toEqual([]);
         await expect(h.request("session/set_config_option", {sessionId: childId, configId: "model", value: "anything",
-            ...(version === 2 ? {type: "id"} : {})})).rejects.toMatchObject({code: -32600});
+            ...(version === 2 ? {type: "id"} : {})})).rejects.toMatchObject({code: -32602});
         const final = status !== "missing" && status !== "inProgress";
         expect(states()).toHaveLength(final ? 1 : 0);
         if (final) {
@@ -92,6 +93,15 @@ describe.each([1, 2] as const)("ACP v%s historical child outcomes", version => {
                 && (frame.params as {update: {state?: {state: string}}}).update.state?.state === "idle");
             expect(outcome).toBeGreaterThanOrEqual(0);
             expect(response).toBeGreaterThan(outcome);
+            if (version === 2) {
+                const parentBoundary = frames.findIndex(frame => {
+                    if (!("method" in frame) || frame.method !== "session/update") return false;
+                    const params = frame.params as {sessionId: string; update: {sessionUpdate: string}};
+                    return params.sessionId === sessionId && params.update.sessionUpdate === "replay_complete";
+                });
+                expect(parentBoundary).toBeGreaterThan(outcome);
+                expect(stateUpdates().every(entry => entry.update.sessionUpdate === "subagent_update")).toBe(true);
+            }
         }
         expect(JSON.stringify(h.scopedUpdates)).not.toContain("Private backend diagnostic");
         if (paginated) {
@@ -161,7 +171,9 @@ describe.each([1, 2] as const)("ACP v%s historical child outcomes", version => {
             answerPermission();
             await expect(pending).resolves.toEqual({decision: "accept"});
             h.emit(onWorker(turnCompleted("live-turn")));
-            await vi.waitFor(() => expect(states().at(-1)).toEqual({state: "idle", stopReason: "end_turn"}));
+            await vi.waitFor(() => expect(states().at(-1)).toEqual({
+                state: "idle", stopReason: "end_turn", ...(version === 2 ? {background: []} : {}),
+            }));
         } finally { answerPermission?.(); }
     });
 

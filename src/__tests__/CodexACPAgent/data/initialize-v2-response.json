@@ -13,7 +13,8 @@
       },
       "mcp": {
         "stdio": {},
-        "http": {}
+        "http": {},
+        "acp": {}
       },
       "delete": {},
       "additionalDirectories": {},
@@ -22,6 +23,7 @@
       "title": {}
     },
     "auth": {
+      "status": {},
       "_meta": {
         "authStatus": {}
       }

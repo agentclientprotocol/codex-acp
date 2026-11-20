@@ -30,6 +30,7 @@
   {
     "sessionId": "thread-1:subagent:worker",
     "update": {
+      "background": [],
       "state": "running",
       "sessionUpdate": "state_update"
     }
@@ -39,6 +40,7 @@
     "update": {
       "sessionId": "thread-1:subagent:worker",
       "state": {
+        "background": [],
         "state": "running"
       },
       "sessionUpdate": "subagent_update"

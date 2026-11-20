@@ -18,6 +18,7 @@ import type {
     ConfigReadResponse,
     ConfigBatchWriteParams,
     ConfigWriteResponse,
+    ExperimentalFeatureListResponse,
     GetAccountParams,
     GetAccountRateLimitsResponse,
     GetAccountResponse,
@@ -875,6 +876,19 @@ export class CodexAppServerClient {
 
     async listMcpServerStatus(params: ListMcpServerStatusParams): Promise<ListMcpServerStatusResponse> {
         return await this.sendRequest({ method: "mcpServerStatus/list", params });
+    }
+
+    /** Whether this binary implements a feature, regardless of its default enablement. */
+    async hasExperimentalFeature(name: string): Promise<boolean> {
+        let cursor: string | null = null;
+        do {
+            const page: ExperimentalFeatureListResponse = await this.sendRequest({
+                method: "experimentalFeature/list", params: {cursor, limit: 256},
+            });
+            if (page.data.some(feature => feature.name === name && feature.stage !== "removed")) return true;
+            cursor = page.nextCursor ?? null;
+        } while (cursor !== null);
+        return false;
     }
 
     async mcpServerReload(): Promise<McpServerRefreshResponse> {

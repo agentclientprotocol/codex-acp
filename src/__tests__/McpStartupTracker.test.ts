@@ -8,7 +8,7 @@ import {McpOauthCompletions} from "../mcp/McpOauthCompletions";
 import {McpStartupTracker} from "../mcp/McpStartupTracker";
 
 function startupStatus(name: string, threadId: string | null, status: "starting" | "ready" = "ready") {
-    return {threadId, name, status, error: null, failureReason: null};
+    return {threadId, name, status, environmentId: null, error: null, failureReason: null};
 }
 
 function waiterCount(tracker: McpStartupTracker): number {

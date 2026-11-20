@@ -148,7 +148,7 @@ async function runInWorkspace(
     const initializeResponse = await agent.initialize({protocolVersion: 1, clientCapabilities: typeof profile === "string" ? PROFILES[profile] : profile});
     recorded.push({direction: "response", method: "initialize", params: initializeResponse});
     // The adapter pushes the first auth status after the initialize response, from a later event loop phase.
-    await recordWhenSent(fixture, recorded, "_auth/status_update");
+    await recordWhenSent(fixture, recorded, "auth/status_update");
 
     const mcpServers: acp.McpServer[] = [
         ...(scenario.mcpStartup?.failed ?? []).map(failure => failure.server),

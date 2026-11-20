@@ -177,6 +177,7 @@ describe('baseline tracker installed before thread/resume, so an auto-started go
                     id: "replayed-reply",
                     text: "Earlier answer",
                     phase: null,
+                    moderation: null,
                     memoryCitation: null,
                     delivery: null,
                     questions: null,

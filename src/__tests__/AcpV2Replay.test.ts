@@ -2,7 +2,70 @@ import * as acp from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import {describe, expect, it, vi} from "vitest";
 import {ACPSessionConnection, AcpV2Connection, type AcpV2ClientConnection} from "../ACPSessionConnection";
 import {AcpClientDelivery} from "../AcpClientDelivery";
-import {toV2ReplayUpdates} from "../AcpV2Replay";
+import {AcpV2Replay, toV2ReplayUpdates} from "../AcpV2Replay";
+
+describe("V2 replay boundaries", () => {
+    it("holds live updates and requests, including current state produced by history, until each replay is complete", async () => {
+        const sent: acp.UpdateSessionNotification[] = [];
+        const replay = new AcpV2Replay(async params => { sent.push(params); });
+        let finish!: () => void;
+        let historyReady!: () => void;
+        const gate = new Promise<void>(resolve => { finish = resolve; });
+        const ready = new Promise<void>(resolve => { historyReady = resolve; });
+        const operation = replay.run("root", () => replay.withHistory("root", async () => {
+            await replay.notify({sessionId: "root", update: {sessionUpdate: "subagent_update", sessionId: "child"}});
+            await replay.notify({sessionId: "child", update: {sessionUpdate: "subagent_update", sessionId: "empty"}});
+            await replay.notify({sessionId: "child", update: {
+                sessionUpdate: "session_message", messageId: "task", content: [{type: "text", text: "Investigate"}],
+            }});
+            await replay.notify({sessionId: "child", update: {sessionUpdate: "state_update", state: "unknown"}});
+            historyReady();
+            await gate;
+        }));
+        await ready;
+        await replay.notify({sessionId: "root", update: {
+            sessionUpdate: "subagent_update", sessionId: "child", state: {state: "unknown"},
+        }});
+        await replay.notify({sessionId: "root", update: {sessionUpdate: "notice", title: "Live", severity: "info"}});
+        await replay.notify({sessionId: "child", update: {sessionUpdate: "agent_message_chunk",
+            messageId: "answer", content: {type: "text", text: "Live child"}}});
+        await replay.notify({sessionId: "root", update: {sessionUpdate: "subagent_update", sessionId: "new-child"}});
+        await replay.notify({sessionId: "new-child", update: {sessionUpdate: "agent_message_chunk",
+            messageId: "new-answer", content: {type: "text", text: "New child"}}});
+        const request = vi.fn();
+        const waiting = replay.wait("child").then(request);
+        await replay.notify({sessionId: "unrelated", update: {sessionUpdate: "state_update", state: "idle"}});
+        expect(sent.map(params => params.update.sessionUpdate)).toEqual([
+            "subagent_update", "subagent_update", "session_message", "state_update",
+        ]);
+        expect(request).not.toHaveBeenCalled();
+        finish();
+        await operation;
+        await waiting;
+        expect(request).toHaveBeenCalledOnce();
+        await expect(`${JSON.stringify(sent, null, 2)}\n`).toMatchFileSnapshot("data/v2-replay-boundaries.json");
+    });
+
+    it.each(["failure", "cancellation"] as const)("does not certify a replay after %s and releases pending requests", async outcome => {
+        const sent: acp.UpdateSessionNotification[] = [];
+        const replay = new AcpV2Replay(async params => { sent.push(params); });
+        const controller = new AbortController();
+        let waiting!: Promise<void>;
+        const failed = replay.run("session", async () => {
+            waiting = replay.wait("session");
+            // Attach the rejection handler before the replay releases it.
+            void waiting.catch(() => {});
+            await replay.notify({sessionId: "session", update: {sessionUpdate: "state_update", state: "running"}});
+            if (outcome === "failure") throw new Error("History unavailable");
+            controller.abort();
+        }, controller.signal);
+        await expect(failed).rejects.toThrow(outcome === "failure" ? "History unavailable" : "Session replay was cancelled");
+        await expect(waiting).rejects.toMatchObject({code: -32800});
+        expect(sent).toEqual([]);
+        await replay.run("session", async () => {});
+        expect(sent).toEqual([{sessionId: "session", update: {sessionUpdate: "replay_complete"}}]);
+    });
+});
 
 const entities: Array<{name: string; initial: acp.SessionUpdate; next: acp.SessionUpdate}> = [
     {name: "tool", initial: {sessionUpdate: "tool_call_update", toolCallId: "same", title: "Tool", status: "in_progress"},
@@ -42,7 +105,8 @@ describe("V2 replay initialization", () => {
     it.each(entities)("clears empty $name metadata in the snapshot itself", ({initial}) => {
         for (const meta of [undefined, null, {}]) {
             const updates = toV2ReplayUpdates({...initial, ...(meta === undefined ? {} : {_meta: meta})}, new Set());
-            expect(updates).toEqual([{...initial, _meta: null}]);
+            expect(updates).toEqual([{...initial, _meta: null,
+                ...(initial.sessionUpdate === "compaction_update" ? {summary: []} : {})}]);
             expect(metadataAfter(updates)).toEqual({});
         }
     });
@@ -64,10 +128,40 @@ describe("V2 replay initialization", () => {
         expect(toV2ReplayUpdates(chunk, initialized)).toEqual([chunk]);
     });
 
-    it("does not reset plan, output-chunk or session metadata", () => {
+    const text = {type: "text", text: "Part"} as const;
+    const chunks: Array<{chunk: acp.SessionUpdate; primer: acp.SessionUpdate}> = [
+        {chunk: {sessionUpdate: "session_message_chunk", messageId: "same", content: text},
+            primer: {sessionUpdate: "session_message", messageId: "same", content: []}},
+        {chunk: {sessionUpdate: "tool_call_content_chunk", toolCallId: "same", content: {type: "content", content: text}},
+            primer: {sessionUpdate: "tool_call_update", toolCallId: "same", content: []}},
+        {chunk: {sessionUpdate: "terminal_output_chunk", terminalId: "same", data: "T0s="},
+            primer: {sessionUpdate: "terminal_update", terminalId: "same", output: {data: ""}}},
+        {chunk: {sessionUpdate: "compaction_summary_chunk", compactionId: "same", content: text},
+            primer: {sessionUpdate: "compaction_update", compactionId: "same", status: "in_progress", summary: []}},
+    ];
+    it.each(chunks)("primes $chunk.sessionUpdate once without applying chunk metadata to the entity", ({chunk, primer}) => {
+        const initialized = new Set<string>();
+        const part = {...chunk, _meta: {value: null}};
+        expect(toV2ReplayUpdates(part, initialized)).toEqual([{...primer, _meta: null}, part]);
+        expect(toV2ReplayUpdates(part, initialized)).toEqual([part]);
+        const snapshotted = new Set<string>();
+        toV2ReplayUpdates(primer, snapshotted);
+        expect(toV2ReplayUpdates(part, snapshotted)).toEqual([part]);
+    });
+
+    it("primes a replayed terminal after a header that did not initialize output", () => {
+        const initialized = new Set<string>();
+        const header = {sessionUpdate: "terminal_update", terminalId: "terminal", command: "echo OK"} as const;
+        const chunk = {sessionUpdate: "terminal_output_chunk", terminalId: "terminal", data: "T0s="} as const;
+        expect(toV2ReplayUpdates(header, initialized)).toEqual([{...header, _meta: null}]);
+        expect(toV2ReplayUpdates(chunk, initialized)).toEqual([
+            {sessionUpdate: "terminal_update", terminalId: "terminal", output: {data: ""}}, chunk,
+        ]);
+    });
+
+    it("does not reset plan or session metadata", () => {
         const updates: acp.SessionUpdate[] = [
             {sessionUpdate: "plan_update", plan: {type: "markdown", planId: "plan", content: "Plan"}, _meta: {value: null}},
-            {sessionUpdate: "terminal_output_chunk", terminalId: "terminal", data: "T0s=", _meta: {value: null}},
             {sessionUpdate: "session_info_update", title: "Current", _meta: {value: null}},
         ];
         for (const update of updates) expect(toV2ReplayUpdates(update, new Set())).toEqual([update]);

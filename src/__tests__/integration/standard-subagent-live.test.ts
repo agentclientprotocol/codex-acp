@@ -94,8 +94,11 @@ describeIntegration("integration: live standard subagents", () => {
                 expect(updates.some(entry => entry.sessionId === sessionId && entry.update.sessionUpdate === "subagent_update")).toBe(true);
             }, {timeout: 15_000});
             const childId = updates.find(entry => entry.sessionId === sessionId && entry.update.sessionUpdate === "subagent_update")!.update.sessionId;
+            const associationState = (entry: typeof updates[number]) =>
+                entry.sessionId === sessionId && entry.update.sessionUpdate === "subagent_update"
+                && entry.update.sessionId === childId ? entry.update.state : undefined;
             const state = (entry: typeof updates[number]) => version === 1
-                ? entry.update.sessionUpdate === "subagent_update" && entry.update.sessionId === childId ? entry.update.state : undefined
+                ? associationState(entry)
                 : entry.sessionId === childId && entry.update.sessionUpdate === "state_update" ? entry.update : undefined;
             const configuration = (entry: typeof updates[number]) =>
                 entry.sessionId === childId && entry.update.sessionUpdate === "config_option_update";
@@ -157,6 +160,19 @@ describeIntegration("integration: live standard subagents", () => {
                 await vi.waitFor(() => expect(updates.slice(boundary).some(entry =>
                     state(entry)?.state === "idle" && state(entry)?.stopReason === "cancelled"), stderr).toBe(true), {timeout: 15_000});
                 await request("session/prompt", {sessionId, prompt: [{type: "text", text: "Continue independently"}]});
+            } else if (ending === "cancel" && version === 2) {
+                // The parent's final turn released the child. Parent cancel must not interrupt it.
+                await vi.waitFor(() => expect(updates.some(entry => entry.sessionId === sessionId
+                    && entry.update.sessionUpdate === "state_update" && entry.update.state === "idle"
+                    && entry.update.background?.some((item: {type: string; sessionId?: string}) =>
+                        item.type === "subagent" && item.sessionId === childId)), stderr).toBe(true), {timeout: 15_000});
+                const boundary = updates.length;
+                await context.notify("session/cancel", {sessionId});
+                await request("session/list", {});
+                releaseChild();
+                await vi.waitFor(() => expect(updates.slice(boundary).some(entry =>
+                    state(entry)?.state === "idle" && state(entry)?.stopReason === "end_turn"), stderr).toBe(true), {timeout: 15_000});
+                expect(updates.slice(boundary).some(entry => state(entry)?.stopReason === "cancelled")).toBe(false);
             } else {
                 const boundary = updates.length;
                 if (ending === "cancel") await context.notify("session/cancel", {sessionId});
@@ -183,8 +199,17 @@ describeIntegration("integration: live standard subagents", () => {
                 await vi.waitFor(() => expect(updates.slice(replayStart).some(entry => entry.sessionId === childId
                     && entry.update.sessionUpdate === "agent_message_chunk"
                     && entry.update.content.text.includes("CHILD_RESULT")), stderr).toBe(true));
-                await vi.waitFor(() => expect(updates.slice(replayStart).some(entry =>
-                    state(entry)?.state === "idle" && state(entry)?.stopReason === "end_turn"), stderr).toBe(true));
+                await vi.waitFor(() => {
+                    const replay = updates.slice(replayStart);
+                    const outcome = replay.findIndex(entry =>
+                        associationState(entry)?.state === "idle" && associationState(entry)?.stopReason === "end_turn");
+                    expect(outcome, stderr).toBeGreaterThanOrEqual(0);
+                    if (version === 2) {
+                        const boundary = replay.findIndex(entry => entry.sessionId === sessionId && entry.update.sessionUpdate === "replay_complete");
+                        expect(boundary).toBeGreaterThan(outcome);
+                        expect(replay.some(entry => state(entry)?.stopReason === "end_turn")).toBe(false);
+                    }
+                });
             }
             expect(updates.some(entry => ["subagent_spawned", "subagent_state_update", "_subagent_update"].includes(entry.update.sessionUpdate))).toBe(false);
             expect(mock.unexpectedRequests).toBe(0);

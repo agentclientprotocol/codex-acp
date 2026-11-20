@@ -14,8 +14,25 @@ export class AcpV2ForegroundState {
     constructor(
         private readonly notify: (state: acpV2.StateUpdate) => Promise<void>,
         running: boolean | "unknown" = false,
+        private readonly background?: () => acpV2.BackgroundWork[] | null,
     ) {
         this.activity = running === "unknown" ? "unknown" : running ? "running" : "idle";
+    }
+
+    get isIdle(): boolean { return this.activity === "idle"; }
+
+    /** Current state, without replaying a prior stop reason or turn usage. */
+    current(): acpV2.StateUpdate {
+        return this.withBackground(this.snapshotState());
+    }
+
+    private snapshotState(): acpV2.StateUpdate {
+        switch (this.activity) {
+            case "idle": return {state: "idle"};
+            case "running": return {state: "running"};
+            case "requires_action": return {state: "requires_action"};
+            case "unknown": return {state: "unknown"};
+        }
     }
 
     async update(state: acpV2.StateUpdate): Promise<void> {
@@ -37,17 +54,9 @@ export class AcpV2ForegroundState {
     }
 
     /** Snapshots never repeat completion usage or failure metadata. */
-    snapshot(): Promise<void> {
-        switch (this.activity) {
-            case "idle":
-                return this.publish({state: "idle"});
-            case "running":
-                return this.publish({state: "running"});
-            case "requires_action":
-                return this.publish({state: "requires_action"});
-            case "unknown":
-                return this.publish({state: "unknown"});
-        }
+    snapshot(skipIdle = false): Promise<void> {
+        if (skipIdle && this.isIdle && !this.background?.()?.length) return this.sending;
+        return this.publish(this.snapshotState());
     }
 
     async startItem(itemId: string): Promise<void> {
@@ -107,7 +116,11 @@ export class AcpV2ForegroundState {
     }
 
     private publish(state: acpV2.StateUpdate): Promise<void> {
-        return this.serializePublication(() => this.notify(state));
+        return this.serializePublication(() => this.notify(this.withBackground(state)));
+    }
+
+    private withBackground(state: acpV2.StateUpdate): acpV2.StateUpdate {
+        return this.background === undefined ? state : {...state, background: this.background()};
     }
 
     serializePublication(publish: () => Promise<void>): Promise<void> {

@@ -63,6 +63,9 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
         case "notice":
         case "compaction_update":
         case "compaction_summary_chunk":
+        case "session_message":
+        case "session_message_chunk":
+        case "prompt_suggestions_update":
             return update;
         case "config_option_update":
             return {...update, configOptions: toV2ConfigOptions(update.configOptions)};
@@ -119,6 +122,8 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
         }
         case "subagent_update":
             return update;
+        case "cursor_update":
+            throw acp.RequestError.internalError(undefined, "Session cursors are not supported");
         // AIR's private contract is selected independently upstream.
         case "subagent_spawned": {
             const {subagentSessionId, name, task, _meta} = update;
@@ -162,6 +167,8 @@ export function toV2ToolCallContent(content: acp.ToolCallContent): acpV2.ToolCal
             return content;
         // Same shape on v2; the terminal itself is sent by `toV2SessionUpdates`.
         case "terminal":
+            return content;
+        case "session":
             return content;
         case "diff":
             return {type: "diff", ...toV2Diff(content)};

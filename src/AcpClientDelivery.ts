@@ -11,7 +11,7 @@ type SessionUpdateParams = {sessionId: string; update: UpdateSessionEvent};
  * whether the work belongs to a prompt, background activity or session startup.
  */
 export class AcpClientDelivery {
-    readonly reports = new ToolCallReports();
+    readonly reports: ToolCallReports;
     private readonly sessionRequests = new Map<string, Set<AbortController>>();
     private readonly closedSessions = new Set<string>();
     private readonly urlElicitations = new Map<string, {sessionId: string | null}>();
@@ -21,7 +21,9 @@ export class AcpClientDelivery {
     constructor(
         private readonly client: AcpClientConnection,
         private readonly sessionIsClosing: (sessionId: string) => boolean = () => false,
+        protocolVersion: 1 | 2 = 1,
     ) {
+        this.reports = new ToolCallReports(protocolVersion === 2);
         this.sendElicitationCompletion = params => client.notify(acp.methods.client.elicitation.complete, params as acp.CompleteElicitationNotification);
     }
 
@@ -121,9 +123,9 @@ export class AcpClientDelivery {
         await this.client.notify(method, params);
     }
 
-    async withSessionUpdate(params: SessionUpdateParams, send: (params: SessionUpdateParams) => Promise<void>): Promise<void> {
+    async withSessionUpdate(params: SessionUpdateParams, send: (params: SessionUpdateParams) => Promise<void>, replay = false): Promise<void> {
         if (!this.canPublishSession(params.sessionId)) return;
-        const update = this.reports.prepare(params.sessionId, params.update);
+        const update = this.reports.prepare(params.sessionId, params.update, replay);
         if (update === null) return;
         await send({...params, update});
         // A fresh announcement reopens a child view after its parent is resumed.
@@ -142,10 +144,13 @@ export class AcpClientDelivery {
         // The client merges the request tool call into the stored tool call, like an update.
         // A cancelled or failed request may leave the client without these fields,
         // so the adapter then forgets the open record and sends every field again.
-        this.reports.prepare(params.sessionId, {sessionUpdate: "tool_call_update", ...params.toolCall});
+        const {sessionUpdate: _update, ...toolCall} = this.reports.withLiveStatus(
+            params.sessionId, {sessionUpdate: "tool_call_update", ...params.toolCall},
+        );
+        this.reports.prepare(params.sessionId, {sessionUpdate: "tool_call_update", ...toolCall});
         let response: unknown;
         try {
-            response = await this.sendRequest(method, params, options);
+            response = await this.sendRequest(method, {...params, toolCall}, options);
         } catch (error) {
             this.reports.forgetOpen(params.sessionId, params.toolCall.toolCallId);
             throw error;

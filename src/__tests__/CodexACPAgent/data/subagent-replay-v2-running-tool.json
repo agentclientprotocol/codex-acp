@@ -34,16 +34,23 @@
   {
     "sessionId": "thread-1:subagent:worker",
     "update": {
-      "terminalId": "command",
-      "data": "QWZ0ZXI=",
-      "sessionUpdate": "terminal_output_chunk"
+      "sessionUpdate": "replay_complete"
     }
   },
   {
     "sessionId": "thread-1:subagent:worker",
     "update": {
+      "background": [],
       "state": "running",
       "sessionUpdate": "state_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "terminalId": "command",
+      "data": "QWZ0ZXI=",
+      "sessionUpdate": "terminal_output_chunk"
     }
   },
   {

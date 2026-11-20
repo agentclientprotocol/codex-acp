@@ -1,0 +1,184 @@
+[
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "sessionId": "thread-1:subagent:worker",
+      "capabilities": {},
+      "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "spawn:to:worker",
+      "senderSessionId": "thread-1",
+      "recipientSessionId": "thread-1:subagent:worker",
+      "content": [
+        {
+          "text": "Find the bug",
+          "type": "text"
+        }
+      ],
+      "sessionUpdate": "session_message"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "messageId": "task-1",
+      "senderSessionId": "thread-1",
+      "recipientSessionId": "thread-1:subagent:worker",
+      "senderMessageId": "spawn:to:worker",
+      "content": [
+        {
+          "text": "Find the bug",
+          "type": "text"
+        }
+      ],
+      "sessionUpdate": "session_message"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "spawn:to:worker",
+      "recipientMessageId": "task-1",
+      "sessionUpdate": "session_message"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "messageId": "first",
+      "content": [],
+      "_meta": null,
+      "sessionUpdate": "agent_message"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "messageId": "first",
+      "content": {
+        "text": "First answer",
+        "type": "text"
+      },
+      "sessionUpdate": "agent_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "messageId": "task-2",
+      "recipientSessionId": "thread-1:subagent:worker",
+      "content": [
+        {
+          "text": "Also check Windows",
+          "type": "text"
+        }
+      ],
+      "sessionUpdate": "session_message"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "messageId": "second",
+      "content": [],
+      "_meta": null,
+      "sessionUpdate": "agent_message"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "messageId": "second",
+      "content": {
+        "text": "Second answer",
+        "type": "text"
+      },
+      "sessionUpdate": "agent_message_chunk"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "messageId": "sendInput:to:worker",
+      "senderSessionId": "thread-1",
+      "recipientSessionId": "thread-1:subagent:worker",
+      "recipientMessageId": "task-2",
+      "content": [
+        {
+          "text": "Also check Windows",
+          "type": "text"
+        }
+      ],
+      "sessionUpdate": "session_message"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "messageId": "task-2",
+      "senderSessionId": "thread-1",
+      "senderMessageId": "sendInput:to:worker",
+      "sessionUpdate": "session_message"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "toolCallId": "sendInput",
+      "title": "sendInput",
+      "kind": "other",
+      "status": "completed",
+      "content": [
+        {
+          "sessionId": "thread-1:subagent:worker",
+          "type": "session"
+        }
+      ],
+      "rawInput": {
+        "prompt": "Also check Windows",
+        "senderThreadId": "thread-1",
+        "receiverThreadIds": [
+          "worker"
+        ],
+        "agentsStates": {},
+        "model": null,
+        "reasoningEffort": null,
+        "status": "completed"
+      },
+      "_meta": null,
+      "sessionUpdate": "tool_call_update"
+    }
+  },
+  {
+    "sessionId": "thread-1",
+    "update": {
+      "toolCallId": "wait",
+      "title": "wait",
+      "kind": "other",
+      "status": "completed",
+      "content": [
+        {
+          "sessionId": "thread-1:subagent:worker",
+          "type": "session"
+        }
+      ],
+      "rawInput": {
+        "prompt": null,
+        "senderThreadId": "thread-1",
+        "receiverThreadIds": [
+          "worker"
+        ],
+        "agentsStates": {},
+        "model": null,
+        "reasoningEffort": null,
+        "status": "completed"
+      },
+      "_meta": null,
+      "sessionUpdate": "tool_call_update"
+    }
+  }
+]
