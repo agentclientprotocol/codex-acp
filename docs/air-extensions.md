@@ -62,6 +62,7 @@ Only these differences are allowed:
   no output after a tool call ended, a terminal status for a replayed image generation,
   and the command as the title of a command approval.
 - Feature changes for every client: the `/mcp` command has a new description and an input hint.
+  The adapter advertises [`auth.status`](auth-status.md) and sends `auth/status_update` alongside the legacy `_auth/status_update`.
   Session `configOptions` list model, reasoning effort, fast mode, permissions mode, and collaboration mode
   in that order, omitting unavailable options.
 - The client gets no AIR-only key.

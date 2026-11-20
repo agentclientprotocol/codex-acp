@@ -135,7 +135,7 @@ describe("V2 namespace transactions", () => {
             await v2.client.notify("session/update", {sessionId: "child", update: {sessionUpdate: "session_info_update", _meta: {codex: {child: true}}}});
             const state = h.agent.getSessionState(sessionId);
             vi.spyOn(state.subagents, "notificationSessionId").mockReturnValue("child");
-            const handler = new CodexEventHandler(outbound, state, false, new SessionFailureIds("epoch"), state.subagents, undefined, false, false, false);
+            const handler = new CodexEventHandler(outbound, state, false, new SessionFailureIds("epoch"), state.subagents, false, false, false);
             await handler.handleNotification({method: "thread/status/changed", params: {threadId: sessionId, status: {type: "idle"}}});
             await flush(h);
             const child = h.scopedUpdates.filter(entry => entry.sessionId === "child").at(-1)?.update;

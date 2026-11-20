@@ -202,6 +202,7 @@ import {
     fromAccountUpdated,
     gatewayStatus,
     sameAuthStatus,
+    toAcpAuthStatus,
 } from "./AuthStatusMeta";
 import {randomUUID} from "node:crypto";
 import {TitleGenerator} from "./TitleGenerator";
@@ -519,14 +520,17 @@ export class CodexAcpServer {
     private booleanConfigOptionsSupported: boolean;
     /** Last `authStatus` pushed to the client; used to suppress duplicates. */
     private currentAuthStatus: AuthStatus | null;
+    private acpAuthStatus: acp.AuthStatusResponse = {state: "unknown"};
+    private authStatusRead: {version: number; done: Promise<void>} | null = null;
+    private authObserver: {client: CodexAcpClient; stop: () => void} | null = null;
     /**
      * The last known account of the agent. Every successful account read and every `account/updated` sets it,
      * and a logout clears it. A session open takes it when the account read is unavailable.
      */
-    private lastReadAccount: Account | null = null;
+    private lastAccountRead: Pick<GetAccountResponse, "account" | "requiresOpenaiAuth"> = {account: null, requiresOpenaiAuth: true};
     /**
-     * Counts the calls of {@link setAuthStatus}, also the calls that push nothing. A late account read
-     * compares it with the value at the start of the read: a change means a newer status.
+     * A session/auth operation or an account/updated event supersedes a pending read,
+     * even if the displayed fields don't change. Asking for status does not.
      */
     private authStatusVersion = 0;
 
@@ -769,6 +773,9 @@ export class CodexAcpServer {
     observeSessionSetupResponses(): () => void {
         this.setupResponseOrdering = true;
         return () => {
+            this.authObserver?.stop();
+            this.authObserver = null;
+            this.authStatusVersion++;
             this.mcpSessionStartup.dispose();
             this.clientDelivery.disposeSessionSetups();
             for (const session of this.sessions.values()) session.asyncTasks.clear();
@@ -845,7 +852,7 @@ export class CodexAcpServer {
         this.clientDelivery.reports.compareMeta = this.capabilities.airToolCallContract;
         this.booleanConfigOptionsSupported = clientSupportsBooleanConfigOptions(_params.clientCapabilities);
         this.sessionIndex.configure(_params.clientCapabilities);
-        this.sessionIndex.observe(this.codexAcpClient);
+        this.observeAppServer(this.codexAcpClient);
         this.publishFirstAuthStatusAfterResponse();
         const sessionCapabilities: SubagentAwareSessionCapabilities = {
             resume: { },
@@ -869,6 +876,7 @@ export class CodexAcpServer {
             agentCapabilities: {
                 auth: {
                     logout: {},
+                    status: {},
                 },
                 providers: {},
                 loadSession: true,
@@ -910,7 +918,7 @@ export class CodexAcpServer {
         // Boolean config options are baseline on v2, so there is nothing to probe.
         this.booleanConfigOptionsSupported = true;
         this.sessionIndex.configure(clientCapabilities);
-        this.sessionIndex.observe(this.codexAcpClient);
+        this.observeAppServer(this.codexAcpClient);
         this.publishFirstAuthStatusAfterResponse();
         return {
             protocolVersion: 2,
@@ -921,6 +929,7 @@ export class CodexAcpServer {
             },
             capabilities: {
                 auth: {
+                    status: {},
                     _meta: {
                         // Presence means "this agent pushes `_auth/status_update`".
                         [AUTH_STATUS_META_KEY]: authStatusCapability(),
@@ -1101,7 +1110,7 @@ export class CodexAcpServer {
         } catch (error) {
             if (isAccountReadUnavailableError(error)) {
                 logger.log("Account read unavailable, so the authentication status uses the last known account", {error: String(error)});
-                const account = this.lastReadAccount;
+                const {account} = this.lastAccountRead;
                 return {type: "chat-gpt", email: account?.type === "chatgpt" ? account.email ?? "" : ""};
             }
             if (isAccountReadAuthFailureError(error)) {
@@ -1536,11 +1545,11 @@ export class CodexAcpServer {
         if (accountResponse === null) {
             logger.log("No account read, so the auth status stays as it was");
             return {
-                account: this.lastReadAccount,
+                account: this.lastAccountRead.account,
                 authConfigured: true,
             };
         }
-        this.lastReadAccount = accountResponse.account;
+        this.lastAccountRead = accountResponse;
         await this.publishAuthStatus(authProvider, accountResponse.account);
         return {
             account: accountResponse.account,
@@ -1614,7 +1623,7 @@ export class CodexAcpServer {
                 if (!answerIsCurrent()) return;
                 if (isAuthRequiredError(error) || isAccountReadAuthFailureError(error)) {
                     logger.log("A late account read found that the agent needs a login", {error: String(error)});
-                    this.lastReadAccount = null;
+                    this.lastAccountRead = {account: null, requiresOpenaiAuth: true};
                     sessionState.account = null;
                     sessionState.authConfigured = false;
                     await this.publishAuthStatus(sessionState.authProvider, null);
@@ -1708,7 +1717,6 @@ export class CodexAcpServer {
                         clientSupportsTypedSessionFailures(this.clientCapabilities),
                         this.sessionFailureIds,
                         sessionState.subagents,
-                        (accountUpdated) => this.handleAccountUpdated(accountUpdated),
                         false,
                         clientSupportsCompaction(this.clientCapabilities),
                         clientSupportsNotices(this.clientCapabilities),
@@ -2460,7 +2468,7 @@ export class CodexAcpServer {
             }
             await replacement.initialize(this.initializeRequest);
             this.codexAcpClient = replacement;
-            this.sessionIndex.observe(replacement);
+            this.observeAppServer(replacement);
             this.availableCommands = this.createAvailableCommands(replacement);
 
             const resumeErrors: unknown[] = [];
@@ -2691,14 +2699,27 @@ export class CodexAcpServer {
         // A `providers/set` can have changed the routing of the old client while the restart ran.
         client.adoptRoutingFrom(this.codexAcpClient);
         this.codexAcpClient = client;
-        // The session index watches the thread notifications of the app-server that runs now.
-        this.sessionIndex.observe(client);
+        this.observeAppServer(client);
         this.availableCommands = this.createAvailableCommands(client);
         for (const session of this.sessions.values()) {
             session.asyncTasks.setAppServer(client.appServerClient);
             session.titleGen?.rebindAppServer(client.appServerClient);
             session.promptSuggestions?.rebindAppServer(client.appServerClient);
         }
+    }
+
+    /** Observe account changes once per connection, also before the first session. */
+    private observeAppServer(client: CodexAcpClient): void {
+        this.sessionIndex.observe(client);
+        if (this.authObserver?.client === client) return;
+        this.authObserver?.stop();
+        this.authStatusVersion++;
+        const stop = client.appServerClient.onClientTransportEvent(event => {
+            if (event.eventType === "notification" && event.method === "account/updated") {
+                this.handleAccountUpdated(event.params);
+            }
+        });
+        this.authObserver = {client, stop};
     }
 
     /** Returns whether the auth state was read (and thus the auth status pushed). */
@@ -2758,6 +2779,22 @@ export class CodexAcpServer {
         void this.publishAuthStatusRead();
     }
 
+    /** Don't wait for config/read or account/read; the client gets a notification when the read finds a change. */
+    authStatus(): acp.AuthStatusResponse {
+        void this.publishAuthStatusRead();
+        return this.acpAuthStatus;
+    }
+
+    private publishAuthStatusRead(): Promise<void> {
+        const version = this.authStatusVersion;
+        if (this.authStatusRead?.version === version) return this.authStatusRead.done;
+        const done = this.readAndReportAuthStatus(version).finally(() => {
+            if (this.authStatusRead?.done === done) this.authStatusRead = null;
+        });
+        this.authStatusRead = {version, done};
+        return done;
+    }
+
     /**
      * Reads the agent-owned identity and pushes it.
      *
@@ -2769,42 +2806,35 @@ export class CodexAcpServer {
      * token, is an answer: it pushes the `none` status, see
      * {@link isAccountReadAuthFailureError}.
      */
-    private async publishAuthStatusRead(): Promise<void> {
-        let authStatus: AuthStatus;
+    private async readAndReportAuthStatus(version: number): Promise<void> {
+        let identity: AuthStatus;
         try {
-            authStatus = await this.readAgentAuthIdentity();
+            const gateway = this.codexAcpClient.getAuthGatewayProviderName();
+            if (gateway !== null) {
+                identity = gatewayStatus(gateway);
+            } else {
+                // Unlike session routing, this provider excludes anything supplied through providers/set.
+                const provider = await this.runWithProcessCheck(() => this.codexAcpClient.getAgentConfiguredModelProvider());
+                if (version !== this.authStatusVersion) return;
+                if (this.authProviderUsesOpenAiAccount(provider)) {
+                    const read = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
+                    if (version !== this.authStatusVersion) return;
+                    this.lastAccountRead = read;
+                    identity = fromAccount(read.account);
+                } else {
+                    identity = agentConfiguredProviderStatus(provider);
+                }
+            }
         } catch (error) {
-            if (isAccountReadAuthFailureError(error)) {
-                logger.log("The account read found that the agent needs a login", {error: String(error)});
-                this.lastReadAccount = null;
-                await this.setAuthStatus(fromAccount(null));
+            if (version !== this.authStatusVersion) return;
+            if (!isAuthRequiredError(error) && !isAccountReadAuthFailureError(error)) {
+                logger.log("Cannot determine auth status", {error: String(error)});
                 return;
             }
-            logger.log("Cannot determine auth status", {error: String(error)});
-            return;
+            this.lastAccountRead = {account: null, requiresOpenaiAuth: true};
+            identity = fromAccount(null);
         }
-        await this.setAuthStatus(authStatus);
-    }
-
-    /**
-     * Builds the agent-owned auth identity. Routing the client configured
-     * through the ACP `providers/*` API is invisible here: the reported state
-     * is what the agent itself is logged in with. `gateway` stays reserved for
-     * agent-owned gateway state — the `gateway` auth method, or a provider the
-     * user configured in Codex's own config.
-     */
-    private async readAgentAuthIdentity(): Promise<AuthStatus> {
-        const authGatewayName = this.codexAcpClient.getAuthGatewayProviderName();
-        if (authGatewayName !== null) {
-            return gatewayStatus(authGatewayName);
-        }
-        const modelProvider = await this.runWithProcessCheck(() => this.codexAcpClient.getAgentConfiguredModelProvider());
-        if (!this.authProviderUsesOpenAiAccount(modelProvider)) {
-            return agentConfiguredProviderStatus(modelProvider);
-        }
-        const accountResponse = await this.runWithProcessCheck(() => this.codexAcpClient.getAccount());
-        this.lastReadAccount = accountResponse.account;
-        return fromAccount(accountResponse.account);
+        if (version === this.authStatusVersion) await this.setAuthStatus(identity);
     }
 
     /**
@@ -2816,6 +2846,7 @@ export class CodexAcpServer {
         authProvider: string | null,
         account: Account | null,
     ): Promise<void> {
+        this.authStatusVersion++;
         const authGatewayName = this.codexAcpClient.getAuthGatewayProviderName();
         if (authGatewayName !== null) {
             await this.setAuthStatus(gatewayStatus(authGatewayName));
@@ -2850,7 +2881,8 @@ export class CodexAcpServer {
      * invalidate; only a gateway logout or a provider change does.
      */
     private async applyAccountUpdated(notification: AccountUpdatedNotification): Promise<void> {
-        this.lastReadAccount = accountFromUpdated(notification, this.lastReadAccount);
+        this.authStatusVersion++;
+        this.lastAccountRead = {...this.lastAccountRead, account: accountFromUpdated(notification, this.lastAccountRead.account)};
         if (this.initializeResponseDelivery === "pending") return;
         try {
             if (this.codexAcpClient.getAuthGatewayProviderName() !== null) {
@@ -2865,14 +2897,19 @@ export class CodexAcpServer {
             if (this.currentAuthStatus.kind === "gateway") {
                 return;
             }
-            await this.setAuthStatus(fromAccountUpdated(notification, this.currentAuthStatus));
+            const next = fromAccountUpdated(notification, this.currentAuthStatus);
+            const published = this.setAuthStatus(next);
+            // The event has no email or workspace. Even an unchanged plan can be a different login.
+            if (next.kind === "account") void this.publishAuthStatusRead();
+            await published;
         } catch (error) {
             logger.log("Failed to apply account update to auth status", {error: String(error)});
         }
     }
 
     /**
-     * Stores `next` and pushes `_auth/status_update`.
+     * Stores the observation before sending notifications. The two formats can
+     * change independently: only ACP distinguishes `not_required` from signed out.
      *
      * A push goes out only when the payload changed. The identity is read on
      * many occasions — `initialize`, each session create, each `account/updated`
@@ -2884,14 +2921,18 @@ export class CodexAcpServer {
      * so no payload can equal it.
      */
     private async setAuthStatus(next: AuthStatus): Promise<void> {
-        this.authStatusVersion += 1;
         if (this.initializeResponseDelivery === "pending") return;
-        if (sameAuthStatus(this.currentAuthStatus, next)) {
-            return;
-        }
+        const legacyChanged = !sameAuthStatus(this.currentAuthStatus, next);
+        const status = toAcpAuthStatus(next, this.lastAccountRead);
+        const changed = !isDeepStrictEqual(status, this.acpAuthStatus);
         this.currentAuthStatus = next;
+        this.acpAuthStatus = status;
+        // Schedule both before yielding so concurrent observations stay in order on each wire.
         try {
-            await this.connection.notify(AUTH_STATUS_UPDATE_METHOD, {authStatus: next});
+            await Promise.all([
+                legacyChanged && this.connection.notify(AUTH_STATUS_UPDATE_METHOD, {authStatus: next}),
+                changed && (this.v2Connection ?? this.connection).notify(acp.methods.client.auth.statusUpdate, status),
+            ]);
         } catch (error) {
             logger.log("Failed to send auth status update", {error: String(error)});
         }
@@ -5117,7 +5158,6 @@ export class CodexAcpServer {
                 clientSupportsTypedSessionFailures(this.clientCapabilities),
                 this.sessionFailureIds,
                 sessionState.subagents,
-                (accountUpdated) => this.handleAccountUpdated(accountUpdated),
                 agentFileChangeReportRequest !== null,
                 clientSupportsCompaction(this.clientCapabilities),
                 clientSupportsNotices(this.clientCapabilities),

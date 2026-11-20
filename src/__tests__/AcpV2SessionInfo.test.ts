@@ -118,7 +118,7 @@ describe("V2 session metadata", () => {
         const v2 = new AcpV2Connection(client);
         const failure: SessionFailure = {id: "incident", revision: 1, category: "service", severity: "warning", title: "Retrying", actions: ["retry"]};
         const state = createTestSessionState({sessionId: "session", sessionFailure: failure});
-        const handler = new CodexEventHandler(v2.extensionOnlyV1View(), state, true, new SessionFailureIds("epoch"), state.subagents, undefined, false, false, false);
+        const handler = new CodexEventHandler(v2.extensionOnlyV1View(), state, true, new SessionFailureIds("epoch"), state.subagents, false, false, false);
         await v2.client.notify("session/update", {sessionId: "session", update: {
             sessionUpdate: "session_info_update",
             _meta: {jetbrains: {other: true, air: {version: 1, sibling: {value: null}, sessionFailure: {...failure, revision}}}},

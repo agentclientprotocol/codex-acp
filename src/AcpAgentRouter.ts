@@ -204,6 +204,7 @@ function createRouter(
         .onRequest(acp.methods.agent.session.setTitle, (ctx) => getAgent(ctx.params).sessionIndex.setTitle(ctx.params))
         .onRequest(acp.methods.agent.authenticate, (ctx) => getAgent().authenticate(ctx.params, ctx.requestId, ctx.signal))
         .onRequest(acp.methods.agent.logout, (ctx) => getAgent().logout(ctx.params))
+        .onRequest(acp.methods.agent.auth.status, () => getAgent().authStatus())
         .onRequest(acp.methods.agent.providers.list, (ctx) => getAgent().listProviders(ctx.params))
         .onRequest(acp.methods.agent.providers.set, (ctx) => getAgent().setProvider(ctx.params))
         .onRequest(acp.methods.agent.providers.disable, (ctx) => getAgent().disableProvider(ctx.params))
@@ -242,6 +243,7 @@ function createRouter(
         // The v1-only `authentication/status|logout` extensions are not registered on v2.
         .onRequest(acpV2.methods.agent.auth.login, (ctx) => getAgent().authenticateV2(ctx.params, ctx.requestId, ctx.signal))
         .onRequest(acpV2.methods.agent.auth.logout, (ctx) => getAgent().logoutV2(ctx.params))
+        .onRequest(acpV2.methods.agent.auth.status, () => getAgent().authStatus())
         .onRequest(acpV2.methods.agent.session.prompt, (ctx) => getAgent(ctx.params).promptV2(ctx.params, ctx.signal))
         .onNotification(acpV2.methods.agent.session.cancel, (ctx) => getAgent().cancel(ctx.params))
         .onRequest(acpV2.methods.agent.providers.list, (ctx) => getAgent().listProviders(ctx.params))

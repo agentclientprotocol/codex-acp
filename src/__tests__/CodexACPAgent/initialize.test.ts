@@ -40,6 +40,7 @@ describe('CodexACPAgent - initialize', () => {
             agentCapabilities: {
                 auth: {
                     logout: {},
+                    status: {},
                 },
                 providers: {},
                 loadSession: true,

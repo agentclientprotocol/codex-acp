@@ -11,6 +11,15 @@
   ]
 }
 {
+  "method": "notify",
+  "args": [
+    "auth/status_update",
+    {
+      "state": "not_required"
+    }
+  ]
+}
+{
   "method": "sessionUpdate",
   "args": [
     {

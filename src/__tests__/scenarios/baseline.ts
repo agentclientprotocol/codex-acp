@@ -156,7 +156,8 @@ export function withFeatureChanges(messages: RecordedMessage[]): RecordedMessage
             if (session) {
                 const {subagents: _subagents, ...kept} = session;
                 return {...message, params: {...params, agentCapabilities: {
-                    ...capabilities, sessionCapabilities: {...kept, systemPrompt: {}, title: {}},
+                    ...capabilities, auth: {...capabilities?.["auth"] as Json, status: {}},
+                    sessionCapabilities: {...kept, systemPrompt: {}, title: {}},
                 }}};
             }
         }
@@ -241,7 +242,11 @@ export function withOutputOnce(messages: RecordedMessage[]): RecordedMessage[] {
 
 /** The baseline messages with the allowed differences applied, except the merge of the tool call reports. */
 export function expectedFromBaseline(scenario: string, baseline: RecordedMessage[]): RecordedMessage[] {
-    return withFeatureChanges(withBugFixes(scenario, withoutAirOnlyMessages(baseline)));
+    // The scenario's account/read reports no account and requiresOpenaiAuth: false.
+    return withFeatureChanges(withBugFixes(scenario, withoutAirOnlyMessages(baseline))).flatMap(message =>
+        message.method === "_auth/status_update"
+            ? [message, {direction: "notify", method: "auth/status_update", params: {state: "not_required"}}]
+            : [message]);
 }
 
 /**

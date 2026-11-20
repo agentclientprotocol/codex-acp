@@ -23,6 +23,7 @@
       "title": {}
     },
     "auth": {
+      "status": {},
       "_meta": {
         "authStatus": {}
       }
