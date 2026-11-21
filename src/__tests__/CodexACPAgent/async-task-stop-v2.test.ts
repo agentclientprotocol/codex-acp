@@ -125,6 +125,7 @@ describe('background terminal controls on ACP v2', () => {
         client.emit({method: "item/completed", params: {threadId: sessionId, turnId: "background-turn", completedAtMs: 0,
             item: commandItem({status: "completed", exitCode: 0, aggregatedOutput: "final output"})}});
         await client.waitForNotifications();
+        await vi.waitFor(() => expect(states().at(-1)).toMatchObject({state: "running", background: [background[1]]}));
         const completion = client.scopedUpdates.slice(before).map(entry => entry.update);
         const output = completion.findIndex(update => update.sessionUpdate === "terminal_update" && update["output"] != null);
         const removed = completion.findIndex(update => update.sessionUpdate === "state_update"
@@ -164,6 +165,7 @@ describe('background terminal controls on ACP v2', () => {
         client.emit({method: "item/completed", params: {threadId: sessionId, turnId: "background-turn", completedAtMs: 0,
             item: commandItem({id: "command-2", status: "completed", exitCode: 0, aggregatedOutput: "detached output"})}});
         await client.waitForNotifications();
+        await vi.waitFor(() => expect(states().at(-1)).toMatchObject({state: "idle", background: []}));
         const detached = client.scopedUpdates.slice(completionStart).map(entry => entry.update);
         const detachedOutput = detached.findIndex(update => update.sessionUpdate === "terminal_update"
             && (update["output"] as {data?: string} | undefined)?.data === Buffer.from("detached output").toString("base64"));
@@ -213,21 +215,24 @@ describe('background terminal controls on ACP v2', () => {
             }} : {}),
         }}});
         await client.waitForNotifications();
+        await vi.waitFor(() => expect(client.scopedUpdates.slice(start).map(entry => entry.update)
+            .filter(update => update.sessionUpdate === "state_update").at(-1)).toMatchObject({
+                state: "idle", background: [{type: "terminal", terminalId: "command-1"}],
+            }));
         const updates = client.scopedUpdates.slice(start).map(entry => entry.update);
         expect(updates.some(update => update.sessionUpdate === "terminal_update" && update["exitStatus"] != null)).toBe(false);
-        expect(updates.filter(update => update.sessionUpdate === "state_update").at(-1)).toMatchObject({
-            state: "idle", background: [{type: "terminal", terminalId: "command-1"}],
-        });
         expect(client.turnInterruptCalls()).toEqual(status === "interrupted" ? [{threadId: sessionId, turnId: "turn-1"}] : []);
         client.emit({method: "item/completed", params: {threadId: sessionId, turnId: "background-turn", completedAtMs: 0,
             item: commandItem({status: "completed", exitCode: 0, aggregatedOutput: "late output"})}});
         await client.waitForNotifications();
+        await vi.waitFor(() => expect(client.scopedUpdates.map(entry => entry.update)).toContainEqual({
+            sessionUpdate: "terminal_update", terminalId: "command-1", capabilities: null,
+        }));
         const completed = client.scopedUpdates.map(entry => entry.update);
         expect(completed).toContainEqual(expect.objectContaining({
             sessionUpdate: "terminal_update", terminalId: "command-1", exitStatus: {exitCode: 0, signal: null},
             output: {data: Buffer.from("late output").toString("base64")},
         }));
-        expect(completed).toContainEqual({sessionUpdate: "terminal_update", terminalId: "command-1", capabilities: null});
     });
 
     it('isolates equal root and child terminal IDs and preserves a refused Stop', async () => {
