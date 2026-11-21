@@ -279,6 +279,20 @@ describe("Gateway model discovery (providers/set)", () => {
         expect(await fixture.getCodexAcpClient().fetchAvailableModels()).toEqual(codexModels());
     });
 
+    it.each(["custom-model", ""])("opens with an empty native catalogue only when the thread supplies a model (%j)", async (model) => {
+        const fixture = createFixture([]);
+        const opening = openSession(fixture, model);
+
+        if (model === "") {
+            await expect(opening).rejects.toThrow("Codex did not return any models");
+            return;
+        }
+
+        const response = await opening;
+        expect(response.configOptions?.find(o => o.id === MODEL_CONFIG_ID)).toBeUndefined();
+        expect(fixture.getCodexAcpAgent().getSessionState(response.sessionId).currentModelId).toBe("custom-model[high]");
+    });
+
     it("does not list models when providers/set was not used", async () => {
         const fixture = createFixture();
 
