@@ -219,7 +219,6 @@ import {
     AIR_PLAN_CONTENT_DELTA_KEY,
     AIR_RAW_INPUT_RENDERING_KEY,
     AIR_RECOMMENDED_CONFIG_VALUE_KEY,
-    AIR_MODEL_REASONING_EFFORTS_CAPABILITY,
     AIR_EXTENSION_CAPABILITIES_KEY,
     AIR_EXTENSION_VERSION,
     AIR_GOAL_KEY,
@@ -3496,7 +3495,7 @@ export class CodexAcpServer {
                 sessionState.availableModels,
                 currentModelId.model,
                 recommendedModelId,
-                clientSupportsAirCapability(this.clientCapabilities, AIR_MODEL_REASONING_EFFORTS_CAPABILITY),
+                isAirClient(this.clientCapabilities),
             ));
         }
         if (sessionState.supportedReasoningEfforts.length > 0) {

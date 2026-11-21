@@ -3,9 +3,10 @@ import type {AnyMessage} from "@agentclientprotocol/sdk/experimental/v2/unstable
 import {createTestModel} from "../acp-test-utils";
 import {codexResponse, connectSession, createThread, cwd, sessionId} from "./v2-prompt-harness";
 
-const AIR_CAPABILITIES = {_meta: {jetbrains: {air: {version: 1, capabilities: ["modelReasoningEfforts"]}}}};
+/** An AIR client that declares no AIR capability. */
+const AIR_CLIENT = {_meta: {jetbrains: {air: {version: 1}}}};
 
-async function connect(version: 1 | 2, airCapability: boolean) {
+async function connect(version: 1 | 2, airClient: boolean) {
     const luna = createTestModel({
         id: "gpt-5.6-luna",
         displayName: "GPT-5.6-Luna",
@@ -29,9 +30,7 @@ async function connect(version: 1 | 2, airCapability: boolean) {
     });
     const start = async () => ({...codexResponse("thread/start") as object, model: luna.id});
     return connectSession(version, {
-        ...(airCapability
-            ? version === 2 ? {clientCapabilities: AIR_CAPABILITIES} : {v1ClientCapabilities: AIR_CAPABILITIES}
-            : {}),
+        ...(airClient ? version === 2 ? {clientCapabilities: AIR_CLIENT} : {v1ClientCapabilities: AIR_CLIENT} : {}),
         codexResponses: {
             "thread/start": start,
             "thread/resume": start,
@@ -65,7 +64,7 @@ const expectedEntries = [
 ];
 
 describe.each([1, 2] as const)("ACP v%s model reasoning efforts", version => {
-    it("adds no per-model metadata without the modelReasoningEfforts capability", async () => {
+    it("adds no per-model metadata for a client that is not AIR", async () => {
         const h = await connect(version, false);
         try {
             const entries = modelEntries(sessionNewResponse(h.wireMessages).configOptions) as Array<object>;
@@ -74,7 +73,7 @@ describe.each([1, 2] as const)("ACP v%s model reasoning efforts", version => {
         } finally { h.connection.close(); }
     });
 
-    it("carries the efforts of each model in every answer with config options", async () => {
+    it("carries the efforts of each model in every answer with config options for an AIR client", async () => {
         const h = await connect(version, true);
         try {
             const answers: Record<string, unknown> = {};
