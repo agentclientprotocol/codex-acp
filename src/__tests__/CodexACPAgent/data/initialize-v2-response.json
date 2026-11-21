@@ -90,8 +90,7 @@
           "customInstructions",
           "nativeSubagentSessions",
           "asyncTasks",
-          "recommendedValue",
-          "modelReasoningEfforts"
+          "recommendedValue"
         ]
       }
     }

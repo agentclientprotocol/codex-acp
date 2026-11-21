@@ -6,7 +6,6 @@
     "nativeSubagentSessions",
     "asyncTasks",
     "recommendedValue",
-    "modelReasoningEfforts",
     "sessionIndex",
     "sessionBatchGet",
     "sessionArchive",

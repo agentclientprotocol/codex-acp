@@ -977,7 +977,6 @@ export class CodexAcpServer {
                 AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
                 AIR_ASYNC_TASKS_KEY,
                 AIR_RECOMMENDED_CONFIG_VALUE_KEY,
-                AIR_MODEL_REASONING_EFFORTS_CAPABILITY,
                 AIR_RAW_INPUT_RENDERING_KEY,
                 AIR_PLAN_CONTENT_DELTA_KEY,
                 AIR_CODEX_HOOKS_KEY,
@@ -990,7 +989,6 @@ export class CodexAcpServer {
                 AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
                 AIR_ASYNC_TASKS_KEY,
                 AIR_RECOMMENDED_CONFIG_VALUE_KEY,
-                AIR_MODEL_REASONING_EFFORTS_CAPABILITY,
                 ...this.sessionIndex.agentCapabilities(),
             ];
         return {

@@ -139,7 +139,6 @@ The `initialize` response carries the agent side of the extension only when the 
           "nativeSubagentSessions",
           "asyncTasks",
           "recommendedValue",
-          "modelReasoningEfforts",
           "rawInputRendering",
           "planContentDelta",
           "codexHooks"
@@ -790,6 +789,9 @@ Without the capability, the config options keep their old shape and carry no rec
 
 The `modelReasoningEfforts` extension lets a client show the efforts of a model before the user selects it.
 It applies to the entries of the `model` config selector.
+
+Only the client declares `modelReasoningEfforts`. The agent does not list it in its declaration.
+The agent sends the key only to a client that asks for it.
 
 When the client declares `modelReasoningEfforts`, a model entry with efforts carries:
 
