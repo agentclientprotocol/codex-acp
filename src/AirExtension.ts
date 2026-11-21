@@ -139,5 +139,5 @@ export function isAirCustomAnswer(meta: unknown): boolean {
     const air = asRecord(asRecord(root[JETBRAINS_META_KEY])[AIR_META_KEY]);
     const marker = air[AIR_CUSTOM_ANSWER_KEY] === undefined
         ? root[LEGACY_AIR_CUSTOM_ANSWER_KEY] : air[AIR_CUSTOM_ANSWER_KEY];
-    return marker === true || Object.keys(asRecord(marker)).length > 0;
+    return marker === true;
 }
