@@ -1,3 +1,4 @@
+import {withAutomaticTurnChoice} from "./automatic-choice";
 import * as acp from "@agentclientprotocol/sdk/unstable";
 import type {ApprovalHandler} from "../CodexAppServerClient";
 import type {
@@ -103,12 +104,12 @@ export class CodexApprovalHandler implements ApprovalHandler {
         try {
             const response = await this.requestPermission({
                 sessionId: params.threadId,
-                toolCall: this.renderer.renderPermissionToolCall(SandboxPermissionReporter.permission(
+                toolCall: withAutomaticTurnChoice(this.renderer.renderPermissionToolCall(SandboxPermissionReporter.permission(
                     params.itemId,
                     params.cwd,
                     params.environmentId,
                     params.permissions,
-                )),
+                )), this.renderer.capabilities.automaticChoice),
                 options: permissionProfileOptions(),
                 ...requestPermissionMeta(
                     this.renderer.capabilities,

@@ -110,6 +110,10 @@ ACP v2 shows detached children and background terminals in the session's `backgr
 
 See [Background work](docs/background-work.md) for the v2 lifecycle and cancel methods, or [AIR async tasks](docs/air-extensions.md#async-tasks) for the existing AIR extension.
 
+### Approval policy integration
+
+Optional [Instance Automatic approval choices](docs/instance-automatic-choice.md) let an installed host identify the ordinary turn grant without changing manual choices.
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the Apache 2.0 License.
