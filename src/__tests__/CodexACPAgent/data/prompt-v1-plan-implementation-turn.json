@@ -51,6 +51,36 @@
     }
   },
   {
+    "codexRequest": "turn/start",
+    "params": {
+      "threadId": "thread-1",
+      "input": [
+        {
+          "type": "text",
+          "text": "Implement the approved plan.",
+          "text_elements": []
+        }
+      ],
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "auto_review",
+      "sandboxPolicy": {
+        "type": "workspaceWrite",
+        "writableRoots": [],
+        "networkAccess": false,
+        "excludeTmpdirEnvVar": false,
+        "excludeSlashTmp": false
+      },
+      "summary": "auto",
+      "effort": "medium",
+      "model": "gpt-5",
+      "serviceTier": null,
+      "clientUserMessageId": "<implementationId>"
+    }
+  },
+  {
+    "codexResponse": "turn/start"
+  },
+  {
     "sessionUpdate": {
       "configOptions": [
         {
@@ -135,36 +165,6 @@
       ],
       "sessionUpdate": "config_option_update"
     }
-  },
-  {
-    "codexRequest": "turn/start",
-    "params": {
-      "threadId": "thread-1",
-      "input": [
-        {
-          "type": "text",
-          "text": "Implement the approved plan.",
-          "text_elements": []
-        }
-      ],
-      "approvalPolicy": "on-request",
-      "approvalsReviewer": "auto_review",
-      "sandboxPolicy": {
-        "type": "workspaceWrite",
-        "writableRoots": [],
-        "networkAccess": false,
-        "excludeTmpdirEnvVar": false,
-        "excludeSlashTmp": false
-      },
-      "summary": "auto",
-      "effort": "medium",
-      "model": "gpt-5",
-      "serviceTier": null,
-      "clientUserMessageId": "<implementationId>"
-    }
-  },
-  {
-    "codexResponse": "turn/start"
   },
   {
     "codexNotification": "turn/started"
