@@ -731,6 +731,7 @@ describe('Elicitation Events', () => {
             fixture.setElicitationResponse({action: 'accept'});
             const oauthLogin = vi.spyOn(codexClient, 'mcpServerOauthLogin').mockResolvedValue({
                 authorizationUrl: 'https://example.com/oauth/authorize',
+                loginId: 'login',
             });
             vi.spyOn(codexClient, 'awaitMcpServerOauthLoginCompleted').mockResolvedValue({
                 name: 'linear',
@@ -794,11 +795,7 @@ describe('Elicitation Events', () => {
             });
             await fixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
 
-            const [, completeElicitationEvent] = fixture.getAcpConnectionEvents([]);
-            expect(completeElicitationEvent).toEqual({
-                method: 'completeElicitation',
-                args: [{ elicitationId: 'elicit-123' }],
-            });
+            expect(fixture.getAcpConnectionEvents([]).some(event => event.method === "completeElicitation")).toBe(false);
 
             completeTurn();
             await promptPromise;

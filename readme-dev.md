@@ -162,12 +162,18 @@ The adapter restarts the Codex app-server when it dies (for example, killed for 
 
 ### ACP v2 support
 
-The agent speaks both ACP v1 and the unstable ACP v2 (Draft) protocol from the same process; the
-version is negotiated on the first `initialize` request and fixed for the connection's lifetime.
+The adapter serves ACP v1 and [ACP v2 Preview](https://agentclientprotocol.com/protocol/v2/overview)
+from the same process. The TypeScript SDK router selects a version on the first `initialize`.
+A client that needs v1 after the router selected v2 must open a new connection.
+
+V2 [allows Markdown](https://agentclientprotocol.com/protocol/v2/content#text-content) in
+descriptions of auth methods, commands and skills, config options and their values, permission
+requests, and subagent roles. Plan-entry content can also contain Markdown. The adapter sends
+those strings as text for the client to render. Names and titles remain plain text.
 
 The v2 chain registers: `initialize`, `session/new|list|close|delete|resume` (v2 folds `session/load`
-into `session/resume` with `replayFrom`), `session/set_config_option`, `session/cancel`,
-`auth/login|logout`, `session/prompt` (plus `$/cancel_request`), `session/fork`, and
+into `session/resume` with `replayFrom`), `session/set_config_option`, `session/set_title`, `session/cancel`,
+`auth/login|logout|status`, `session/prompt` (plus `$/cancel_request`), `session/fork`, `terminal/cancel`, and
 `providers/list|set|disable`. Unstable extension methods on top of that: `_session/steering`,
 `_session/goal` (set/pause/resume/clear), `_session/async_task/stop`, and the AIR session index
 requests (`_session/rename`, `_session/archive|unarchive`, `_session/list/subscribe|unsubscribe`).
@@ -234,14 +240,19 @@ schema alone:
   (gated on the AIR `asyncTasks` capability). Payload shapes are unchanged.
 - Foreground state is independent of prompt acceptance. `running` can precede the user-message
   echo, including while Codex runs hooks. A successful prompt response still waits for insertion.
+- A held prompt can be withdrawn before dispatch. Once dispatched, cancellation can race with
+  insertion: an inserted message still gets its `messageId`, not `-32800`. A keyed retry reuses
+  the receipt while the message is retained. Resume alone does not prove that a live-only command
+  or its key survived a disconnect, so clients should not blindly resubmit an unanswered command.
 - Every successful `session/resume` sends a current-state snapshot after any replay and before its
   response. An idle snapshot is not another completed turn and repeats no usage or failure metadata.
 - Permission and elicitation requests affect aggregate foreground state: another runnable item keeps
   the session running, and answering one wait does not resume work that remains blocked. Withdrawing
   a request on cancellation does not resume the workflow; late answers cannot revive an ended turn.
 - A steer (`_session/steering`) shows up as a `user_message` once it actually lands in the turn.
-- On cancel, any permission or elicitation request still waiting on a client response is withdrawn
-  with `$/cancel_request`, not just the underlying Codex turn.
+- On cancel, requests the stopped foreground work was waiting for are withdrawn with `$/cancel_request`.
+  Listed background work survives. Prompts received after cancellation wait for the old work's idle
+  before starting new work, including when Codex started the old turn itself.
 - Turns Codex starts on its own (goal auto-turns, e.g. after `session/resume` or `session/new`) are
   rendered the same as prompted turns (`running` then one `idle`) but with no corresponding
   `session/prompt` call — clients should not assume every `running`/`idle` pair has a matching
@@ -291,8 +302,8 @@ including complete JSON-RPC batches; historical or copied child records never gr
 Child `config_option_update` notifications contain complete reported snapshots. Observed model and
 reasoning effort use singleton selects, including changes between assignments. Unknown or unset values
 are omitted; no values are inferred from the parent or requested spawn arguments. These reports do not
-enable configuration changes, even to the current value. Replayed configuration is historical, not
-confirmed current. Reattachment drops cached confirmation and refreshes loaded children after the
+enable configuration changes, even to the current value. V1 load can report historical configuration.
+V2 replay omits it. Reattachment drops cached confirmation and refreshes loaded children after the
 response. Optional reads do not block child delivery; newer observations or attachment changes discard
 stale results.
 

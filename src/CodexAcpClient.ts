@@ -32,7 +32,7 @@ import {isDeepStrictEqual} from "node:util";
 import {logger} from "./Logger";
 import {isAccountReadAuthFailureError, isAccountReadUnavailableError} from "./CodexThreadErrors";
 import {listedSessionTitle, normalizeSessionTitle} from "./SessionTitle";
-import {type AcpMcpServer, type McpOverAcpToHttp, type WithAcpMcpServers, normalizeMcpServers, toCodexMcpServerConfig} from "./McpServerConfig";
+import {type AcpMcpServer, type McpOverAcpToHttp, type WithAcpMcpServers, normalizeMcpServers, prepareMcpServer} from "./McpServerConfig";
 import type {
     AccountUpdatedNotification,
     ApprovalsReviewer,
@@ -824,6 +824,7 @@ export class CodexAcpClient {
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier ?? null,
             thread,
+            threadStatus: response.thread.status,
             history,
             additionalDirectories,
             skippedMcpServers,
@@ -1083,7 +1084,7 @@ export class CodexAcpClient {
             // rollout on the first user message), an already-deleted session,
             // and an ACP session id that is not a Codex thread id at all --
             // ACP session ids are opaque strings, Codex thread ids are UUIDs.
-            if (!isUnknownThreadError(err)) throw err;
+            if (!isUnknownThreadError(err) && !isThreadNotFoundError(err)) throw err;
             logger.log("Delete request for a session Codex has no persisted thread for; treating as deleted", {
                 sessionId,
                 reason: err instanceof Error ? err.message : String(err),
@@ -1248,19 +1249,24 @@ export class CodexAcpClient {
             return {config: configWithWorkspaceRoots, skippedMcpServers, ...permissionProfileMetadata};
         }
 
-        const configs = await Promise.all(serversToConfigure.map(async server =>
-            [server.name, await toCodexMcpServerConfig(server)] as const));
+        const prepared = await Promise.all(serversToConfigure.map(prepareMcpServer));
+        const configured = prepared.filter(server => "config" in server);
+        const failures = prepared.flatMap(server => "failure" in server ? [server.failure] : []);
         const features = configWithWorkspaceRoots["features"];
         return {
             config: {
                 ...configWithWorkspaceRoots,
                 // Without modern discovery Codex sends `initialize`, which the ACP bridge does not accept.
-                ...(serversToConfigure.some(server => server.type === "acp") && {
+                ...(configured.some(server => server.bridged) && {
                     features: {...(isJsonObject(features) ? features : {}), [STATELESS_MCP_FEATURE]: true},
                 }),
-                mcp_servers: {...(isJsonObject(localServers) ? localServers : {}), ...Object.fromEntries(configs)},
+                ...(configured.length > 0 && {mcp_servers: {
+                    ...(isJsonObject(localServers) ? localServers : {}),
+                    ...Object.fromEntries(configured.map(({name, config}) => [name, config])),
+                }}),
             },
             skippedMcpServers,
+            ...(failures.length > 0 && {mcpStartupFailures: failures}),
             ...permissionProfileMetadata,
         };
     }
@@ -1552,9 +1558,10 @@ export class CodexAcpClient {
     async awaitMcpServerOauthLoginCompleted(
         name: string,
         threadId: string,
+        loginId: Promise<string>,
         signal?: AbortSignal,
     ): Promise<McpServerOauthLoginCompletedNotification> {
-        return await this.codexClient.mcpOauthCompletions.await(name, threadId, signal);
+        return await this.codexClient.mcpOauthCompletions.await(name, threadId, loginId, signal);
     }
 
     async listSessions(request: acp.ListSessionsRequest): Promise<acp.ListSessionsResponse> {
@@ -1581,6 +1588,7 @@ export class CodexAcpClient {
         // each call, which took about 4 s per page.
         const listResponse = await this.codexClient.threadList({
             cursor: request.cursor ?? null,
+            sortKey: "recency_at",
             modelProviders: modelProviders,
             sourceKinds: sourceKinds,
             useStateDbOnly: true,
@@ -1658,6 +1666,7 @@ export type JsonObject = { [key in string]?: JsonValue }
 export type SessionConfig = {
     config: JsonObject,
     skippedMcpServers: string[],
+    mcpStartupFailures?: McpStartupResult["failed"],
     defaultPermissionProfileId?: string | null,
     approvalPolicy?: AskForApproval,
     approvalsReviewer?: ApprovalsReviewer,

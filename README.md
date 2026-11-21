@@ -98,7 +98,7 @@ See [readme-dev.md](readme-dev.md) for local client configuration, binary packag
 
 ### Subagent sessions
 
-Codex subagents are reported as ACP child sessions that follow the ACP [Subagent Sessions RFD](https://agentclientprotocol.com/rfds/subagents). A v1 client opts in with `clientCapabilities.subagents: {}` during `initialize`. A v2 client gets them without negotiation. The adapter announces each child with `subagent_update`, reports delegated tasks as `session_message`, and references children from collaboration tool calls with `session` content. A client can cancel a child's current work with `session/cancel`.
+Codex subagents are reported as [ACP child sessions](https://agentclientprotocol.com/protocol/v2/subagents). A v1 client opts in with `clientCapabilities.subagents: {}` during `initialize`. A v2 client gets them without negotiation. The adapter announces each child with `subagent_update`, reports delegated tasks as `session_message`, and references children from collaboration tool calls with `session` content. A client can cancel a child's current work with `session/cancel`.
 
 JetBrains AIR clients keep an older private contract instead. Without either contract, the subagent lifecycle stays an ordinary ACP tool call.
 

@@ -638,8 +638,8 @@ export class CodexEventHandler {
             case "turn/plan/updated": {
                 this.completeRetryIncidentOnTurnProgress(notification.params.threadId);
                 const update = this.updatePlan(notification.params);
-                if (this.session.protocolVersion !== 2 || notification.params.plan.length !== 0 || update.sessionUpdate !== "plan_update") return update;
-                // Baseline v2 clients can clear the checklist even if they don't act on plan_removed.
+                if (notification.params.plan.length !== 0 || update.sessionUpdate !== "plan_update") return update;
+                // Older clients clear the checklist even if they don't act on plan_removed.
                 await this.publishUpdate(update, this.subagents.notificationSessionId(notification));
                 return {sessionUpdate: "plan_removed", planId: update.plan.planId};
             }
@@ -675,16 +675,15 @@ export class CodexEventHandler {
                 this.latestRootTurnId = this.sessionState.currentTurnId ?? this.latestRootTurnId;
                 this.sessionState.currentTurnId = null;
                 this.sessionState.interruptTurnId = null;
-                if (this.session.protocolVersion === 2 && notification.params.turn.status === "failed") {
-                    for (const update of this.sessionState.openToolCalls.finishOutstanding(undefined,
+                if (this.session.protocolVersion === 2) {
+                    for (const update of this.sessionState.openToolCalls.finishOutstanding(notification.params.turn.id,
                         id => this.session.hasBackgroundItem({type: "terminal", terminalId: id}))) {
                         await this.session.update(update, this.subagents.notificationSessionId(notification));
                     }
+                } else {
+                    this.sessionState.openToolCalls.clear();
                 }
                 this.sessionState.toolCallReports.releaseOpen(this.subagents.notificationSessionId(notification));
-                // An item that missed its item/completed (e.g. dropped by a provider restart
-                // mid-turn) must not linger past its own turn and get failed by a later restart.
-                this.sessionState.openToolCalls.clear();
                 return null;
             case "thread/tokenUsage/updated":
                 return this.createUsageUpdate(notification.params);

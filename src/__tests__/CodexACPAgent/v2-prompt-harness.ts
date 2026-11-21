@@ -8,6 +8,7 @@ import {CodexAppServerClient} from '../../CodexAppServerClient';
 import type {ServerNotification} from '../../app-server';
 import type {Thread, ThreadItem, Turn, TurnStatus} from '../../app-server/v2';
 import type {McpStartupResult} from '../../mcp/McpStartupTracker';
+import type {McpOverAcpToHttp} from '../../McpServerConfig';
 import {createTestModel} from '../acp-test-utils';
 import {createMockConnections} from './test-utils';
 import {checkV2SessionUpdate} from './v2-session-update-guard';
@@ -145,6 +146,7 @@ export type PromptSession = {
 export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
     mcpServers?: acpV2.McpServer[],
     mcpStartup?: McpStartupResult,
+    mcpBridge?: McpOverAcpToHttp,
     /** Sent on `initialize` (v2 only). */
     clientCapabilities?: acpV2.ClientCapabilities,
     v1ClientCapabilities?: acp.ClientCapabilities,
@@ -195,7 +197,8 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         return response;
     });
     const appServer = new CodexAppServerClient(mocks.mockCodexConnection as any);
-    const codexAcpClient = new CodexAcpClient(appServer);
+    const codexAcpClient = new CodexAcpClient(appServer, undefined, undefined, options.mcpBridge);
+    if (options.mcpBridge) vi.spyOn(appServer, "hasExperimentalFeature").mockResolvedValue(true);
     vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
     vi.spyOn(codexAcpClient, "getAgentConfiguredModelProvider").mockResolvedValue("openai");
     vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, userId: null, requiresOpenaiAuth: false});

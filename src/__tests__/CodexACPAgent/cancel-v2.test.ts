@@ -4,8 +4,10 @@ import {CommandExecutionApprovalRequest} from '../../CodexAppServerClient';
 import type {CommandExecutionRequestApprovalParams} from '../../app-server/v2';
 import {
     connectSession,
+    commandExecutionItem,
     createTurn,
     userMessageItem,
+    itemStarted,
     itemCompleted,
     turnStarted,
     turnCompleted,
@@ -73,12 +75,19 @@ describe('session/cancel and session/close over ACP v2', () => {
         client.emit(itemCompleted(userMessageItem(client.turnStartParams[0]!["clientUserMessageId"] as string)));
         await response;
 
+        client.emit(itemStarted(commandExecutionItem("unfinished")));
         await client.cancel();
         client.emit(turnFinished("interrupted"));
         await client.promptRunFinished();
         await settle();
 
         expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "cancelled"}]);
+        const failedTool = client.transcript.findIndex(entry => "sessionUpdate" in entry
+            && entry.sessionUpdate.sessionUpdate === "tool_call_update" && entry.sessionUpdate.status === "failed");
+        const idle = client.transcript.findIndex(entry => "sessionUpdate" in entry
+            && entry.sessionUpdate.sessionUpdate === "state_update" && entry.sessionUpdate.state === "idle");
+        expect(failedTool).toBeGreaterThanOrEqual(0);
+        expect(idle).toBeGreaterThan(failedTool);
         await expect(dump(client.transcript, client.turnStartParams[0]!["clientUserMessageId"] as string))
             .toMatchFileSnapshot('data/cancel-v2-running-prompt.json');
     });
@@ -291,7 +300,7 @@ describe('session/cancel and session/close over ACP v2', () => {
         ]);
     });
 
-    it('interrupts and drops a started-but-not-inserted prompt on `$/cancel_request`', async () => {
+    it.each([false, true])('interrupts dispatched work but answers from actual insertion on `$/cancel_request` (landed: %s)', async landed => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
 
@@ -305,18 +314,21 @@ describe('session/cancel and session/close over ACP v2', () => {
             {threadId: "thread-1", turnId: "turn-1"},
         ]));
 
-        await expect(response).rejects.toMatchObject({code: -32800});
+        const messageId = client.turnStartParams[0]!["clientUserMessageId"] as string;
+        if (landed) client.emit(itemCompleted(userMessageItem(messageId)));
         client.emit(turnFinished("interrupted"));
+        if (landed) await expect(response).resolves.toMatchObject({messageId});
+        else await expect(response).rejects.toMatchObject({code: -32800});
         await client.promptRunFinished();
         await settle();
 
         expect(client.transcript.some(entry => "sessionUpdate" in entry && entry.sessionUpdate.sessionUpdate === "user_message_chunk"))
-            .toBe(false);
-        // The accepted turn started work, even though cancellation prevented insertion.
+            .toBe(landed);
+        // The accepted turn started work whether or not cancellation prevented insertion.
         expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "cancelled"}]);
     });
 
-    it('does not interrupt an adopted turn on `$/cancel_request`, but still drops the pending request', async () => {
+    it.each(["before", "after"])('does not interrupt an adopted turn when `$/cancel_request` arrives %s turn/start answers', async order => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
 
@@ -326,24 +338,28 @@ describe('session/cancel and session/close over ACP v2', () => {
         expect(stateUpdates(client.transcript)).toEqual([{state: "running"}]);
 
         const start = client.transcript.length;
-        client.setTurnStart(async () => ({turn: createTurn("inProgress", "goal-turn")}));
+        const startReply = deferred<void>();
+        if (order === "after") startReply.resolve();
+        client.setTurnStart(async () => {
+            await startReply.promise;
+            return {turn: createTurn("inProgress", "goal-turn")};
+        });
         const controller = new AbortController();
         const response = client.sendPrompt([{type: "text", text: "Hello"}], controller.signal);
         await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
 
         controller.abort();
-        await expect(response).rejects.toMatchObject({code: -32800});
-        await settle();
-        // The adopted turn belongs to someone else (the goal continuation): a per-request cancel
-        // must not touch it.
-        expect(client.turnInterruptCalls()).toEqual([]);
+        await client.request("session/list", {});
+        startReply.resolve();
 
         // The goal turn finishes normally on its own, unaffected by the dropped request.
         client.emit(turnFinished("completed", "goal-turn"));
+        await expect(response).rejects.toMatchObject({code: -32800});
         await client.promptRunFinished();
         await settle();
 
         const transcript = client.transcript.slice(start);
+        expect(client.turnInterruptCalls()).toEqual([]);
         expect(transcript.some(entry => "sessionUpdate" in entry && entry.sessionUpdate.sessionUpdate === "user_message_chunk"))
             .toBe(false);
         // This prompt claimed ownership of the adopted turn, so it alone reports the matching

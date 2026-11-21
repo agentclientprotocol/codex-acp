@@ -384,7 +384,10 @@ describe('provider restart fails outstanding tool calls left open by the cut-off
         client.emit(turnStarted("turn-a"));
         client.emit(itemStarted(commandExecutionItem("exec-1"), "turn-a"));
         client.emit(turnCompleted("turn-a"));
-        await settle();
+        await client.waitForNotifications();
+        await client.request("session/list", {});
+        const firstTurn = client.transcript.length;
+        expect(toolCallUpdates(client.transcript)).toContainEqual(expect.objectContaining({toolCallId: "exec-1", status: "failed"}));
 
         // A later turn (turn-b) is running when the restart happens; exec-1 belongs to the
         // already-finished turn-a and must not be failed as if it were cut off by this restart.
@@ -396,9 +399,6 @@ describe('provider restart fails outstanding tool calls left open by the cut-off
         await client.request(acpV2.methods.agent.providers.set, setProviderParams());
         await settle();
 
-        expect(toolCallUpdates(client.transcript).some(update =>
-            (update as {toolCallId: string, status?: string}).toolCallId === "exec-1"
-            && (update as {status?: string}).status === "failed",
-        )).toBe(false);
+        expect(toolCallUpdates(client.transcript.slice(firstTurn))).not.toContainEqual(expect.objectContaining({toolCallId: "exec-1"}));
     });
 });

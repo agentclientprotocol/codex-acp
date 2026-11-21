@@ -290,10 +290,10 @@ export class SessionIndexService {
 
     /**
      * Deletes the thread for `session/delete`: AIR then means "delete", not "done", because it has
-     * `_session/archive` for that. A thread that this connection had open but Codex never persisted (no
-     * prompt yet) is gone with the close, so it counts as deleted.
+     * `_session/archive` for that. V2 delete is idempotent. V1 also succeeds if closing an
+     * unpersisted thread already removed it.
      */
-    async deleteThread(sessionId: string, hadLocalSession: boolean): Promise<void> {
+    async deleteThread(sessionId: string, missingIsSuccess: boolean): Promise<void> {
         await this.writes.run(sessionId, async () => {
             let outcome;
             try {
@@ -303,7 +303,7 @@ export class SessionIndexService {
             } catch (err) {
                 throw sessionIndexRequestError(sessionId, err);
             }
-            if (outcome === "missing" && !hadLocalSession) {
+            if (outcome === "missing" && !missingIsSuccess) {
                 throw sessionNotFoundRequestError(sessionId);
             }
             this.activity.forget(sessionId);

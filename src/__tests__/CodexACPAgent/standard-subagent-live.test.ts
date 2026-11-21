@@ -100,7 +100,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
 
     it("reports delegated tasks as linked session messages and references the child from visible collaboration calls", async () => {
         await connect();
-        h.emit({method: "thread/started", params: {thread: {...createThread(), id: worker, parentThreadId: sessionId, agentRole: "explorer"}}});
+        h.emit({method: "thread/started", params: {thread: {...createThread(), id: worker, parentThreadId: sessionId, agentRole: "    explorer\n\nChecks **edge cases**."}}});
         h.emit(itemStarted(collab("spawnAgent", "spawn", "Find the bug", "inProgress")));
         h.emit(itemCompleted(collab("spawnAgent", "spawn", "Find the bug")));
         h.emit(onWorker(turnStarted("child-turn")));
@@ -181,7 +181,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         expect(h.turnInterruptCalls()).toEqual([]);
     });
 
-    it("keeps permissions and accepted URL completions alive across parent replay", async () => {
+    it("keeps child permissions alive across parent replay without inventing URL completions", async () => {
         await connect({
             v1ClientCapabilities: {subagents: {}, elicitation: {url: {}}},
             clientCapabilities: {elicitation: {url: {}}},
@@ -201,7 +201,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         expect(await approval("after")).toEqual({decision: "accept"});
         h.emit({method: "serverRequest/resolved", params: {threadId: worker, requestId: "authorization-request"}});
         await flush(h);
-        expect(h.transcript).toContainEqual({elicitationComplete: {elicitationId: "authorization"}});
+        expect(h.transcript).not.toContainEqual({elicitationComplete: {elicitationId: "authorization"}});
         expect(h.transcript.filter(entry => "permissionRequest" in entry).map(entry =>
             "permissionRequest" in entry ? entry.permissionRequest.sessionId : null)).toEqual([childId, childId]);
     });
@@ -290,6 +290,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         await flush(h);
         history(h);
         await load();
+        await flush(h);
         h.emit({method: "item/commandExecution/outputDelta", params: {threadId: worker, turnId: "child-turn", itemId: "terminal", delta: "Still streaming"}});
         h.emit({method: "item/completed", params: {threadId: worker, turnId: "child-turn", completedAtMs: 0,
             item: {...commandExecutionItem("terminal", "completed"), exitCode: 0, aggregatedOutput: "Still streaming"}}});

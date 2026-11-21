@@ -4,6 +4,8 @@ import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import type {McpServerHttpDeclaration} from "@agentclientprotocol/sdk/experimental/mcp-http";
 import type {JsonObject} from "./CodexAcpClient";
 import {sanitizeMcpServerName} from "./McpServerName";
+import {isAbsoluteProtocolPath} from "./PathUtils";
+import type {McpStartupFailure} from "./mcp/McpStartupTracker";
 
 /**
  * An MCP server entry from an ACP v1 or v2 session request.
@@ -57,6 +59,11 @@ export function normalizeMcpServer(server: AcpMcpServer, toHttp?: McpOverAcpToHt
     switch (server.type) {
         case "stdio": {
             const stdio = server as acpV2.McpServerStdio;
+            // Codex needs a NUL-free, fully qualified path. The SDK also accepts `\bin\server`.
+            if (!isAbsoluteProtocolPath(stdio.command)) {
+                throw RequestError.invalidParams({name: stdio.name, command: stdio.command},
+                    "A stdio MCP server command must be a fully qualified executable path without NUL");
+            }
             return {
                 type: "stdio",
                 name: stdio.name,
@@ -85,29 +92,31 @@ export function normalizeMcpServer(server: AcpMcpServer, toHttp?: McpOverAcpToHt
     }
 }
 
-/**
- * Creates a Codex `mcp_servers` config entry.
- */
-export async function toCodexMcpServerConfig(server: NormalizedMcpServer): Promise<JsonObject> {
+/** Declarations have already been validated. A listener failure affects only this server. */
+export async function prepareMcpServer(server: NormalizedMcpServer): Promise<
+    {name: string; config: JsonObject; bridged: boolean} | {failure: McpStartupFailure}
+> {
+    const {name} = server;
+    const bridged = server.type === "acp";
     if (server.type === "acp") {
         try {
             server = await server.toHttp();
-        } catch (error) {
-            throw RequestError.internalError({name: server.name}, `Could not open the MCP-over-ACP endpoint for ${server.name}: ${error}`);
+        } catch {
+            return {failure: {server: name, error: "Could not open the MCP-over-ACP endpoint"}};
         }
     }
     switch (server.type) {
         case "stdio":
-            return {
+            return {name, bridged, config: {
                 "command": server.command,
                 "args": server.args,
                 "env": Object.fromEntries(server.env.map(env => [env.name, env.value])),
-            };
+            }};
         case "http":
-            return {
+            return {name, bridged, config: {
                 "url": server.url,
                 "http_headers": Object.fromEntries(server.headers.map(h => [h.name, h.value])),
-            };
+            }};
     }
 }
 

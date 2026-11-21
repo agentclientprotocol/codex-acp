@@ -1,6 +1,6 @@
 # Session compaction
 
-The adapter implements the [ACP session compaction RFD](https://agentclientprotocol.com/rfds/session-compaction) for ACP v1. Clients opt in during initialization:
+The adapter reports [session compaction](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#session-compaction) to every v2 client. V1 clients opt in during initialization:
 
 ```json
 {
@@ -18,6 +18,8 @@ The adapter uses Codex's item ID as the compaction ID. It suppresses duplicate c
 
 Loading a session replays each persisted compaction as one completed update in its history position. Current Codex paginated history preserves the live item ID. Older legacy histories can reconstruct item IDs, and Codex does not persist failed or interrupted compaction items, so those entries are not available for replay.
 
+For compatibility with older clients, the adapter includes the current `status` in every `compaction_update`, including updates that only clear metadata during v2 replay. A completed compaction stays `completed` on those updates.
+
 Codex's app-server compaction items expose lifecycle identity without a user-displayable summary. The adapter therefore omits `summary` and does not emit `compaction_summary_chunk`. It does not extract internal replacement history or encrypted compaction data. Context utilization continues to arrive separately through `usage_update`.
 
-When the client omits `session.compaction` or sets it to `null`, the adapter preserves its existing synthetic tool-call and text-message fallback. The synthetic tool call carries the AIR `contextCompaction` key, see [AIR extensions](air-extensions.md#context-compaction).
+When a v1 client omits `session.compaction` or sets it to `null`, the adapter preserves its synthetic tool-call and text-message fallback. The synthetic tool call carries the AIR `contextCompaction` key, see [AIR extensions](air-extensions.md#context-compaction).

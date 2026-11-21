@@ -1,7 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk/unstable";
 import * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import type { ElicitationHandler } from "./CodexAppServerClient";
-import type { ServerNotification } from "./app-server";
 import type {JsonValue} from "./app-server/serde_json/JsonValue";
 import type {
     McpServerElicitationRequestParams,
@@ -40,51 +39,28 @@ const USER_INPUT_OTHER_OPTION = "None of the above";
 const USER_INPUT_NOTE_PREFIX = "user_note: ";
 
 function normalizeElicitationSchema(value: unknown): acp.ElicitationSchema {
-    const normalized = normalizeElicitationSchemaValue(value);
-    if (!isRecord(normalized)) {
-        return { type: "object", properties: {} };
+    const schema = normalizeJsonValue(value);
+    if (!isRecord(schema) || schema["type"] !== "object" || !isRecord(schema["properties"])) {
+        throw acp.RequestError.invalidParams(undefined, "Expected an object elicitation form with properties");
     }
-
-    return {
-        ...normalized,
-        type: "object",
-    } as acp.ElicitationSchema;
+    const properties = Object.fromEntries(Object.entries(schema["properties"]).map(([name, property]) => {
+        if (isRecord(property) && property["type"] === "array") {
+            return [name, {...property, items: normalizeEnumNames(property["items"], true)}];
+        }
+        return [name, normalizeEnumNames(property, false)];
+    }));
+    return {...schema, type: "object", properties} as acp.ElicitationSchema;
 }
 
-function normalizeElicitationSchemaValue(value: unknown): unknown {
-    if (typeof value === "bigint") {
-        return Number(value);
-    }
-    if (Array.isArray(value)) {
-        return value.map(normalizeElicitationSchemaValue);
-    }
-    if (!isRecord(value)) {
+/** Single-select properties use oneOf. Titled multi-select items use anyOf without a type tag. */
+function normalizeEnumNames(value: unknown, multiple: boolean): unknown {
+    if (!isRecord(value) || value["type"] !== "string" || !Array.isArray(value["enum"])
+        || !Array.isArray(value["enumNames"]) || Array.isArray(value[multiple ? "anyOf" : "oneOf"])) {
         return value;
     }
-
-    const result: Record<string, unknown> = Object.fromEntries(
-        Object.entries(value)
-            .filter(([, nested]) => nested !== undefined)
-            .map(([key, nested]) => [key, normalizeElicitationSchemaValue(nested)])
-    );
-
-    if (
-        result["type"] === "string" &&
-        Array.isArray(result["enum"]) &&
-        Array.isArray(result["enumNames"]) &&
-        !Array.isArray(result["oneOf"])
-    ) {
-        const values = result["enum"];
-        const names = result["enumNames"];
-        result["oneOf"] = values.map((value, index) => ({
-            const: String(value),
-            title: String(names[index] ?? value),
-        }));
-        delete result["enum"];
-        delete result["enumNames"];
-    }
-
-    return result;
+    const {type, enum: values, enumNames, ...rest} = value;
+    const choices = values.map((entry, index) => ({const: String(entry), title: String(enumNames[index] ?? entry)}));
+    return multiple ? {...rest, anyOf: choices} : {...rest, type, oneOf: choices};
 }
 
 function contentRecord(content: unknown): Record<string, unknown> {
@@ -321,10 +297,6 @@ export class CodexElicitationHandler implements ElicitationHandler {
     // Workaround: before requesting approval, Codex emits an item/started notification with an
     // mcpToolCall item carrying the call id and server name. The shared permission lifecycle stores
     // (threadId, serverName) → callId so this request can correlate to the rendered tool call item.
-    //
-    // The app-server handler exposes URL elicitationId, while serverRequest/resolved only exposes
-    // threadId here, so accepted URL elicitations are completed at thread scope.
-    private readonly pendingUrlElicitations = new Map<string, Set<string>>();
 
     constructor(
         connection: AcpClientConnection,
@@ -340,16 +312,6 @@ export class CodexElicitationHandler implements ElicitationHandler {
         this.cancellationSignal = cancellationSignal;
     }
 
-    async handleNotification(notification: ServerNotification): Promise<void> {
-        switch (notification.method) {
-            case "serverRequest/resolved":
-                await this.completeUrlElicitations(notification.params.threadId);
-                return;
-            default:
-                return;
-        }
-    }
-
     async handleElicitation(
         params: McpServerElicitationRequestParams
     ): Promise<McpServerElicitationRequestResponse> {
@@ -363,9 +325,6 @@ export class CodexElicitationHandler implements ElicitationHandler {
                     this.requestOptions(signal, true),
                 ));
                 const result = this.convertElicitationResponse(response, context);
-                if (params.mode === "url" && result.action === "accept") {
-                    this.trackUrlElicitation(params.threadId, params.elicitationId);
-                }
                 await this.publishAcceptedMcpToolApproval(params.threadId, context, result.action === "accept");
                 return result;
             }
@@ -555,6 +514,8 @@ export class CodexElicitationHandler implements ElicitationHandler {
                 };
             }
             case "url":
+                // serverRequest/resolved acknowledges the Codex request, not the external interaction.
+                // Without a correlated external result we omit ACP's optional elicitation/complete.
                 return {
                     ...base,
                     mode: "url",
@@ -630,38 +591,6 @@ export class CodexElicitationHandler implements ElicitationHandler {
             sessionId,
             update: this.renderer.render(ElicitationReporter.accepted(context.correlatedCallId)),
         });
-    }
-
-    /**
-     * Completes every accepted URL elicitation: the app-server died and will never resolve them, so the client must
-     * not keep their flow open.
-     */
-    async completeAllUrlElicitations(): Promise<void> {
-        for (const threadId of [...this.pendingUrlElicitations.keys()]) {
-            await this.completeUrlElicitations(threadId);
-        }
-    }
-
-    private trackUrlElicitation(threadId: string, elicitationId: string): void {
-        const existing = this.pendingUrlElicitations.get(threadId);
-        if (existing) {
-            existing.add(elicitationId);
-            return;
-        }
-        this.pendingUrlElicitations.set(threadId, new Set([elicitationId]));
-    }
-
-    private async completeUrlElicitations(threadId: string): Promise<void> {
-        const elicitationIds = this.pendingUrlElicitations.get(threadId);
-        if (!elicitationIds) {
-            return;
-        }
-        this.pendingUrlElicitations.delete(threadId);
-        for (const elicitationId of elicitationIds) {
-            await this.connection.notify(acp.methods.client.elicitation.complete, {
-                elicitationId,
-            });
-        }
     }
 
 }

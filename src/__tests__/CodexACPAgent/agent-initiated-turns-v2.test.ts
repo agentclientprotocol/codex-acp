@@ -147,24 +147,61 @@ describe('agent-initiated Codex turns over ACP v2', () => {
         expect(userMessageChunks(transcript)).toEqual([]);
     });
 
-    it('reports `cancelled` for an unowned turn Codex reports as interrupted', async () => {
+    it('interrupts unowned work and holds the next prompt until its cancelled idle', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
         await runPromptToCompletion(client);
 
         const start = client.transcript.length;
         client.emit(turnStarted("turn-2"));
-        await settle();
+        await client.waitForNotifications();
+        await client.cancel();
+        await vi.waitFor(() => expect(client.turnInterruptCalls()).toEqual([{threadId: sessionId, turnId: "turn-2"}]));
+        const next = client.sendPrompt([{type: "text", text: "/status"}]);
+        await client.request("session/list", {});
+        expect(userMessageChunks(client.transcript.slice(start))).toEqual([]);
         client.emit({method: "turn/completed", params: {threadId: sessionId, turn: {
             id: "turn-2", rootTurnId: null, items: [], itemsView: "notLoaded", status: "interrupted",
             error: null, startedAt: null, completedAt: null, durationMs: null,
         }}});
-        await settle();
-
+        await next;
+        await client.promptRunFinished(1);
+        await client.request("session/list", {});
         expect(stateUpdates(client.transcript.slice(start))).toEqual([
             {state: "running"},
             {state: "idle", stopReason: "cancelled"},
+            {state: "running"},
+            {state: "idle", stopReason: "end_turn"},
         ]);
+    });
+
+    it('reports lost root observability as unknown, then uses the fresh resume observation', async () => {
+        const client = await connectSession();
+        closeClient = () => client.connection.close();
+        client.emit(turnStarted("unowned"));
+        client.emit({method: "thread/status/changed", params: {threadId: sessionId, status: {type: "notLoaded"}}});
+        await client.waitForNotifications();
+        await client.request("session/resume", {sessionId, cwd});
+        expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "unknown"}, {state: "idle"}]);
+    });
+
+    it('withdraws an unowned turn’s pending approval without waiting for a late answer', async () => {
+        let answer!: () => void;
+        let signal!: AbortSignal;
+        const client = await connectSession(2, {onRequestPermission: (request, cancelled) => {
+            signal = cancelled;
+            return new Promise(resolve => { answer = () => resolve({outcome: {outcome: "selected", optionId: request.options[0]!.optionId}}); });
+        }});
+        closeClient = () => client.connection.close();
+        await runPromptToCompletion(client);
+        client.emit(turnStarted("goal"));
+        await client.waitForNotifications();
+        const approval = client.triggerApproval(CommandExecutionApprovalRequest.method, commandApprovalParams({turnId: "goal"}));
+        await vi.waitFor(() => expect(answer).toBeDefined());
+        await client.cancel();
+        await expect(approval).resolves.toEqual({decision: "cancel"});
+        await vi.waitFor(() => expect(signal.aborted).toBe(true));
+        answer();
     });
 
     it('resumes an unowned turn only after the runtime confirms progress following a permission answer', async () => {

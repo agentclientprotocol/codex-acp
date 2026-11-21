@@ -68,6 +68,6 @@ export function optionPermissionMeta(
 }
 
 function nonBlank(value?: string | null): string | undefined {
-    const normalized = value?.trim();
-    return normalized ? normalized : undefined;
+    // Indentation and line breaks in a Markdown description are content.
+    return value?.trim() ? value : undefined;
 }

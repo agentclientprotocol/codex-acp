@@ -410,9 +410,8 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
     }
 
     /** The role Codex assigned describes the child. The task it was given is a message, not a description. */
-    async observeRole(threadId: string, role: string | null): Promise<void> {
-        const description = role?.trim();
-        if (!description || this.retired) return;
+    async observeRole(threadId: string, description: string | null): Promise<void> {
+        if (!description?.trim() || this.retired) return;
         const child = this.children.get(threadId);
         if (!child) { this.pendingFor(threadId).description = description; return; }
         if (child.description === description) return;
@@ -631,7 +630,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         this.configurationRequests.clear();
         for (const child of this.children.values()) {
             child.cancelAdvertised = false;
-            void child.foreground.snapshot().catch(error => logger.error("Failed to snapshot child work", error));
+            if (child.live) void child.foreground.snapshot().catch(error => logger.error("Failed to snapshot child work", error));
         }
     }
 
