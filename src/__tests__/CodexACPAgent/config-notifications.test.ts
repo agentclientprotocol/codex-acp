@@ -92,6 +92,7 @@ describe.each([1, 2] as const)("ACP v%s config notifications", version => {
             const start = h.wireMessages.length;
             await h.sendPrompt([{type: "text", text: "/plan"}]);
             await h.promptRunFinished();
+            await h.request("session/list", {});
             const updates = configUpdates(h.wireMessages.slice(start));
             expect(updates).toHaveLength(1);
             expect(updates[0]!.configOptions).toHaveLength(5);

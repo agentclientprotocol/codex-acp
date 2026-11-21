@@ -631,7 +631,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         this.configurationRequests.clear();
         for (const child of this.children.values()) {
             child.cancelAdvertised = false;
-            void child.foreground.snapshot().catch(error => logger.error("Failed to snapshot child work", error));
+            if (child.live) void child.foreground.snapshot().catch(error => logger.error("Failed to snapshot child work", error));
         }
     }
 

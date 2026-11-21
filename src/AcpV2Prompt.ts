@@ -81,17 +81,10 @@ export type UserMessageInsertion = {
      */
     onSyntheticInserted: (clientUserMessageId: string, prompt: acp.ContentBlock[]) => Promise<void>;
     /**
-     * Fired synchronously once, from the turn-start response, when Codex steers this prompt into
-     * a turn that was already running and unowned (its `running` went out before this prompt
-     * existed). Lets the caller skip sending a duplicate `running` and still close the turn with
-     * one `idle` if the steered input never lands.
+     * An adopted turn was already running when Codex steered this input into it.
+     * Withdrawing this prompt must not interrupt that turn.
      */
-    onTurnAdopted?: () => void;
-    /**
-     * Fired synchronously each time a turn starts (or restarts) for this prompt, with the turn's
-     * ids. Lets a pending `$/cancel_request` interrupt the right turn before insertion.
-     */
-    onTurnStarted?: (turn: {threadId: string, turnId: string}) => void;
+    onTurnStarted?: (turn: {threadId: string, turnId: string, adopted: boolean}) => void;
     /** Reports terminal work failure without changing the v1 prompt response or depending on AIR. */
     onFailure?: (error: acpV2.Error) => void;
 };

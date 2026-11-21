@@ -1,4 +1,7 @@
 {
-  "code": -32603,
-  "message": "Internal error"
+  "code": -32002,
+  "message": "Session not found: unknown-source",
+  "data": {
+    "sessionId": "unknown-source"
+  }
 }

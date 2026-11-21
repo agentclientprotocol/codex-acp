@@ -21,6 +21,5 @@ export class SubagentInteractionHandlers {
     async observe(event: ServerNotification, sessionId: string): Promise<void> {
         const scoped = {...event, params: {...event.params, threadId: sessionId}} as ServerNotification;
         this.context.handleNotification(scoped);
-        await this.elicitations.handleNotification(scoped);
     }
 }

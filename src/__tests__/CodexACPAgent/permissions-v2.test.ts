@@ -331,7 +331,9 @@ describe('session/request_permission over ACP v2', () => {
             {state: "running"},
             {state: "idle", stopReason: "end_turn"},
         ]);
-        await expect(dump(transcript, messageId).replaceAll(implementationId, "<implementationId>"))
+        // The app-server and ACP are separate transports. Only the order on the ACP wire is specified.
+        const acpTranscript = transcript.filter(entry => !("codexRequest" in entry || "codexResponse" in entry || "codexNotification" in entry));
+        await expect(dump(acpTranscript, messageId).replaceAll(implementationId, "<implementationId>"))
             .toMatchFileSnapshot('data/permissions-v2-plan-implementation.json');
     });
 });

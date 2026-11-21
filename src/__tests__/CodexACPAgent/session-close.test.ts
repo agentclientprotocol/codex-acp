@@ -266,7 +266,7 @@ describe("ACP session close", () => {
             currentServiceTier: null,
             additionalDirectories: [],
         });
-        vi.spyOn(codexAcpClient, "mcpServerOauthLogin").mockResolvedValue({authorizationUrl: "https://example.com/oauth"});
+        vi.spyOn(codexAcpClient, "mcpServerOauthLogin").mockResolvedValue({authorizationUrl: "https://example.com/oauth", loginId: "login"});
         fixture.setElicitationResponse(new Promise(() => {}));
         await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: [{name: "linear", command: "npx", args: [], env: []}]});
         fixture.clearAcpConnectionDump();

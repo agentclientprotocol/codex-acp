@@ -3,6 +3,7 @@ import type * as acp from '@agentclientprotocol/sdk/unstable';
 import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {createTestModel} from '../acp-test-utils';
 import {createMockConnections} from './test-utils';
+import {codexResponse, connectSession, createThread, cwd, sessionId} from './v2-prompt-harness';
 import type {AcpMcpServer, McpOverAcpToHttp} from '../../McpServerConfig';
 import {CodexAcpClient, type JsonObject} from '../../CodexAcpClient';
 import {CodexAppServerClient} from '../../CodexAppServerClient';
@@ -110,10 +111,33 @@ describe('MCP server config from ACP v1 and v2 session requests', () => {
         expect(toHttp).toHaveBeenCalledTimes(1);
     });
 
-    it('reports a bridge failure instead of starting the session without its tools', async () => {
+    it('keeps healthy servers when an ACP bridge fails to open', async () => {
         const toHttp = vi.fn<McpOverAcpToHttp>().mockRejectedValue(new Error("listen failed"));
-        await expect(startSessionWithMcpServers([{type: "acp", name: "tools", serverId: "id"}], [], toHttp))
-            .rejects.toMatchObject({code: -32603, data: {name: "tools"}, message: expect.stringContaining("listen failed")});
+        const config = await startSessionWithMcpServers([
+            {type: "acp", name: "tools", serverId: "id"}, {type: "http", name: "healthy", url: "https://example.com"},
+        ], [], toHttp);
+        expect(config["mcp_servers"]).toEqual({healthy: {url: "https://example.com", http_headers: {}}});
+        expect(config["features"]).not.toHaveProperty("mcp_2026_07_28");
+    });
+
+    it.each([1, 2] as const)('reports a bridge startup failure on the fork without rejecting setup on v%i', async version => {
+        const client = await connectSession(version, {
+            mcpBridge: async () => { throw new Error("listen failed"); },
+            codexResponses: {"thread/fork": async () => ({
+                ...codexResponse("thread/start") as object, thread: {...createThread(), id: "fork"},
+            })},
+        });
+        try {
+            await expect(client.request("session/fork", {sessionId, cwd,
+                mcpServers: [{type: "acp", name: "broken", serverId: "opaque"}],
+            })).resolves.toMatchObject({sessionId: "fork"});
+            await vi.waitFor(() => expect(client.scopedUpdates).toContainEqual(expect.objectContaining({
+                sessionId: "fork", update: expect.objectContaining({
+                    title: "mcp__broken__startup", status: "failed",
+                    content: [{type: "content", content: {type: "text", text: expect.stringContaining("Could not open the MCP-over-ACP endpoint")}}],
+                }),
+            })));
+        } finally { client.connection.close(); }
     });
 
     it('rejects sse, custom transports, and an ACP declaration without a serverId', async () => {
@@ -134,9 +158,11 @@ describe('MCP server config from ACP v1 and v2 session requests', () => {
     });
 
     it.each([
+        {type: "stdio", name: "existing", command: "./bin/mcp"},
+        {type: "stdio", name: "existing", command: "mcp"},
         {type: "sse", name: "existing", url: "https://example.com/sse", headers: []},
         {type: "acp", name: "existing", serverId: "not-available"},
-    ] satisfies AcpMcpServer[])('rejects unavailable $type transport even when its name is already configured', async server => {
+    ] satisfies AcpMcpServer[])('validates $type declarations even when the name is already configured', async server => {
         await expect(startSessionWithMcpServers([server], ["existing"])).rejects.toMatchObject({code: -32602});
     });
 
@@ -145,14 +171,14 @@ describe('MCP server config from ACP v1 and v2 session requests', () => {
         ["v2", "stdio", "files"],
         ["sanitized collision", "stdio", "file server"],
     ])('rejects duplicate names before configured-server filtering: %s', async (_label, type, name) => {
-        const server = {name, command: "mcp-fs", args: [], env: [], ...(type ? {type} : {})} as AcpMcpServer;
+        const server = {name, command: "/bin/mcp-fs", args: [], env: [], ...(type ? {type} : {})} as AcpMcpServer;
         const duplicate = {...server, name: name.replace(/ /g, "_")} as AcpMcpServer;
         await expect(startSessionWithMcpServers([server, duplicate], [duplicate.name as string]))
             .rejects.toMatchObject({code: -32602, data: {name: duplicate.name}});
     });
 
     it('uses the last stdio environment entry with a repeated name', async () => {
-        const config = await startSessionWithMcpServers([{type: "stdio", name: "files", command: "mcp-fs",
+        const config = await startSessionWithMcpServers([{type: "stdio", name: "files", command: "C:\\Tools\\mcp-fs.exe",
             env: [{name: "EXAMPLE", value: "first"}, {name: "EXAMPLE", value: "last"}]}]);
         expect(config["mcp_servers"]).toMatchObject({files: {env: {EXAMPLE: "last"}}});
     });

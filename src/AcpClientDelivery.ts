@@ -21,7 +21,7 @@ export class AcpClientDelivery {
     constructor(
         private readonly client: AcpClientConnection,
         private readonly sessionIsClosing: (sessionId: string) => boolean = () => false,
-        protocolVersion: 1 | 2 = 1,
+        private readonly protocolVersion: 1 | 2 = 1,
     ) {
         this.reports = new ToolCallReports(protocolVersion === 2);
         this.sendElicitationCompletion = params => client.notify(acp.methods.client.elicitation.complete, params as acp.CompleteElicitationNotification);
@@ -170,8 +170,14 @@ export class AcpClientDelivery {
     private sendRequest(method: string, params: unknown, options?: acp.SendRequestOptions): Promise<unknown> {
         const sessionId = clientRequestSessionId(method, params);
         return sessionId === null
-            ? this.withElicitationRequest(method, params, () => this.client.request(method, params, options))
+            ? this.requestOnWire(method, params, options)
             : this.sendSessionRequest(sessionId, method, params, options);
+    }
+
+    private requestOnWire(method: string, params: unknown, options?: acp.SendRequestOptions): Promise<unknown> {
+        const send = () => this.client.request(method, params, options);
+        // The v2 view registers the ID when the rendered request reaches its transport.
+        return this.protocolVersion === 2 ? send() : this.withElicitationRequest(method, params, send);
     }
 
     /** Direct v2 requests and the shared v1-shaped path keep the same URL scope. */
@@ -182,6 +188,7 @@ export class AcpClientDelivery {
     }
 
     private async trackUrlRequest(id: string, sessionId: string | null, send: () => Promise<unknown>): Promise<unknown> {
+        if (this.urlElicitations.has(id)) throw acp.RequestError.invalidParams(undefined, "URL elicitation ID already in use");
         const scope = {sessionId};
         this.urlElicitations.set(id, scope);
         try {
@@ -210,9 +217,8 @@ export class AcpClientDelivery {
             const setup = this.waitForSessionSetup(sessionId, cancellationSignal);
             if (setup) await setup;
             // Permission cancellation is a denial. Async elicitations still inspect late answers.
-            return await this.withElicitationRequest(method, params,
-                () => this.client.request(method, params, {...options, cancellationSignal,
-                    stopWaitingOnCancel: method === acp.methods.client.session.requestPermission || options?.stopWaitingOnCancel === true}));
+            return await this.requestOnWire(method, params, {...options, cancellationSignal,
+                stopWaitingOnCancel: method === acp.methods.client.session.requestPermission || options?.stopWaitingOnCancel === true});
         } finally {
             requests.delete(controller);
             if (requests.size === 0) this.sessionRequests.delete(sessionId);

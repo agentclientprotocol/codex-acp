@@ -87,8 +87,10 @@ describe.each([1, 2] as const)("ACP v%s setup response ordering", version => {
             release.resolve();
             h = await connecting;
             await activity;
+            await h.request("session/list", {});
             const response = h.wireMessages.findIndex(frame => "result" in frame
                 && typeof frame.result === "object" && frame.result !== null && "sessionId" in frame.result);
+            expect(response).toBeGreaterThanOrEqual(0);
             const announcement = h.wireMessages.findIndex(frame => "method" in frame && frame.method === "session/update"
                 && (frame.params as {update: {sessionUpdate: string}}).update.sessionUpdate === "subagent_update");
             expect(announcement).toBeGreaterThan(response);
@@ -101,7 +103,7 @@ describe.each([1, 2] as const)("ACP v%s setup response ordering", version => {
     it.each([undefined, 30_000])("starts MCP sign-in after the response write with startup wait %s", async timeout => {
         const writing = deferred();
         const release = deferred();
-        const login = vi.fn(async () => ({authorizationUrl: "https://example.com/oauth"}));
+        const login = vi.fn(async () => ({authorizationUrl: "https://example.com/oauth", loginId: "login"}));
         const elicitation = vi.fn(async () => ({action: "cancel" as const}));
         const connecting = connectSession(version, {
             clientCapabilities: {elicitation: {url: {}}},

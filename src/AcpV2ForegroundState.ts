@@ -7,7 +7,7 @@ type Activity = "idle" | "running" | "requires_action" | "unknown";
 export class AcpV2ForegroundState {
     private activity: Activity;
     private readonly items = new Set<string>();
-    private readonly actions = new Map<symbol, string | undefined>();
+    private readonly actions = new Map<AbortController, string | undefined>();
     private sending: Promise<void> = Promise.resolve();
     private disposed = false;
 
@@ -70,19 +70,30 @@ export class AcpV2ForegroundState {
         if (this.activity !== "idle" && this.actions.size > 0) await this.reportActionState();
     }
 
-    async withUserAction<T>(itemId: string | undefined, request: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-        if (signal?.aborted) return request();
-        const action = Symbol();
+    async withUserAction<T>(itemId: string | undefined, request: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
+        if (signal?.aborted) return request(signal);
+        const action = new AbortController();
+        const lifetime = signal ? AbortSignal.any([signal, action.signal]) : action.signal;
         this.actions.set(action, itemId);
         // The caller only registers actions that belong to active foreground work.
         if (this.activity === "idle") this.activity = "running";
         try {
             await this.reportActionStateSafely();
-            return await request();
+            return await request(lifetime);
         } finally {
             // An idle boundary invalidates old waits, even if a new turn has already started.
-            if (this.actions.delete(action) && !signal?.aborted) await this.reportActionStateSafely();
+            if (this.actions.delete(action) && !lifetime.aborted) await this.reportActionStateSafely();
         }
+    }
+
+    cancelActions(): void {
+        for (const action of this.actions.keys()) action.abort();
+    }
+
+    /** A fresh observation can replace unknown without overwriting a live requires_action snapshot. */
+    restore(running: boolean | "unknown"): void {
+        if (running === "unknown") this.invalidate();
+        else if (this.activity === "unknown") this.activity = running ? "running" : "idle";
     }
 
     dispose(): void {

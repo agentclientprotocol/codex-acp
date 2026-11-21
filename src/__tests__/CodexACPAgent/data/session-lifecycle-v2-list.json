@@ -15,6 +15,7 @@
       "method": "thread/list",
       "params": {
         "cursor": null,
+        "sortKey": "recency_at",
         "modelProviders": [],
         "sourceKinds": [
           "cli",

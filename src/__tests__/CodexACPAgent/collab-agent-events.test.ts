@@ -204,7 +204,7 @@ describe("CodexEventHandler - collab agent tool call events", () => {
             params: {threadId: "thread-paris", requestId: 7},
         });
         await mockFixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
-        expect(mockFixture.getAcpConnectionEvents([])).toContainEqual(expect.objectContaining({
+        expect(mockFixture.getAcpConnectionEvents([])).not.toContainEqual(expect.objectContaining({
             method: "completeElicitation",
             args: [{elicitationId: "legacy-child-url"}],
         }));
