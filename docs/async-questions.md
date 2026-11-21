@@ -17,8 +17,13 @@ the questions were accepted, and the turn goes on.
 
 ## Answers
 
-- An accepted answer joins the current turn through `turn/steer`. If the session is idle,
-  the adapter starts one new turn with the reply. The form summary shows the answer, without a second live user message.
+- An accepted answer joins the current turn through `turn/steer`.
+  Review and compact turns hold the answer until they finish.
+  If the session is idle, the adapter starts one new turn with the reply.
+  The form summary shows the answer, without a second live user message.
+- Both protocol versions stream that turn's output through `session/update`.
+  On v1, no new `session/prompt` request owns its completion or usage response.
+  On v2, standard `state_update` notifications report its running state and completion.
 - Declining or cancelling sends nothing; the agent keeps its own default.
 - The form stays open after its turn ends. Closing the session or losing its app-server cancels it.
 - A rejected answer produces a warning notice where the client supports notices.
