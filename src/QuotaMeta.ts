@@ -6,9 +6,9 @@ export interface ModelTokenCount {
 }
 
 export interface QuotaMeta {
-    // Aggregated token count across all models
+    // Token count of the root thread, the same counts as PromptResponse.usage
     token_count: TokenCount | null;
 
-    // Token count for each model
+    // Token count for each model, including the subagents
     model_usage: ModelTokenCount[];
 }
