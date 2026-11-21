@@ -456,13 +456,13 @@ export class CodexElicitationHandler implements ElicitationHandler {
     private createMcpElicitationContext(params: McpServerElicitationRequestParams): McpElicitationContext {
         const isToolApproval = isMcpToolCallApproval(params._meta) && this.isMessageOnlyForm(params);
         const persistOptions = parsePersistOptions(params._meta);
-        const correlatedCallId = isToolApproval
+        const correlatedToolCall = isToolApproval
             ? this.permissionContext.popPendingMcpApproval(params.threadId, params.serverName)
             : undefined;
         return {
             isToolApproval,
             persistOptions,
-            correlatedCallId,
+            correlatedToolCall,
         };
     }
 
@@ -500,7 +500,7 @@ export class CodexElicitationHandler implements ElicitationHandler {
     ): acp.CreateElicitationRequest {
         const base = {
             sessionId: params.threadId,
-            ...(context.correlatedCallId ? { toolCallId: context.correlatedCallId } : {}),
+            ...(context.correlatedToolCall ? { toolCallId: context.correlatedToolCall.id } : {}),
             message: params.message,
             _meta: recordOrNull(params._meta),
         };
@@ -584,12 +584,12 @@ export class CodexElicitationHandler implements ElicitationHandler {
         context: McpElicitationContext,
         accepted: boolean
     ): Promise<void> {
-        if (!accepted || context.correlatedCallId === undefined) {
+        if (!accepted || context.correlatedToolCall === undefined) {
             return;
         }
         await this.connection.notify(acp.methods.client.session.update, {
             sessionId,
-            update: this.renderer.render(ElicitationReporter.accepted(context.correlatedCallId)),
+            update: this.renderer.render(ElicitationReporter.accepted(context.correlatedToolCall.id)),
         });
     }
 

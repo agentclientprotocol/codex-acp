@@ -1,5 +1,6 @@
 {
   "toolCallId": "cmd",
+  "name": "exec_command",
   "title": "List files in '/w'",
   "rawInput": {
     "command": "ls /w",

@@ -6,6 +6,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "file-change-2",
+        "name": "apply_patch",
         "kind": "edit",
         "title": "Editing files",
         "status": "completed",
@@ -28,7 +29,23 @@
               "kind": "add"
             }
           }
-        ]
+        ],
+        "rawInput": {
+          "changes": [
+            {
+              "path": "/test/project/FileA.kt",
+              "kind": {
+                "type": "add"
+              }
+            },
+            {
+              "path": "/test/project/FileB.kt",
+              "kind": {
+                "type": "add"
+              }
+            }
+          ]
+        }
       }
     }
   ]

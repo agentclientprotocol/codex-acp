@@ -5,15 +5,14 @@ export function functionToolName(name: string, namespace?: string | null): strin
     return `${namespace ?? ""}${name}`;
 }
 
-export function commandToolName(source: CommandExecutionSource): string | undefined {
+/** Stable ACP operation names, including sources without a Codex model-tool name. */
+export function commandToolName(source: CommandExecutionSource): string {
     switch (source) {
         case "unifiedExecStartup":
+        case "agent":
+        case "userShell":
             return "exec_command";
         case "unifiedExecInteraction":
             return "write_stdin";
-        // These sources do not identify a unique model tool.
-        case "agent":
-        case "userShell":
-            return undefined;
     }
 }

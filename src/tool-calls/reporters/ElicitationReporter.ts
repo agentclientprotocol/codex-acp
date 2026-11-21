@@ -1,4 +1,5 @@
 import type {McpServerElicitationRequestParams} from "../../app-server/v2";
+import {McpToolReporter, type McpToolCallItem} from "./McpToolReporter";
 import type {PermissionToolFacts, ToolFacts} from "../ToolFacts";
 
 /**
@@ -11,16 +12,16 @@ export class ElicitationReporter {
     static permission(
         params: McpServerElicitationRequestParams,
         isToolApproval: boolean,
-        correlatedCallId: string | undefined,
+        correlatedToolCall: McpToolCallItem | undefined,
         nextStandaloneToolCallId: () => string,
     ): PermissionToolFacts {
         if (params.mode === "form" || params.mode === "openai/form") {
-            if (correlatedCallId !== undefined) {
-                // The client already shows the MCP tool call. The request keeps the kind, as before the contract.
-                return {toolCallId: correlatedCallId, kind: "execute", status: "pending"};
+            if (isToolApproval && correlatedToolCall !== undefined) {
+                return McpToolReporter.permission(correlatedToolCall);
             }
             return {
                 toolCallId: nextStandaloneToolCallId(),
+                name: isToolApproval ? "mcp_tool_call" : "mcp_elicitation",
                 kind: isToolApproval ? "execute" : "other",
                 status: "pending",
                 title: isToolApproval ? "MCP tool call approval" : "Question from MCP server",
@@ -33,6 +34,7 @@ export class ElicitationReporter {
         }
         return {
             toolCallId: `elicitation-${params.elicitationId}`,
+            name: "mcp_url_authorization",
             kind: "fetch",
             status: "pending",
             title: "MCP server requests to open a URL",

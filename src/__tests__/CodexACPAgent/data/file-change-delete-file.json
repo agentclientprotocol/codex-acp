@@ -6,6 +6,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "file-change-3",
+        "name": "apply_patch",
         "kind": "edit",
         "title": "Editing files",
         "status": "completed",
@@ -19,7 +20,17 @@
               "kind": "delete"
             }
           }
-        ]
+        ],
+        "rawInput": {
+          "changes": [
+            {
+              "path": "/test/project/OldFile.kt",
+              "kind": {
+                "type": "delete"
+              }
+            }
+          ]
+        }
       }
     }
   ]

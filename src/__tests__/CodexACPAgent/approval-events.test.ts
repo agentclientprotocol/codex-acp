@@ -111,9 +111,9 @@ describe("Approval Events", () => {
         it.each([
             ["unifiedExecStartup", "exec_command"],
             ["unifiedExecInteraction", "write_stdin"],
-            ["agent", undefined],
-            ["userShell", undefined],
-        ] as const)("uses only a known tool name for %s command approvals", async (source, name) => {
+            ["agent", "exec_command"],
+            ["userShell", "exec_command"],
+        ] as const)("uses a stable operation name for %s command approvals", async (source, name) => {
             const prompt = setupSessionWithPendingPrompt();
             fixture.sendServerNotification({
                 method: "item/started",
@@ -182,6 +182,7 @@ describe("Approval Events", () => {
             // The request carries the title that the tool call already shows, so the client keeps it.
             expect(permissionRequest().toolCall).toEqual({
                 toolCallId: "command-item",
+                name: "exec_command",
                 title: "npm test",
                 rawInput: {command: "npm test", cwd: "/workspace"},
             });
@@ -208,6 +209,7 @@ describe("Approval Events", () => {
                 sessionId,
                 toolCall: {
                     toolCallId: "command-item",
+                    name: "exec_command",
                     kind: "execute",
                     status: "pending",
                     title: "Run command with file reads",
@@ -734,6 +736,11 @@ describe("Approval Events", () => {
             // The file change already started, so the request keeps its status and kind.
             expect(permissionRequest().toolCall).toEqual({
                 toolCallId: "file-item",
+                name: "apply_patch",
+                rawInput: {changes: [
+                    {path: "/workspace/a.ts", kind: {type: "update", move_path: null}},
+                    {path: "/workspace/b.ts", kind: {type: "add"}},
+                ]},
                 title: "Editing files",
                 locations: [{path: "/workspace/a.ts"}, {path: "/workspace/b.ts"}],
             });

@@ -3,6 +3,7 @@
     {
       "sessionUpdate": "tool_call",
       "toolCallId": "cmd",
+      "name": "exec_command",
       "kind": "execute",
       "title": "npm test",
       "status": "in_progress",
@@ -60,6 +61,7 @@
     {
       "sessionUpdate": "tool_call",
       "toolCallId": "read",
+      "name": "exec_command",
       "kind": "read",
       "title": "Read file '/w/a.txt'",
       "status": "in_progress",
@@ -79,6 +81,7 @@
     {
       "sessionUpdate": "tool_call",
       "toolCallId": "mcp",
+      "name": "mcp_tool_call",
       "kind": "execute",
       "title": "mcp.docs.search",
       "status": "in_progress",

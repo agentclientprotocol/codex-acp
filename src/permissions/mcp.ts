@@ -8,6 +8,7 @@ import {optionPermissionMeta} from "./metadata";
 import {McpApprovalOptionId} from "./option-ids";
 import {isRecord} from "./json";
 import type {AcpToolCallRenderer} from "../tool-calls/AcpToolCallRenderer";
+import type {McpToolCallItem} from "../tool-calls/reporters/McpToolReporter";
 import {ElicitationReporter} from "../tool-calls/reporters/ElicitationReporter";
 
 export type PersistValue = "session" | "always";
@@ -15,7 +16,7 @@ export type PersistValue = "session" | "always";
 export type McpElicitationContext = {
     isToolApproval: boolean;
     persistOptions: Set<PersistValue>;
-    correlatedCallId: string | undefined;
+    correlatedToolCall: McpToolCallItem | undefined;
 };
 
 export function parsePersistOptions(meta: unknown): Set<PersistValue> {
@@ -103,13 +104,13 @@ export function buildMcpPermissionRequest(
     nextStandaloneToolCallId: () => string,
     renderer: AcpToolCallRenderer,
 ): {request: acp.RequestPermissionRequest; correlatedCallId: string | undefined} {
-    const correlatedCallId = params.mode === "form" || params.mode === "openai/form"
-        ? context.correlatedCallId
+    const correlatedToolCall = params.mode === "form" || params.mode === "openai/form"
+        ? context.correlatedToolCall
         : undefined;
     const toolCall = renderer.renderPermissionToolCall(ElicitationReporter.permission(
         params,
         context.isToolApproval,
-        correlatedCallId,
+        correlatedToolCall,
         nextStandaloneToolCallId,
     ));
     const toolApprovalMeta = context.isToolApproval && params.mode !== "url" ? {_meta: {is_mcp_tool_approval: true}} : {};
@@ -124,7 +125,7 @@ export function buildMcpPermissionRequest(
                 renderer.capabilities.airClient,
             ),
         },
-        correlatedCallId,
+        correlatedCallId: correlatedToolCall?.id,
     };
 }
 

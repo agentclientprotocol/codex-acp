@@ -60,6 +60,7 @@ export class AcpToolCallRenderer {
             ...(facts.status === undefined ? {} : {status: facts.status}),
             ...(facts.title === undefined ? {} : {title: facts.title}),
             ...(facts.input === undefined ? {} : {rawInput: facts.input}),
+            ...(facts.mcp ? {_meta: mcpMeta(facts)} : {}),
             ...locationsField(facts.locations),
             ...this.contentField(facts),
         };
@@ -156,7 +157,7 @@ function terminalExit(terminalId: string, exitCode: number | null): Record<strin
     return {terminal_exit: {exit_code: exitCode, signal: null, terminal_id: terminalId}};
 }
 
-function mcpMeta(facts: ToolFacts): Record<string, unknown> {
+function mcpMeta(facts: Pick<ToolFacts, "mcp">): Record<string, unknown> {
     return facts.mcp ? {is_mcp_tool_call: true} : {};
 }
 

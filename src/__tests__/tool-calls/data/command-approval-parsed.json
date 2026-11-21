@@ -1,5 +1,6 @@
 {
   "toolCallId": "cmd",
+  "name": "exec_command",
   "kind": "execute",
   "status": "pending",
   "title": "cat a.txt | head -n 5",

@@ -1,6 +1,7 @@
 [
   {
     "toolCallId": "item-read",
+    "name": "exec_command",
     "title": "Read file '/workspace/src/a.ts'",
     "kind": "read",
     "status": "in_progress",
