@@ -59,8 +59,10 @@ export function normalizeMcpServer(server: AcpMcpServer, toHttp?: McpOverAcpToHt
     switch (server.type) {
         case "stdio": {
             const stdio = server as acpV2.McpServerStdio;
+            // Codex needs a NUL-free, fully qualified path. The SDK also accepts `\bin\server`.
             if (!isAbsoluteProtocolPath(stdio.command)) {
-                throw RequestError.invalidParams({name: stdio.name}, "A stdio MCP server command must be an absolute path");
+                throw RequestError.invalidParams({name: stdio.name, command: stdio.command},
+                    "A stdio MCP server command must be a fully qualified executable path without NUL");
             }
             return {
                 type: "stdio",

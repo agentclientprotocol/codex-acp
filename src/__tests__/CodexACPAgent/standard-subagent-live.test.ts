@@ -100,7 +100,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
 
     it("reports delegated tasks as linked session messages and references the child from visible collaboration calls", async () => {
         await connect();
-        h.emit({method: "thread/started", params: {thread: {...createThread(), id: worker, parentThreadId: sessionId, agentRole: "explorer"}}});
+        h.emit({method: "thread/started", params: {thread: {...createThread(), id: worker, parentThreadId: sessionId, agentRole: "    explorer\n\nChecks **edge cases**."}}});
         h.emit(itemStarted(collab("spawnAgent", "spawn", "Find the bug", "inProgress")));
         h.emit(itemCompleted(collab("spawnAgent", "spawn", "Find the bug")));
         h.emit(onWorker(turnStarted("child-turn")));

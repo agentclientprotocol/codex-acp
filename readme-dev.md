@@ -166,6 +166,11 @@ The adapter serves ACP v1 and [ACP v2 Preview](https://agentclientprotocol.com/p
 from the same process. The TypeScript SDK router selects a version on the first `initialize`.
 A client that needs v1 after the router selected v2 must open a new connection.
 
+V2 [allows Markdown](https://agentclientprotocol.com/protocol/v2/content#text-content) in
+descriptions of auth methods, commands and skills, config options and their values, permission
+requests, and subagent roles. Plan-entry content can also contain Markdown. The adapter sends
+those strings as text for the client to render. Names and titles remain plain text.
+
 The v2 chain registers: `initialize`, `session/new|list|close|delete|resume` (v2 folds `session/load`
 into `session/resume` with `replayFrom`), `session/set_config_option`, `session/set_title`, `session/cancel`,
 `auth/login|logout|status`, `session/prompt` (plus `$/cancel_request`), `session/fork`, `terminal/cancel`, and

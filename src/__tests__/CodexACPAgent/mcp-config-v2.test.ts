@@ -158,12 +158,26 @@ describe('MCP server config from ACP v1 and v2 session requests', () => {
     });
 
     it.each([
-        {type: "stdio", name: "existing", command: "./bin/mcp"},
-        {type: "stdio", name: "existing", command: "mcp"},
+        {type: "stdio", name: "existing", command: "\\bin\\mcp.exe"},
+        {type: "stdio", name: "existing", command: "/usr/bin/mcp\0"},
         {type: "sse", name: "existing", url: "https://example.com/sse", headers: []},
         {type: "acp", name: "existing", serverId: "not-available"},
-    ] satisfies AcpMcpServer[])('validates $type declarations even when the name is already configured', async server => {
+    ] satisfies AcpMcpServer[])('checks Codex constraints on $type even when the name is already configured', async server => {
         await expect(startSessionWithMcpServers([server], ["existing"])).rejects.toMatchObject({code: -32602});
+    });
+
+    it.each([
+        ["session/new", [{type: "stdio", name: "files", command: "npx"}], {name: "files", command: "npx"}],
+        ["session/resume", [{type: "stdio", name: "files", command: "./bin/mcp"}], {name: "files", command: "./bin/mcp"}],
+        ["session/fork", [{type: "acp", name: "tools", serverId: "id"}], {type: "acp"}],
+        ["session/resume", [{type: "stdio", name: "files", command: "/bin/files"}, {type: "http", name: "files", url: "https://example.com"}], {name: "files"}],
+    ] as const)("validates the advertised v2 MCP contract before %s: %j", async (method, mcpServers, data) => {
+        const h = await connectSession();
+        try {
+            const dispatch = [vi.spyOn(h.agent, "newSessionV2"), vi.spyOn(h.agent, "captureSessionSetup"), vi.spyOn(h.agent, "forkSessionV2")];
+            await expect(h.request(method, {cwd, sessionId, mcpServers})).rejects.toMatchObject({code: -32602, data});
+            for (const call of dispatch) expect(call).not.toHaveBeenCalled();
+        } finally { h.connection.close(); }
     });
 
     it.each([

@@ -55,7 +55,12 @@ supports URL elicitation, the adapter first starts the MCP OAuth sign-in. It rep
 `session/new`, `session/resume`, v1 `session/load`, and v2 `session/fork` get these reports.
 If an MCP-over-ACP listener cannot open, setup continues with the other servers. The failed server is
 reported through the same startup report (also on v1 fork) and is not included in the startup wait.
-Invalid declarations still fail setup: in particular, a v2 `stdio` command must be an absolute executable path.
+Invalid v2 declarations fail `session/new`, `session/resume`, or `session/fork` with `-32602`:
+a repeated server name reports `{name}`, an unadvertised transport reports `{type}`, and a relative
+`stdio` command reports `{name, command}`. Use an absolute executable path, such as `/usr/bin/server`,
+`C:\tools\server.exe`, or `\\host\share\server.exe`. The adapter also rejects NUL, Windows paths
+relative to the current drive, and server names that collide after whitespace is replaced with `_`.
+Untagged v1 stdio declarations can still use a command on `PATH`.
 
 On ACP connections, reports and OAuth sign-in for a newly created session wait until its `session/new` response
 has been written. The optional startup wait does not wait for the sign-in.

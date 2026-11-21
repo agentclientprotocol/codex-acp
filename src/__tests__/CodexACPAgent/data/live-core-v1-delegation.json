@@ -3,7 +3,7 @@
     "sessionId": "thread-1",
     "update": {
       "sessionId": "thread-1:subagent:worker",
-      "description": "explorer",
+      "description": "    explorer\n\nChecks **edge cases**.",
       "capabilities": {},
       "sessionUpdate": "subagent_update"
     }
