@@ -948,6 +948,18 @@ export class CodexAppServerClient {
         });
     }
 
+    /** Waits for an observed turn without replacing its owner's completion listener. */
+    async waitForRunningTurn(threadId: string, turnId: string): Promise<void> {
+        if (this.runningTurnId(threadId) !== turnId) return;
+        let release: () => void = () => {};
+        const completed = new Promise<void>(resolve => {
+            release = this.captureTurnCompletions(threadId, event => {
+                if (event.turn.id === turnId && event.turn.status !== "inProgress") resolve();
+            });
+        });
+        await this.waitWhileConnected("the end of the active turn", completed, release);
+    }
+
     async awaitCompactionCompleted(threadId: string): Promise<CompactionCompletedNotification> {
         let releaseCapture: () => void = () => {};
         const completed = new Promise<CompactionCompletedNotification>((resolve) => {

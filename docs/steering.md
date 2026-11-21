@@ -9,7 +9,8 @@ standardization proposal is
 ## Native v2 prompts
 
 An ordinary v2 `session/prompt` steers a running turn. An idle session starts a new turn.
-Slash commands wait for their own execution slot. The adapter returns `messageId` only after
+Slash commands wait for their own execution slot.
+Ordinary prompts and fallback replies wait for an active review or compact turn to finish. The adapter returns `messageId` only after
 Codex records the message. It emits the message once with that ID and keeps the foreground
 state unchanged during steering.
 
