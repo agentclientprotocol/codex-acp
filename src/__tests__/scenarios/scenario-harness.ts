@@ -27,6 +27,7 @@ export const AIR_CAPABILITY_NAMES = [
     "nativeSubagentSessions",
     "asyncTasks",
     "recommendedValue",
+    "modelReasoningEfforts",
     "rawInputRendering",
     "planContentDelta",
     "codexHooks",

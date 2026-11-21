@@ -219,6 +219,7 @@ import {
     AIR_PLAN_CONTENT_DELTA_KEY,
     AIR_RAW_INPUT_RENDERING_KEY,
     AIR_RECOMMENDED_CONFIG_VALUE_KEY,
+    AIR_MODEL_REASONING_EFFORTS_CAPABILITY,
     AIR_EXTENSION_CAPABILITIES_KEY,
     AIR_EXTENSION_VERSION,
     AIR_GOAL_KEY,
@@ -976,6 +977,7 @@ export class CodexAcpServer {
                 AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
                 AIR_ASYNC_TASKS_KEY,
                 AIR_RECOMMENDED_CONFIG_VALUE_KEY,
+                AIR_MODEL_REASONING_EFFORTS_CAPABILITY,
                 AIR_RAW_INPUT_RENDERING_KEY,
                 AIR_PLAN_CONTENT_DELTA_KEY,
                 AIR_CODEX_HOOKS_KEY,
@@ -988,6 +990,7 @@ export class CodexAcpServer {
                 AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
                 AIR_ASYNC_TASKS_KEY,
                 AIR_RECOMMENDED_CONFIG_VALUE_KEY,
+                AIR_MODEL_REASONING_EFFORTS_CAPABILITY,
                 ...this.sessionIndex.agentCapabilities(),
             ];
         return {
@@ -3491,7 +3494,12 @@ export class CodexAcpServer {
         const configOptions: Array<acp.SessionConfigOption> = [];
         // A gateway that lists none of the Codex models leaves no model to offer, so there is no model option at all.
         if (sessionState.availableModels.length > 0) {
-            configOptions.push(createModelConfigOption(sessionState.availableModels, currentModelId.model, recommendedModelId));
+            configOptions.push(createModelConfigOption(
+                sessionState.availableModels,
+                currentModelId.model,
+                recommendedModelId,
+                clientSupportsAirCapability(this.clientCapabilities, AIR_MODEL_REASONING_EFFORTS_CAPABILITY),
+            ));
         }
         if (sessionState.supportedReasoningEfforts.length > 0) {
             configOptions.push(
