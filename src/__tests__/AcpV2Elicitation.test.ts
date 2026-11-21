@@ -13,7 +13,6 @@ function form(meta: unknown): acp.CreateElicitationRequest {
 describe("v2 elicitation companions", () => {
     it.each([
         {jetbrains: {air: {customAnswer: true}}},
-        {jetbrains: {air: {customAnswer: {label: "Note"}}}},
         {_askUserQuestionCustomAnswer: true},
     ])("copies companion IDs to request metadata and keeps other namespaces: %j", meta => {
         const request = form(meta);
@@ -26,6 +25,7 @@ describe("v2 elicitation companions", () => {
     });
 
     it.each([null, {}, {customAnswer: true}, {_askUserQuestionCustomAnswer: false},
+        {jetbrains: {air: {customAnswer: {label: "Note"}}}},
         {jetbrains: {air: {customAnswer: false}}, _askUserQuestionCustomAnswer: true},
     ])("keeps unmarked forms unchanged: %j", meta => {
         const request = form(meta);
