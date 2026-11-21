@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.9.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.8.0...v2.9.0) (2026-11-21)
+
+
+### Features
+
+* support auth/status on ACP v1 and v2 ([#782](https://github.com/agentclientprotocol/codex-acp/issues/782)) ([4f2bdd8](https://github.com/agentclientprotocol/codex-acp/commit/4f2bdd82d0810ac23cb2c03ff8e4789897ae70dd))
+
+
+### Bug Fixes
+
+* align the adapter with ACP SDK 2.9 and v2 Preview ([#787](https://github.com/agentclientprotocol/codex-acp/issues/787)) ([556045e](https://github.com/agentclientprotocol/codex-acp/commit/556045e3fc6e95daad2989fede1a22caaaceae78))
+* update codex to 0.171.0 ([#784](https://github.com/agentclientprotocol/codex-acp/issues/784)) ([e49d438](https://github.com/agentclientprotocol/codex-acp/commit/e49d438a57841436e2f71129dc231ed5359979f8))
+* validate MCP declarations and preserve Markdown with ACP SDK 2.9.1 ([#788](https://github.com/agentclientprotocol/codex-acp/issues/788)) ([e67bc09](https://github.com/agentclientprotocol/codex-acp/commit/e67bc0985eed2bb7f7d2d0298205202c16ca8609))
+
 ## [2.8.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.7.0...v2.8.0) (2026-11-19)
 
 
