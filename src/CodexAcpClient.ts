@@ -60,6 +60,7 @@ import type {
     ThreadItemEntry,
     Turn,
     TurnCompletedNotification,
+    TurnEnvironmentParams,
     TurnSteerResponse,
     UserInput,
 } from "./app-server/v2";
@@ -905,6 +906,7 @@ export class CodexAcpClient {
     readSubagentThread(threadId: string): Promise<Thread | null> { return this.subagents.readChildThread(threadId); }
 
     async newSession(request: WithAcpMcpServers<acp.NewSessionRequest>): Promise<SessionMetadata> {
+        const environments = readSessionEnvironments(request._meta);
         const instructions = await this.resolveSessionInstructions(request, undefined, true);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         const developerInstructions = instructions?.developerInstructions;
@@ -916,6 +918,7 @@ export class CodexAcpClient {
             config,
             modelProvider: this.getModelProvider(),
             cwd: request.cwd,
+            ...(environments !== null && {environments}),
             ...(developerInstructions !== undefined && {developerInstructions}),
         });
 
@@ -1808,6 +1811,30 @@ function readMetaAdditionalRoots(meta?: Record<string, unknown> | null): string[
         .filter((value): value is string => typeof value === "string")
         .map(value => value.trim())
         .filter(value => value.length > 0));
+}
+
+function readSessionEnvironments(meta?: Record<string, unknown> | null): Array<Pick<TurnEnvironmentParams, "environmentId" | "cwd">> | null {
+    const environments = meta?.["environments"];
+    if (environments == null) return null;
+
+    if (!Array.isArray(environments)) {
+        throw RequestError.invalidParams(undefined, "_meta.environments must be an array");
+    }
+
+    return environments.map(environment => {
+        if (environment === null || typeof environment !== "object" || Array.isArray(environment)) {
+            throw RequestError.invalidParams(undefined, "_meta.environments entries must be objects");
+        }
+
+        const {environmentId, cwd} = environment;
+        if (typeof environmentId !== "string" || environmentId.trim().length === 0) {
+            throw RequestError.invalidParams(undefined, "_meta.environments environmentId must be a non-empty string");
+        }
+        if (typeof cwd !== "string" || cwd.trim().length === 0) {
+            throw RequestError.invalidParams(undefined, "_meta.environments cwd must be a non-empty string");
+        }
+        return {environmentId, cwd};
+    });
 }
 
 function readAdditionalDirectories(cwd: string, additionalDirectories?: string[],  meta?: Record<string, unknown> | null): string[] {

@@ -8,6 +8,7 @@ import type { AskForApproval } from "./AskForApproval";
 import type { SandboxMode } from "./SandboxMode";
 import type { ThreadSource } from "./ThreadSource";
 import type { ThreadStartSource } from "./ThreadStartSource";
+import type { TurnEnvironmentParams } from "./TurnEnvironmentParams";
 
 export type ThreadStartParams = {model?: string | null, modelProvider?: string | null, serviceTier?: string | null | null, cwd?: string | null, approvalPolicy?: AskForApproval | null, /**
  * Override where approval requests are routed for review on this thread
@@ -19,4 +20,12 @@ approvalsReviewer?: ApprovalsReviewer | null, sandbox?: SandboxMode | null, conf
 personality?: Personality | null, ephemeral?: boolean | null, sessionStartSource?: ThreadStartSource | null, /**
  * Optional client-supplied analytics source classification for this thread.
  */
-threadSource?: ThreadSource | null};
+threadSource?: ThreadSource | null, /**
+ * Optional sticky environments for this thread.
+ *
+ * Omitted selects the default environment when environment access is
+ * enabled. Empty disables environment access for turns that do not
+ * provide a turn override. Non-empty selects the first environment as the
+ * current turn environment.
+ */
+environments?: Array<TurnEnvironmentParams> | null};

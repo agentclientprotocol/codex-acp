@@ -19,6 +19,7 @@ function createThread(id: string, overrides?: Partial<Thread>): Thread {
     return {
         id,
         sessionId: id,
+        environments: null,
         parentThreadId: null,
         threadSource: null,
         originator: null,
