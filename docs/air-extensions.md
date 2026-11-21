@@ -785,8 +785,10 @@ Without the capability, the config options keep their old shape and carry no rec
 ## Async tasks
 
 Codex app-server owns shell commands that keep running after their tool call.
-The adapter exposes them as async tasks when the client declares `asyncTasks`.
-Without the capability, the adapter sends no async task update.
+The legacy Air extension exposes them as async tasks when the client declares `asyncTasks`.
+Without the capability, the adapter sends no legacy async task update.
+ACP v1 uses `async_task_spawned`, `async_task_progress`, and `async_task_state_update`.
+ACP v2 uses standard terminals and background snapshots. See [background work](background-work.md).
 
 ### Lifecycle
 
@@ -1008,16 +1010,16 @@ Recovery never removes the transcript record.
 
 ## Native subagent sessions
 
-AIR keeps the private subagent contract that predates the ACP Subagent Sessions RFD.
-[Subagent sessions](subagent-sessions.md#air-legacy-contract) describes its lifecycle and the standard contract of other clients.
-This section covers only the AIR bridge.
+ACP v2 always uses the standard subagent contract, including for Air clients.
+[Subagent sessions](subagent-sessions.md) describes its lifecycle, delegated messages, and session references.
+This section covers the private Air bridge on ACP v1.
+It sends `subagent_spawned` and `subagent_state_update`.
 
-- AIR declares `nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`, or on v1 `clientCapabilities.subagents: {}`.
-- Either signal enables native subagent sessions for AIR.
-- The agent advertises `agentCapabilities.sessionCapabilities.subagents` and `nativeSubagentSessions` to AIR only.
-  A client that is not AIR gets neither, because the RFD defines no Agent-side capability.
+- Air v1 declares `nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`, or `clientCapabilities.subagents: {}`.
+- Either signal enables the legacy bridge for Air v1.
+- Only that bridge advertises `agentCapabilities.sessionCapabilities.subagents` and `nativeSubagentSessions`.
 - Without either signal, a Codex subagent stays an ordinary tool call.
-  AIR gets `_meta.jetbrains.air.subagent: true` on a spawn. Another client gets the tool call without `_meta`.
+  Air v1 gets `_meta.jetbrains.air.subagent: true` on a spawn. Another client gets the tool call without `_meta`.
 
 ## Session index
 

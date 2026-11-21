@@ -6,7 +6,12 @@
       "subagentSessionId": "child-1",
       "name": "Researcher",
       "task": "Look into flaky tests",
-      "capabilities": {}
+      "capabilities": {
+        "cancel": true
+      },
+      "_meta": {
+        "source": "delegation"
+      }
     }
   },
   {
@@ -26,6 +31,15 @@
       "taskType": "shell",
       "showInTranscript": false,
       "canStop": true,
+      "toolCallId": "call-1"
+    }
+  },
+  {
+    "sessionId": "session-1",
+    "update": {
+      "sessionUpdate": "_async_task_progress",
+      "asyncTaskId": "task-1",
+      "summary": "Tests are running",
       "toolCallId": "call-1"
     }
   },

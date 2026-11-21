@@ -77,6 +77,12 @@ export function isNoActiveTurnError(err: unknown): boolean {
     return errorText(err).includes("no active turn to interrupt");
 }
 
+/** Review and compact turns reject input until the turn ends. */
+export function isNonSteerableTurnError(err: unknown): boolean {
+    const text = errorText(err).toLowerCase();
+    return text.includes("cannot steer a review turn") || text.includes("cannot steer a compact turn");
+}
+
 /**
  * `turn/interrupt` answers this when Codex has since moved on to another turn --
  * most commonly a review's child turn -- registered after the id we sent. The

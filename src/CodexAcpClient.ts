@@ -14,6 +14,7 @@ import type {
     ApprovalHandler,
     CodexAppServerClient,
     ElicitationHandler,
+    ExperimentalTurnStartParams,
 } from "./CodexAppServerClient";
 import type {McpServerStartupWaitOptions, McpStartupResult} from "./mcp/McpStartupTracker";
 import open from "open";
@@ -76,6 +77,7 @@ import {throwIfRequestCancelled, withRequestCancellation} from "./RequestCancell
 import {isKeyedPromptId} from "./AcpV2Prompt";
 import {
     isMissingRolloutError,
+    isNonSteerableTurnError,
     isThreadNotMaterializedError,
     isThreadActiveWriterError,
     isThreadNotFoundError,
@@ -1468,7 +1470,7 @@ export class CodexAcpClient {
             return null;
         }
         const permissionProfileId = agentMode.permissionProfileId;
-        return await this.codexClient.runTurn({
+        return await this.runPromptTurn({
             threadId: request.sessionId,
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
@@ -1484,7 +1486,24 @@ export class CodexAcpClient {
             model: modelId.model,
             serviceTier: serviceTier,
             ...(clientUserMessageId !== undefined ? {clientUserMessageId} : {}),
-        }, onTurnStarted);
+        }, onTurnStarted, shouldCancel);
+    }
+
+    private async runPromptTurn(
+        params: ExperimentalTurnStartParams,
+        onTurnStarted?: (turnId: string) => void,
+        shouldCancel?: () => boolean,
+    ): Promise<TurnCompletedNotification | null> {
+        while (!shouldCancel?.()) {
+            const runningTurnId = this.codexClient.runningTurnId(params.threadId);
+            try {
+                return await this.codexClient.runTurn(params, onTurnStarted);
+            } catch (error) {
+                if (!isNonSteerableTurnError(error) || runningTurnId === undefined) throw error;
+                await this.codexClient.waitForRunningTurn(params.threadId, runningTurnId);
+            }
+        }
+        return null;
     }
 
     async setCollaborationMode(sessionId: string, mode: ModeKind, currentModelId: string): Promise<void> {

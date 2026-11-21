@@ -1,5 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk/unstable";
 import * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
+import {AIR_CUSTOM_ANSWER_FIELDS_KEY, isAirCustomAnswer, withAirMeta} from "./AirExtension";
 import {isRecord} from "./permissions/json";
 
 /**
@@ -12,12 +13,18 @@ export function toV2CreateElicitationRequest(request: acp.CreateElicitationReque
     if (request.mode !== "form" || !isRecord(request.requestedSchema) || !isRecord(request.requestedSchema["properties"])) {
         throw acp.RequestError.invalidParams(undefined, "Invalid elicitation request");
     }
+    const fields = Object.entries(request.requestedSchema["properties"])
+        .filter(([, property]) => isRecord(property) && isAirCustomAnswer(property["_meta"]))
+        .map(([id]) => id);
     const properties = Object.fromEntries(Object.entries(request.requestedSchema["properties"]).map(([key, property]) => {
         if (!isRecord(property) || property["type"] !== "string" || !("pattern" in property)) return [key, property];
         const {pattern: _pattern, ...rest} = property;
         return [key, rest];
     }));
-    const form = {...request, requestedSchema: {...request.requestedSchema, properties}} as unknown as acpV2.CreateElicitationRequest;
+    const converted = {...request, requestedSchema: {...request.requestedSchema, properties}};
+    const form = (fields.length === 0 ? converted : {
+        ...converted, _meta: withAirMeta(request._meta, AIR_CUSTOM_ANSWER_FIELDS_KEY, fields),
+    }) as unknown as acpV2.CreateElicitationRequest;
     if (!acpV2.CreateElicitationRequest.isForm(form)) throw acp.RequestError.invalidParams(undefined, "Invalid elicitation form");
     return form;
 }

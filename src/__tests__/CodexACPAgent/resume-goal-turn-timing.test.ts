@@ -72,7 +72,7 @@ describe('baseline tracker installed before thread/resume, so an auto-started go
         await settle();
 
         // The second running report is the required resume snapshot, not a new work interval.
-        expect(stateUpdates(client.transcript)).toEqual([
+        expect(stateUpdates(client.transcript, true)).toEqual([
             {state: "running"},
             {state: "running"},
             {state: "idle", stopReason: "end_turn"},
@@ -94,7 +94,7 @@ describe('baseline tracker installed before thread/resume, so an auto-started go
         await settle();
 
         // Replay finishes before the current running snapshot is sent.
-        expect(stateUpdates(client.transcript)).toEqual([
+        expect(stateUpdates(client.transcript, true)).toEqual([
             {state: "running"},
             {state: "running"},
             {state: "idle", stopReason: "end_turn"},

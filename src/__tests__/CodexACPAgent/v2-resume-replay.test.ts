@@ -585,7 +585,7 @@ describe('resume replay of async question answers', () => {
         expectConformingV2SessionUpdates();
     });
 
-    it('replays answers as the questions and their answers on v2', async () => {
+    it('replays v2 answers as completed interactions and keeps quoted envelopes as messages', async () => {
         const {connection, updates} = await connectV2Client({replayTurns: answerTurns});
         try {
             await connection.agent.request(acpV2.methods.agent.session.resume, {
@@ -597,8 +597,11 @@ describe('resume replay of async question answers', () => {
             connection.close();
         }
 
+        const interactions = updates.filter(({update}) => update.sessionUpdate === "tool_call_update");
         const chunks = updates.filter(({update}) => update.sessionUpdate === "user_message_chunk");
-        await expect(dump(chunks)).toMatchFileSnapshot('data/v2-resume-replay-async-question-answers.json');
+        expect(chunks).toHaveLength(1);
+        expect(chunks[0]?.update).toMatchObject({messageId: "quoted"});
+        await expect(dump([...interactions, ...chunks])).toMatchFileSnapshot('data/v2-resume-replay-async-question-answers.json');
     });
 
     it('replays answers as the questions and their answers on v1', async () => {

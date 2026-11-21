@@ -49,7 +49,7 @@ type TerminalSnapshot = {
 const LIVE_POLL_MS = 1_000;
 
 /** One runtime inventory for the AIR extension and the ACP v2 display terminals. */
-export class CodexBackgroundTerminalTasks {
+export class CodexBackgroundTasks {
     /** The live tasks. A task leaves the map when it ends, so the map holds only the running commands. */
     private readonly tasks = new Map<string, Task>();
     /**
@@ -92,7 +92,7 @@ export class CodexBackgroundTerminalTasks {
         // The list includes processes still serving their initial tool call. At a turn boundary
         // a surviving process is known to be detached. Publish its terminal before reporting idle.
         if (this.reportsStandard(sessionId) && notification.method === "turn/completed"
-            && notification.params.turn.status !== "inProgress" && this.hasRunningTask(threadId)) {
+            && notification.params.turn.status !== "inProgress") {
             await this.reconcile(threadId, sessionId);
         } else if (this.enabled && (notification.method === "turn/completed"
             || (notification.method === "item/started" && this.hasRunningTask(threadId)))) {
@@ -221,7 +221,9 @@ export class CodexBackgroundTerminalTasks {
     async stop(taskId: string): Promise<boolean> {
         if (!this.isActive()) return false;
         const task = this.tasks.get(taskId);
-        if (!task || task.publication !== "published") return false;
+        if (!task) return false;
+        if (this.standard) return this.cancelTerminal(task.sessionId, task.itemId);
+        if (task.publication !== "published") return false;
         return this.stopTask(task);
     }
 

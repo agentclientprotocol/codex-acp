@@ -3,7 +3,9 @@
 `codex-acp` reports Codex subagents as ACP child sessions through one of two contracts. A connection gets one contract, never both.
 
 - The **standard contract** follows the ACP [subagent sessions specification](https://agentclientprotocol.com/protocol/v2/subagents): `subagent_update`, `session_message`, and `session` tool call content.
-- The **AIR legacy contract** is the older private contract for JetBrains AIR clients: `subagent_spawned` and `subagent_state_update`.
+- The **AIR legacy contract** serves Air v1 clients with `subagent_spawned` and `subagent_state_update`.
+
+ACP v2 always uses the standard contract, including for Air clients.
 
 Without either contract, a subagent stays an ordinary tool call on the root session. See [Fallback](#fallback).
 
@@ -14,6 +16,18 @@ Without either contract, a subagent stays an ordinary tool call on the root sess
 - A v1 Client opts in with `clientCapabilities.subagents: {}`. Without it, the adapter sends none of the updates below.
 - A v2 Client needs no capability. Subagent updates are part of the v2 session model.
 - There is no Agent-side capability. The `initialize` response to a standard Client does not contain `agentCapabilities.sessionCapabilities.subagents`.
+
+### Lifecycle controls
+
+- The adapter sends `subagent_update` before any child output.
+- It uses the child session ID for later messages, thoughts, plans, tools, permissions, and elicitations.
+- It mirrors each child state snapshot on the immediate parent.
+- The adapter advertises `capabilities.cancel: {}` only while that child has cancellable work.
+- On ACP v2, `session/cancel` stops the selected child and its foreground descendants. It preserves listed background work and its requests.
+- On ACP v1, child `session/cancel` also stops descendant work. Both versions preserve parent and sibling work.
+- Child permissions and elicitations use the owning child session ID.
+- On ACP v2, root `session/cancel` stops foreground work, including foreground descendants. It preserves listed background work and its requests.
+- Root `session/close` stops child work and withdraws child requests. ACP v1 retains recursive root cancellation.
 
 ### Association updates
 
@@ -61,11 +75,13 @@ The adapter verifies the child's ID, parent, and loaded state before accepting r
 
 ## AIR legacy contract
 
-This contract applies only to a Client that declares `_meta.jetbrains.air`. It does not use `subagent_update`, `session_message`, or `session` tool call content. See [AIR extensions](air-extensions.md#native-subagent-sessions).
+This contract applies only to an ACP v1 client that declares `_meta.jetbrains.air`.
+It does not use `subagent_update`, `session_message`, or `session` tool call content.
+See [AIR extensions](air-extensions.md#native-subagent-sessions).
 
 ### Capability negotiation
 
-- AIR opts in with `nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`, or on v1 with `clientCapabilities.subagents: {}`.
+- Air v1 opts in with `nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`, or with `clientCapabilities.subagents: {}`.
 - The adapter answers an AIR Client with `agentCapabilities.sessionCapabilities.subagents: {}` on v1 and lists `nativeSubagentSessions` in its own `_meta.jetbrains.air.capabilities`.
 
 ### Lifecycle events
@@ -74,7 +90,6 @@ This contract applies only to a Client that declares `_meta.jetbrains.air`. It d
 - It uses the child session ID for later messages, thoughts, plans, tools, permissions, and elicitations.
 - It sends one `subagent_state_update` on the immediate parent, with `completed`, `failed`, `cancelled`, or `disconnected`.
 - The adapter advertises an empty child capability object. It does not support targeted child cancel or close operations.
-- On v2 both updates are sent as `_subagent_update`.
 
 ### Session load
 

@@ -92,6 +92,62 @@ describe('session/cancel and session/close over ACP v2', () => {
             .toMatchFileSnapshot('data/cancel-v2-running-prompt.json');
     });
 
+    it('preserves child approvals across foreground Stop and ends descendant work on Close', async () => {
+        const permission = deferred<acpV2.RequestPermissionResponse>();
+        const descendantPermission = deferred<acpV2.RequestPermissionResponse>();
+        let permissionSignal: AbortSignal | undefined;
+        let descendantSignal: AbortSignal | undefined;
+        let optionId = "";
+        const client = await connectSession(2, {onRequestPermission: (request, signal) => {
+            if (request.sessionId === `${sessionId}:subagent:descendant`) {
+                descendantSignal = signal;
+                return descendantPermission.promise;
+            }
+            optionId = request.options[0]!.optionId;
+            permissionSignal = signal;
+            return permission.promise;
+        }});
+        closeClient = () => client.connection.close();
+        const {response, clientUserMessageId} = await startRunningPrompt(client);
+        client.emit(itemCompleted(userMessageItem(clientUserMessageId)));
+        await response;
+        client.emit(itemStarted({type: "subAgentActivity", id: "spawn-worker", kind: "started", agentThreadId: "worker",
+            agentPath: "/root/worker", model: null, reasoningEffort: null}));
+        client.emit({method: "turn/started", params: {threadId: "worker", turn: createTurn("inProgress", "worker-turn")}});
+        client.emit(itemStarted({type: "subAgentActivity", id: "spawn-descendant", kind: "started", agentThreadId: "descendant",
+            agentPath: "/root/worker/descendant", model: null, reasoningEffort: null}));
+        client.emit({method: "turn/started", params: {threadId: "descendant", turn: createTurn("inProgress", "descendant-turn")}});
+        client.emit(turnCompleted());
+        await client.promptRunFinished();
+        client.emit(turnStarted("unrelated-turn"));
+        await client.waitForNotifications();
+        const approval = client.triggerApproval(CommandExecutionApprovalRequest.method, {
+            ...commandApprovalParams(), threadId: "worker", turnId: "worker-turn",
+        });
+        const descendantApproval = client.triggerApproval(CommandExecutionApprovalRequest.method, {
+            ...commandApprovalParams(), threadId: "descendant", turnId: "descendant-turn",
+        });
+        try {
+            await vi.waitFor(() => expect(permissionSignal).toBeDefined());
+            await vi.waitFor(() => expect(descendantSignal).toBeDefined());
+            await client.cancel();
+            await vi.waitFor(() => expect(client.turnInterruptCalls()).toEqual([{threadId: sessionId, turnId: "unrelated-turn"}]));
+            client.emit(turnFinished("interrupted", "unrelated-turn"));
+            await client.waitForNotifications();
+            expect(permissionSignal!.aborted).toBe(false);
+            expect(descendantSignal!.aborted).toBe(false);
+            permission.resolve({outcome: {outcome: "selected", optionId}});
+            await expect(approval).resolves.toEqual({decision: "accept"});
+            await client.request("session/close", {sessionId});
+            expect(client.turnInterruptCalls()).toContainEqual({threadId: "worker", turnId: "worker-turn"});
+            expect(client.turnInterruptCalls()).toContainEqual({threadId: "descendant", turnId: "descendant-turn"});
+            await expect(descendantApproval).resolves.toEqual({decision: "cancel"});
+        } finally {
+            permission.resolve({outcome: {outcome: "cancelled"}});
+            descendantPermission.resolve({outcome: {outcome: "cancelled"}});
+        }
+    });
+
     it('drops queued prompts with -32800 on cancel, and lets a later prompt run normally', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
@@ -103,8 +159,8 @@ describe('session/cancel and session/close over ACP v2', () => {
         await first;
 
         // B and C queue behind the running turn: nothing about them is observable yet.
-        const second = client.sendPrompt([{type: "text", text: "Two"}]);
-        const third = client.sendPrompt([{type: "text", text: "Three"}]);
+        const second = client.sendPrompt([{type: "text", text: "/status"}]);
+        const third = client.sendPrompt([{type: "text", text: "/plan"}]);
         await settle();
         expect(client.turnStartParams).toHaveLength(1);
 
@@ -116,7 +172,7 @@ describe('session/cancel and session/close over ACP v2', () => {
         await client.promptRunFinished();
         await settle();
 
-        // Neither B ("Two") nor C ("Three") ever reached `turn/start` or sent a user message.
+        // Neither queued command reaches Codex or sends a user message.
         expect(client.turnStartParams).toHaveLength(1);
         const userMessageTexts = client.transcript.flatMap(entry => {
             if (!("sessionUpdate" in entry) || entry.sessionUpdate.sessionUpdate !== "user_message_chunk") {
@@ -125,7 +181,7 @@ describe('session/cancel and session/close over ACP v2', () => {
             const content = entry.sessionUpdate.content as {type: string, text?: string};
             return content.type === "text" ? [content.text] : [];
         });
-        expect(userMessageTexts).not.toEqual(expect.arrayContaining(["Two", "Three"]));
+        expect(userMessageTexts).not.toEqual(expect.arrayContaining(["/status", "/plan"]));
         expect(stateUpdates(client.transcript)).toEqual([{state: "running"}, {state: "idle", stopReason: "cancelled"}]);
 
         // The queue is empty afterwards: a fresh prompt runs like normal, not as if still queued.
@@ -167,7 +223,7 @@ describe('session/cancel and session/close over ACP v2', () => {
                 client.emit(turnStarted());
                 client.emit(itemCompleted(userMessageItem(client.turnStartParams[0]!["clientUserMessageId"] as string)));
                 await first;
-                const beforeCancel = client.sendPrompt([{type: "text", text: "Before cancellation"}]);
+                const beforeCancel = client.sendPrompt([{type: "text", text: "/status"}]);
                 await settle();
                 await client.cancel();
                 await interrupting.promise;
@@ -205,7 +261,7 @@ describe('session/cancel and session/close over ACP v2', () => {
         client.emit(itemCompleted(userMessageItem(client.turnStartParams[0]!["clientUserMessageId"] as string)));
         await first;
 
-        const second = client.sendPrompt([{type: "text", text: "Two"}]);
+        const second = client.sendPrompt([{type: "text", text: "/status"}]);
         await settle();
         expect(client.turnStartParams).toHaveLength(1);
 
@@ -260,8 +316,8 @@ describe('session/cancel and session/close over ACP v2', () => {
 
         // B and C both queue behind the running turn.
         const controllerB = new AbortController();
-        const second = client.sendPrompt([{type: "text", text: "Two"}], controllerB.signal);
-        const third = client.sendPrompt([{type: "text", text: "Three"}]);
+        const second = client.sendPrompt([{type: "text", text: "/status"}], controllerB.signal);
+        const third = client.sendPrompt([{type: "text", text: "/plan"}]);
         await settle();
         expect(client.turnStartParams).toHaveLength(1);
 
@@ -275,15 +331,10 @@ describe('session/cancel and session/close over ACP v2', () => {
         await client.promptRunFinished();
         await settle();
 
-        // C still runs once A finishes: dropping B did not disturb its FIFO slot.
-        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(2));
-        client.emit(turnStarted("turn-2"));
-        client.emit(itemCompleted(userMessageItem(client.turnStartParams[1]!["clientUserMessageId"] as string, "Three"), "turn-2"));
-        const {messageId} = await third;
-        expect(messageId).toBe(client.turnStartParams[1]!["clientUserMessageId"]);
-        client.emit({method: "turn/completed", params: {threadId: "thread-1", turn: createTurn("completed", "turn-2")}});
+        await third;
         await client.promptRunFinished(1);
         await settle();
+        expect(client.turnStartParams).toHaveLength(1);
 
         const userMessageTexts = client.transcript.flatMap(entry => {
             if (!("sessionUpdate" in entry) || entry.sessionUpdate.sessionUpdate !== "user_message_chunk") {
@@ -292,8 +343,8 @@ describe('session/cancel and session/close over ACP v2', () => {
             const content = entry.sessionUpdate.content as {type: string, text?: string};
             return content.type === "text" ? [content.text] : [];
         });
-        expect(userMessageTexts).not.toEqual(expect.arrayContaining(["Two"]));
-        expect(userMessageTexts).toEqual(expect.arrayContaining(["One", "Three"]));
+        expect(userMessageTexts).not.toEqual(expect.arrayContaining(["/status"]));
+        expect(userMessageTexts).toEqual(expect.arrayContaining(["One", "/plan"]));
         expect(stateUpdates(client.transcript)).toEqual([
             {state: "running"}, {state: "idle", stopReason: "end_turn"},
             {state: "running"}, {state: "idle", stopReason: "end_turn"},
