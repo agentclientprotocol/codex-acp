@@ -117,12 +117,13 @@ describe('session/request_permission over ACP v2', () => {
         closeClient = () => client.connection.close();
         const {finishTurn} = await startRunningPrompt(client);
 
-        await client.triggerApproval(CommandExecutionApprovalRequest.method, commandApprovalParams({reason: "Needs a listing"}));
+        const reason = "    ls -la\n\nInspect **all** entries.";
+        await client.triggerApproval(CommandExecutionApprovalRequest.method, commandApprovalParams({reason}));
 
         expect(requests).toHaveLength(1);
-        expect(requests[0]).toMatchObject({title: "Run command?", description: "Needs a listing"});
+        expect(requests[0]).toMatchObject({title: "Run command?", description: reason});
         expect(requests[0]!._meta).toEqual({
-            jetbrains: {air: {version: 1, permission: {version: 1, title: "Run command?", description: "Needs a listing"}}},
+            jetbrains: {air: {version: 1, permission: {version: 1, title: "Run command?", description: reason}}},
         });
 
         await finishTurn();

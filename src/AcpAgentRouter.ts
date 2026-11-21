@@ -234,16 +234,32 @@ function createRouter(
         .onRequest(SESSION_LIST_SUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.subscribeList(ctx.params))
         .onRequest(SESSION_LIST_UNSUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.unsubscribeList(ctx.params));
 
+    let advertisedMcp: acpV2.McpCapabilities | null = null;
+    // Check the negotiated transports and v2 wire rules before setup can suspend child controls.
+    const withSupportedMcpServers = <P extends Pick<acpV2.NewSessionRequest, "mcpServers">, R>(
+        handle: acpV2.AgentRequestHandler<P, R>,
+    ): acpV2.AgentRequestHandler<P, R> => ctx => {
+        acpV2.assertSupportedMcpServers(ctx.params.mcpServers, advertisedMcp);
+        return handle(ctx);
+    };
+
     const v2Agent = acpV2.agent({name: packageJson.name})
         .onConnect(({client, signal}) => attachAgent(createAgent(new AcpV2Connection(client), server => bridge.toHttp(client, server)), signal))
         .onNotification(acpV2.methods.agent.mcp.message, mcp.handleNotification)
-        .onRequest(acpV2.methods.agent.initialize, (ctx) => initialize(ctx.requestId, () => getAgent().initializeV2(ctx.params)))
+        .onRequest(acpV2.methods.agent.initialize, (ctx) => initialize(ctx.requestId, async () => {
+            const response = await getAgent().initializeV2(ctx.params);
+            advertisedMcp = response.capabilities?.session?.mcp ?? null;
+            return response;
+        }))
         // No `session/load`: v2 folds it into `session/resume` with `replayFrom`.
-        .onRequest(acpV2.methods.agent.session.new, (ctx) => createdSetup(ctx.requestId, () => getAgentForPaths(ctx.params).newSessionV2(ctx.params)))
+        .onRequest(acpV2.methods.agent.session.new, withSupportedMcpServers(ctx =>
+            createdSetup(ctx.requestId, () => getAgentForPaths(ctx.params).newSessionV2(ctx.params))))
         .onRequest(acpV2.methods.agent.session.list, (ctx) => getAgentForPaths({cwd: ctx.params.cwd ?? null}).listSessions(ctx.params))
         .onRequest(acpV2.methods.agent.session.delete, (ctx) => getAgent(ctx.params).deleteSession(ctx.params))
-        .onRequest(acpV2.methods.agent.session.resume, (ctx) => setup(ctx.params.sessionId, ctx.requestId, () => forStoredSessionV2(ctx.params, agent => agent.resumeSessionV2(ctx.params, ctx.signal)), ctx.signal))
-        .onRequest(acpV2.methods.agent.session.fork, (ctx) => createdSetup(ctx.requestId, () => forStoredSessionV2(ctx.params, agent => agent.forkSessionV2(ctx.params))))
+        .onRequest(acpV2.methods.agent.session.resume, withSupportedMcpServers(ctx =>
+            setup(ctx.params.sessionId, ctx.requestId, () => forStoredSessionV2(ctx.params, agent => agent.resumeSessionV2(ctx.params, ctx.signal)), ctx.signal)))
+        .onRequest(acpV2.methods.agent.session.fork, withSupportedMcpServers(ctx =>
+            createdSetup(ctx.requestId, () => forStoredSessionV2(ctx.params, agent => agent.forkSessionV2(ctx.params)))))
         .onRequest(acpV2.methods.agent.session.close, (ctx) => getAgent(ctx.params).closeSession(ctx.params))
         .onRequest(acpV2.methods.agent.terminal.cancel, (ctx) => getAgent().cancelTerminalV2(ctx.params))
         // No `session/set_mode`: v2 removed the modes API; modes are config options.
