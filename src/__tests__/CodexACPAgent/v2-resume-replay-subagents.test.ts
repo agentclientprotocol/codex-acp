@@ -239,11 +239,7 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
         expect(agentMessages).toContain("Investigating the flaky test.");
     });
 
-    it.each([
-        {activityModel: "gpt-5", expected: [{sessionId: childId, value: "gpt-5", name: "5"}]},
-        // The spawn request names a model, but a role config can override it, so replay sends no model.
-        {activityModel: null, expected: []},
-    ])('replays the model of a child only when its activity names it ($activityModel)', async ({activityModel, expected}) => {
+    it('does not replay historical child configuration on the AIR contract either', async () => {
         const root: Thread["turns"] = [{
             ...rootTurns[0]!,
             items: [
@@ -259,7 +255,7 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
                     reasoningEffort: null,
                     agentsStates: {},
                 },
-                {...rootTurns[0]!.items[0]!, model: activityModel} as Thread["turns"][number]["items"][number],
+                {...rootTurns[0]!.items[0]!, model: "gpt-5"} as Thread["turns"][number]["items"][number],
                 ...rootTurns[0]!.items.slice(1),
             ],
         }];
@@ -274,14 +270,7 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
             replayFrom: {type: "start"},
         });
 
-        const childModels = updates
-            .filter(({sessionId, update}) => sessionId === childId && update.sessionUpdate === "config_option_update")
-            .map(({sessionId, update}) => {
-                const option = (update as {configOptions: Array<{currentValue: string; options: Array<{name: string}>}>})
-                    .configOptions[0]!;
-                return {sessionId, value: option.currentValue, name: option.options[0]!.name};
-            });
-        expect(childModels).toEqual(expected);
+        expect(updates.some(({sessionId, update}) => sessionId === childId && update.sessionUpdate === "config_option_update")).toBe(false);
     });
 
     it('replays a follow-up turn of a finished child as a new generation', async () => {

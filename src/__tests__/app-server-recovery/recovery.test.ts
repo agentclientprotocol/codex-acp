@@ -1047,7 +1047,7 @@ describe("app-server recovery", () => {
         await expect(prompt).resolves.toMatchObject({stopReason: "cancelled"});
     });
 
-    it("completes an accepted URL elicitation that the dead app-server can no longer resolve", async () => {
+    it("does not report an external URL interaction as complete just because Codex exited", async () => {
         const fixture = createRecoveryFixture();
         await initialize(fixture, false, {elicitation: {url: {}}});
         const {sessionId} = await fixture.agent.newSession({cwd: "/work", mcpServers: []});
@@ -1064,7 +1064,7 @@ describe("app-server recovery", () => {
         await fixture.kill();
 
         await expect(prompt).rejects.toMatchObject({code: 1001});
-        expect(fixture.acp.notify).toHaveBeenCalledWith(acp.methods.client.elicitation.complete, {elicitationId: "elicit-123"});
+        expect(fixture.acp.notify).not.toHaveBeenCalledWith(acp.methods.client.elicitation.complete, {elicitationId: "elicit-123"});
     });
 
     it("reports a crash during the history read of session/load as the exit of the app-server", async () => {

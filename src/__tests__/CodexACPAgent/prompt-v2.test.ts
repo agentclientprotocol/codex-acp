@@ -927,7 +927,8 @@ describe('session/prompt over ACP v2', () => {
 
         // One running…idle pair for the whole exchange, despite the two turns.
         expect(stateUpdates(client.transcript.slice(start))).toEqual([{state: "running"}, {state: "idle", stopReason: "end_turn"}]);
-        await expect(dump(client.transcript.slice(start), messageId).replaceAll(implementationId, "<implementationId>"))
+        const acpTranscript = client.transcript.slice(start).filter(entry => !("codexRequest" in entry || "codexResponse" in entry || "codexNotification" in entry));
+        await expect(dump(acpTranscript, messageId).replaceAll(implementationId, "<implementationId>"))
             .toMatchFileSnapshot('data/prompt-v2-plan-implementation-turn.json');
     });
 

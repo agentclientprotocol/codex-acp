@@ -2,32 +2,33 @@ import type {McpServerOauthLoginCompletedNotification} from "../app-server/v2";
 
 type McpOauthCompletionWaiter = {
     threadId: string;
-    resolve: (event: McpServerOauthLoginCompletedNotification) => void;
+    match: (event: McpServerOauthLoginCompletedNotification) => void;
     reject: (error: unknown) => void;
 };
 
 /**
  * Routes the `mcpServer/oauthLogin/completed` notifications to the sign-ins that wait for them.
- * Many sign-ins can wait at the same time. One notification completes every waiter of its server and thread.
+ * The server and thread can have several sign-ins in flight. Only the matching attempt can complete one.
  */
 export class McpOauthCompletions {
     /** The waiters, by server name. */
     private readonly waiters = new Map<string, Set<McpOauthCompletionWaiter>>();
     private closedError: Error | null = null;
 
-    /** Completes the waiters of the server. A notification without a thread completes the waiters of every thread. */
     complete(event: McpServerOauthLoginCompletedNotification): void {
+        if (event.loginId == null) return;
         for (const waiter of [...this.waiters.get(event.name) ?? []]) {
             if (event.threadId === null || event.threadId === waiter.threadId) {
-                waiter.resolve(event);
+                waiter.match(event);
             }
         }
     }
 
-    /** Waits for the sign-in completion of the server. The wait rejects when `signal` aborts or when the Codex connection closes. */
+    /** Register before starting login: a completion can arrive before the response that supplies its ID. */
     async await(
         name: string,
         threadId: string,
+        loginId: Promise<string>,
         signal?: AbortSignal,
     ): Promise<McpServerOauthLoginCompletedNotification> {
         signal?.throwIfAborted();
@@ -46,9 +47,12 @@ export class McpOauthCompletions {
             };
             const waiter: McpOauthCompletionWaiter = {
                 threadId,
-                resolve: (event) => {
-                    release();
-                    resolve(event);
+                match: (event) => {
+                    void loginId.then(id => {
+                        if (event.loginId !== id) return;
+                        release();
+                        resolve(event);
+                    }, () => {});
                 },
                 reject: (error) => {
                     release();
@@ -62,6 +66,7 @@ export class McpOauthCompletions {
                 this.waiters.set(name, waiters);
             }
             waiters.add(waiter);
+            void loginId.catch(waiter.reject);
         });
     }
 

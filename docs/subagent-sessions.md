@@ -2,7 +2,7 @@
 
 `codex-acp` reports Codex subagents as ACP child sessions through one of two contracts. A connection gets one contract, never both.
 
-- The **standard contract** follows the ACP [Subagent Sessions RFD](https://agentclientprotocol.com/rfds/subagents): `subagent_update`, `session_message`, and `session` tool call content.
+- The **standard contract** follows the ACP [subagent sessions specification](https://agentclientprotocol.com/protocol/v2/subagents): `subagent_update`, `session_message`, and `session` tool call content.
 - The **AIR legacy contract** is the older private contract for JetBrains AIR clients: `subagent_spawned` and `subagent_state_update`.
 
 Without either contract, a subagent stays an ordinary tool call on the root session. See [Fallback](#fallback).
@@ -46,6 +46,8 @@ The task a session gives a child is reported as `session_message`, not as a user
 `session/load`, and v2 `session/resume` with `replayFrom`, replay each recorded child conversation once, before the response. Replay reports the same announcements, session messages, and session references as the live path. The latest recorded turn outcome is historical state on the parent's `subagent_update`, not a live `state_update` for the child. Replay grants no cancel capability.
 
 On v2, the root and each announced child get exactly one `replay_complete`, including children with no retained content. A parent's marker separates historical child associations from current child state and capabilities reported on that parent. Live updates, state snapshots, and requests follow the boundary for their session. Root activation and child controls still wait for the successful resume response. A resume without `replayFrom` sends no replay boundary. V1 `session/load` uses the response as the freshness boundary.
+
+V2 replay omits historical child configuration. Only a restored child's current configuration is reported. V1 load keeps recorded child configuration in history.
 
 A missing or incomplete child transcript adds one advisory on the root session. On v1 this is a thought. On v2 it is a live notice after `replay_complete`, not retained history.
 

@@ -47,9 +47,7 @@ export function subagentProtocol(
     capabilities?: ClientCapabilities | null,
     version: 1 | 2 = 1,
 ): "hidden" | "air" | "standard" {
-    const subagents = (
-        capabilities as (ClientCapabilities & { subagents?: unknown }) | null | undefined
-    )?.subagents;
+    const subagents = capabilities?.subagents;
     const standard = typeof subagents === "object" && subagents !== null && !Array.isArray(subagents);
     const air = isAirClient(capabilities);
     if (clientSupportsAirCapability(capabilities, AIR_NATIVE_SUBAGENT_SESSIONS_KEY)

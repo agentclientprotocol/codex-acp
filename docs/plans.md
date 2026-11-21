@@ -8,7 +8,7 @@ Codex produces two kinds of plans:
 - **Markdown plans** that Codex writes in plan mode (the `plan` item). The
   `planId` is the Codex item id.
 
-The adapter follows the [plan operations RFD](https://agentclientprotocol.com/rfds/plan-operations).
+The adapter follows the [ACP plan operations](https://agentclientprotocol.com/protocol/v1/agent-plan).
 On v1, a client opts in to `plan_update` with `clientCapabilities.plan: {}`. On v2,
 every client gets `plan_update`, and no capability is needed.
 
@@ -57,10 +57,9 @@ A v1 client without `clientCapabilities.plan` gets:
 ## Removal
 
 An explicit empty checklist from `turn/plan/updated` clears
-`codex-structured-plan`. On v1 the adapter sends the same checklist update as
-usual, with empty `entries`. On v2 it sends an empty `items` update, then
-`plan_removed`, so clients without support for plan removal still clear the
-checklist.
+`codex-structured-plan`. Clients with plan updates (opt-in on v1, baseline on v2)
+receive an empty `items` update, then `plan_removed`. A v1 client without `plan`
+receives only the legacy `plan` with empty `entries`.
 
 Completion does not remove a plan. Codex has no equivalent removal event for
 Markdown plan items. Markdown plans omit `path` because Codex streams plan text
