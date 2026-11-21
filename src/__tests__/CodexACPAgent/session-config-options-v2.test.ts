@@ -84,6 +84,7 @@ describe('Session config options over ACP v2', () => {
         closeClient?.();
         closeClient = null;
         vi.clearAllMocks();
+        vi.unstubAllEnvs();
     });
 
     it('builds the v2 config option list with configId and a boolean fast-mode option', async () => {
@@ -151,6 +152,25 @@ describe('Session config options over ACP v2', () => {
         expect(sessionState.agentMode).toBe(AgentMode.ReadOnly);
         await expect(dump({fastModeResponse, modeResponse}))
             .toMatchFileSnapshot('data/session-config-options-v2-set.json');
+    });
+
+    it('selects the opted-in host sandbox through the v2 mode option', async () => {
+        vi.stubEnv("CODEX_ACP_EXTERNAL_SANDBOX", "true");
+        const {connection, sessionState} = await connectV2Client();
+        closeClient = () => connection.close();
+        sessionState.availableAgentModes = AgentMode.all();
+        const response = await connection.agent.request(acpV2.methods.agent.session.setConfigOption, {
+            sessionId: sessionState.sessionId,
+            configId: MODE_CONFIG_ID,
+            type: "id",
+            value: "external-sandbox",
+        });
+        expect(response.configOptions.find(option => option.configId === MODE_CONFIG_ID))
+            .toMatchObject({currentValue: "external-sandbox"});
+        expect(sessionState.agentMode).toMatchObject({
+            approvalPolicy: "untrusted",
+            sandboxPolicy: {type: "externalSandbox", networkAccess: "enabled"},
+        });
     });
 
     it('lists and selects allowed custom permission profiles over v2', async () => {
