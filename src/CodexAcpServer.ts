@@ -32,6 +32,7 @@ import {
     isAccountReadAuthFailureError,
     isAccountReadUnavailableError,
     isNoActiveTurnError,
+    isNonSteerableTurnError,
     isThreadNotFoundError,
     isThreadNotLoadedError,
     parseExpectedActiveTurnMismatch,
@@ -3278,7 +3279,8 @@ export class CodexAcpServer {
         this.assertSteerInputSupported(params, sessionState);
         const activePrompt = this.activePrompts.get(params.sessionId);
         const mustWait = activePrompt !== undefined && (activePrompt.cancelRequested
-            || activePrompt.inputKind.kind === "codexTurnCommand" && activePrompt.inputKind.name === "compact");
+            || activePrompt.inputKind.kind === "codexTurnCommand"
+                && (activePrompt.inputKind.name === "compact" || activePrompt.inputKind.name === "review"));
         const turnId = mustWait ? null : await this.getSteerableTurnId(sessionState);
         if (insertion?.signal.aborted) throw RequestError.requestCancelled();
         if (turnId) {
@@ -3359,7 +3361,7 @@ export class CodexAcpServer {
             landing.ended(false);
             const turnStillActive = sessionState.currentTurnId !== null
                 && codexRunningTurnId(sessionState, sessionState.currentTurnId) === turnId;
-            if (turnStillActive && !this.isNoActiveTurnToSteerError(error)) throw error;
+            if (turnStillActive && !this.isNoActiveTurnToSteerError(error) && !isNonSteerableTurnError(error)) throw error;
             return false;
         }
     }
