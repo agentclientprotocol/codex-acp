@@ -260,6 +260,18 @@ export class CodexSubagentEventRouter {
             }
         }
 
+        // An ad-hoc v1 spawn can reveal its child id only when the spawn
+        // completes and never send a subAgentActivity with an agent path. The
+        // child must be announced now or its buffered output is never routed.
+        if (item.tool === "spawnAgent" && notification.method === "item/completed") {
+            for (const childSessionId of item.receiverThreadIds) {
+                if (!this.pendingSpawns.has(childSessionId)) continue;
+                const state = item.agentsStates[childSessionId];
+                if (state && terminalStateOf(state.status) !== undefined) continue;
+                await this.materialize(childSessionId, undefined, item.model);
+            }
+        }
+
         for (const [childSessionId, state] of Object.entries(item.agentsStates)) {
             const terminalState = state && terminalStateOf(state.status);
             if (!terminalState) continue;
@@ -273,7 +285,12 @@ export class CodexSubagentEventRouter {
         }
         // `updated` is intentionally not synthesized: the portable protocol
         // currently defines only spawn and terminal lifecycle.
-        return item.tool === "spawnAgent" && representedSpawn;
+        // Codex v1 may omit the child id from the start and reveal it only when
+        // the spawn completes. Hide that provisional legacy tool call for a
+        // native-subagent client; otherwise it remains stuck after the child is
+        // announced from the completion event.
+        return item.tool === "spawnAgent"
+            && (representedSpawn || notification.method === "item/started");
     }
 
     shouldIgnore(notification: ServerNotification): boolean {
@@ -429,11 +446,20 @@ export class CodexSubagentEventRouter {
             : [];
     }
 
-    private async materialize(childSessionId: string, path: string, resolvedModel: string | null): Promise<void> {
+    private async materialize(
+        childSessionId: string,
+        path: string | undefined,
+        resolvedModel: string | null,
+    ): Promise<void> {
         if (this.children.has(childSessionId)) return;
         const pending = this.pendingSpawns.get(childSessionId);
-        const name = nameFromAgentPath(path, fallbackName(childSessionId));
-        const inferredParent = this.parentForPath(path);
+        if (path === undefined && !pending) return;
+        const name = path === undefined
+            ? fallbackName(childSessionId)
+            : nameFromAgentPath(path, fallbackName(childSessionId));
+        const inferredParent = path === undefined
+            ? {threadId: this.rootSessionId, sessionId: this.rootSessionId}
+            : this.parentForPath(path);
         const parentThreadId = pending?.parentThreadId ?? inferredParent.threadId;
         const parentSessionId = pending?.parentSessionId ?? inferredParent.sessionId;
         const task = pending?.task ?? `Delegated task for ${name}`;
@@ -454,7 +480,7 @@ export class CodexSubagentEventRouter {
             sessionId: childSessionId,
             name,
             task,
-            path: normalizeAgentPath(path),
+            ...(path === undefined ? {} : {path: normalizeAgentPath(path)}),
             ...(model ? {model} : {}),
             generation: 1,
         });
