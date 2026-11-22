@@ -116,7 +116,8 @@ describe("paginated thread history", () => {
         expect(loaded.thread.turns).toEqual([]);
         expect(await collect(loaded.history)).toEqual(expectedIds);
         expect(loaded.thread.name).toBe(mode === "paginated" ? "Resume metadata" : "Later metadata");
-        expect(read.mock.calls).toEqual(mode === "paginated" ? [] : [
+        expect(read.mock.calls[0]).toEqual([{threadId: "history", includeTurns: false}]);
+        expect(read.mock.calls.slice(1)).toEqual(mode === "paginated" ? [] : [
             [{threadId: "history"}],
             [{threadId: "history", includeTurns: true}],
         ]);

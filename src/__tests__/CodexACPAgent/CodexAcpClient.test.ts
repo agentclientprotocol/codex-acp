@@ -940,7 +940,13 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         expect(codexAppServerClient.getThreadSettings("thread-id")).toBeUndefined();
     });
 
-    it('uses configured model provider when resuming sessions without an explicit provider', async () => {
+    it.each([
+        {configured: null, stored: "openai", override: undefined},
+        {configured: null, stored: "previous-gateway", override: "openai"},
+        {configured: null, stored: undefined, override: "openai"},
+        {configured: "openai", stored: "openai", override: "openai"},
+        {configured: "azure", stored: "openai", override: "azure"},
+    ])('resumes and loads a $stored thread with provider $configured and override $override', async ({configured, stored, override}) => {
         const mockFixture = createCodexMockTestFixture();
         const codexAcpClient = mockFixture.getCodexAcpClient();
         const codexAppServerClient = mockFixture.getCodexAppServerClient();
@@ -949,9 +955,13 @@ describe('ACP server test', { timeout: 40_000 }, () => {
         vi.spyOn(codexAppServerClient, "listSkills").mockResolvedValue({data: []});
         vi.spyOn(codexAppServerClient, "configRead").mockResolvedValue({
             config: {
-                model_provider: "azure",
+                model_provider: configured,
             },
         } as any);
+        const threadRead = vi.spyOn(codexAppServerClient, "threadRead").mockImplementation(async ({threadId}) => {
+            if (!stored) throw new Error("no rollout found for thread id");
+            return {thread: {id: threadId, modelProvider: stored}} as any;
+        });
         const threadResumeSpy = vi.spyOn(codexAppServerClient, "threadResume").mockResolvedValue({
             thread: {id: "thread-id"} as any,
             model: "gpt-5",
@@ -976,8 +986,8 @@ describe('ACP server test', { timeout: 40_000 }, () => {
             mcpServers: [],
         });
 
-        expect(threadResumeSpy.mock.calls[0]![0].modelProvider).toBe("azure");
-        expect(threadResumeSpy.mock.calls[1]![0].modelProvider).toBe("azure");
+        expect(threadResumeSpy.mock.calls.map(([params]) => params.modelProvider)).toEqual([override, override]);
+        if (configured) expect(threadRead).not.toHaveBeenCalled();
     });
 
     it('tracks configured model provider auth state for resumed and loaded sessions', async () => {

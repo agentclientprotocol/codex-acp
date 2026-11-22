@@ -61,7 +61,7 @@ function createFixture() {
     client.getAccount = vi.fn().mockResolvedValue({account: null, requiresOpenaiAuth: false});
     client.listSkills = vi.fn().mockResolvedValue({data: []});
     appServer.listModels = vi.fn().mockResolvedValue({data: [createTestModel()], nextCursor: null});
-    appServer.threadRead = vi.fn();
+    appServer.threadRead = vi.fn().mockResolvedValue({thread: createThread()});
     appServer.threadUnsubscribe = vi.fn().mockResolvedValue({});
     return {fixture, agent: fixture.getCodexAcpAgent(), appServer};
 }
@@ -86,7 +86,7 @@ describe("a thread that another Codex client has loaded", () => {
 
         await expect(load).rejects.toBeInstanceOf(acp.RequestError);
         await expect(load).rejects.toMatchObject(expectedError);
-        expect(appServer.threadRead).not.toHaveBeenCalled();
+        expect(vi.mocked(appServer.threadRead).mock.calls).toEqual([[{threadId, includeTurns: false}]]);
         expect(() => agent.getSessionState(threadId)).toThrow(`Session ${threadId} not found`);
     });
 
@@ -98,7 +98,7 @@ describe("a thread that another Codex client has loaded", () => {
 
         await expect(resume).rejects.toBeInstanceOf(acp.RequestError);
         await expect(resume).rejects.toMatchObject(expectedError);
-        expect(appServer.threadRead).not.toHaveBeenCalled();
+        expect(vi.mocked(appServer.threadRead).mock.calls).toEqual([[{threadId, includeTurns: false}]]);
         expect(() => agent.getSessionState(threadId)).toThrow(`Session ${threadId} not found`);
     });
 
