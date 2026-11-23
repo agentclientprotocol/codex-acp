@@ -25,14 +25,14 @@
   {
     "terminalId": "item-shell",
     "output": {
-      "data": "aGVsbG8K"
+      "data": "aGVsbG8NCndvcmxkDQo="
     },
     "exitStatus": {
       "exitCode": 0,
       "signal": null
     },
     "sessionUpdate": "terminal_update",
-    "decodedOutput": "hello\n"
+    "decodedOutput": "hello\r\nworld\r\n"
   },
   {
     "toolCallId": "item-shell",

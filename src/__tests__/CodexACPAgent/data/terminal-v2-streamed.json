@@ -24,21 +24,21 @@
   },
   {
     "terminalId": "item-shell",
-    "data": "UEFTUyBhLnRlc3QudHMK",
+    "data": "UEFTUyBhLnRlc3QudHMNCg==",
     "sessionUpdate": "terminal_output_chunk",
-    "decoded": "PASS a.test.ts\n"
+    "decoded": "PASS a.test.ts\r\n"
   },
   {
     "terminalId": "item-shell",
-    "data": "VGVzdHM6IDEgcGFzc2VkIOKckwo=",
+    "data": "VGVzdHM6IDEgcGFzc2VkIOKckw0K",
     "sessionUpdate": "terminal_output_chunk",
-    "decoded": "Tests: 1 passed ✓\n"
+    "decoded": "Tests: 1 passed ✓\r\n"
   },
   {
     "terminalId": "item-shell",
-    "data": "CnEK",
+    "data": "DQpxDQo=",
     "sessionUpdate": "terminal_output_chunk",
-    "decoded": "\nq\n"
+    "decoded": "\r\nq\r\n"
   },
   {
     "terminalId": "item-shell",
