@@ -6,7 +6,7 @@ import {isRecord} from "./permissions/json";
 import {validateInitialConfigOptions} from "./SessionConfigOptions";
 import type {CodexAcpServer} from "./CodexAcpServer";
 import {type AcpClientConnection, AcpV2Connection} from "./ACPSessionConnection";
-import type {McpOverAcpToHttp} from "./McpServerConfig";
+import {normalizeMcpServer, type McpOverAcpToHttp} from "./McpServerConfig";
 import packageJson from "../package.json";
 import {AcpResponseDelivery} from "./AcpResponseDelivery";
 import {isAbsoluteProtocolPath} from "./PathUtils";
@@ -240,11 +240,14 @@ function createRouter(
         .onRequest(SESSION_LIST_UNSUBSCRIBE_METHOD, sessionListSubscriptionParamsParser, (ctx) => getAgent().sessionIndex.unsubscribeList(ctx.params));
 
     let advertisedMcp: acpV2.McpCapabilities | null = null;
-    // Check the negotiated transports and v2 wire rules before setup can suspend child controls.
+    // Check transports and Codex constraints before setup can suspend child controls.
     const withSupportedMcpServers = <P extends Pick<acpV2.NewSessionRequest, "mcpServers">, R>(
         handle: acpV2.AgentRequestHandler<P, R>,
     ): acpV2.AgentRequestHandler<P, R> => ctx => {
         acpV2.assertSupportedMcpServers(ctx.params.mcpServers, advertisedMcp);
+        for (const server of ctx.params.mcpServers ?? []) {
+            if (server.type === "stdio") normalizeMcpServer(server);
+        }
         return handle(ctx);
     };
 
