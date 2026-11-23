@@ -120,7 +120,7 @@ describe("ACP v2 background work", () => {
 
     it.each([
         {kind: "output", text: "still running", method: "item/commandExecution/outputDelta"},
-        {kind: "input", text: "\ny\n", method: "item/commandExecution/terminalInteraction"},
+        {kind: "input", text: "\r\ny\r\n", method: "item/commandExecution/terminalInteraction"},
     ] as const)("routes $kind to a restored terminal without its start event", async ({kind, text, method}) => {
         h = await connectSession();
         h.setCodexResponse("thread/backgroundTerminals/list", async () => ({data: [terminal], nextCursor: null}));
