@@ -463,7 +463,7 @@ interface ActivePrompt {
     cancelSignal: Promise<null>;
     signal: AbortSignal;
     /**
-     * Aborted for outbound permission/elicitation requests only (plain `session/cancel`,
+     * Aborted for outbound interactions and external-turn waits (plain `session/cancel`,
      * `requestCancel`, `requestClose`). Kept separate from `signal`, which also drives pre-turn
      * prompt flow (`cancelBeforeTurnStarted`, local commands, native-subagent waits,
      * `interruptLateStartedTurn`) and must keep its current behavior on plain `session/cancel`.
@@ -4955,29 +4955,17 @@ export class CodexAcpServer {
         messageId: string,
         reservation: TurnStartReservation,
         canSteer: boolean,
-        signal?: AbortSignal,
+        signal: AbortSignal,
     ): Promise<boolean> {
-        const cancelled = new AbortController();
-        const unregister = this.registerQueuedV2PromptCanceller(request.sessionId, () => cancelled.abort());
-        const cancellation = signal ? AbortSignal.any([signal, cancelled.signal]) : cancelled.signal;
-        let onAbort: () => void = () => {};
-        const aborted = new Promise<void>(resolve => { onAbort = resolve; });
-        cancellation.addEventListener("abort", onAbort, {once: true});
-        try {
-            if (cancellation.aborted) throw RequestError.requestCancelled();
-            if (canSteer) {
-                const result = await this.executeOrQueueSteeringRequest({
-                    ...request, _meta: {...request._meta, steering: {idleBehavior: "promptRequired"}},
-                }, {messageId, signal: cancellation});
-                if (result.outcome === "injected") return true;
-            }
-            await Promise.race([reservation.wait, aborted]);
-            if (cancellation.aborted) throw RequestError.requestCancelled();
-            return false;
-        } finally {
-            unregister();
-            cancellation.removeEventListener("abort", onAbort);
+        throwIfRequestCancelled(signal);
+        if (canSteer) {
+            const result = await this.executeOrQueueSteeringRequest({
+                ...request, _meta: {...request._meta, steering: {idleBehavior: "promptRequired"}},
+            }, {messageId, signal});
+            if (result.outcome === "injected") return true;
         }
+        await withRequestCancellation(reservation.wait, signal);
+        return false;
     }
 
     /**
@@ -5568,6 +5556,7 @@ export class CodexAcpServer {
                     },
                     () => this.promptShouldStop(params.sessionId, activePrompt),
                     insertion?.clientUserMessageId,
+                    activePrompt.interactionSignal,
                 ));
             void sendPromptPromise.catch((err) => {
                 if (this.activePrompts.get(params.sessionId) !== activePrompt) {
@@ -5681,6 +5670,7 @@ export class CodexAcpServer {
                             },
                             () => this.promptShouldStop(params.sessionId, activePrompt),
                             implementationClientUserMessageId,
+                            activePrompt.interactionSignal,
                         ),
                     );
                     void implementationPromise.catch((err) => {

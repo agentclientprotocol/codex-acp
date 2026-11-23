@@ -1,6 +1,7 @@
 import {type MessageConnection, RequestType} from "vscode-jsonrpc/node";
 import {AppServerConnectionLostError, ConnectionLoss} from "./app-server-recovery/ConnectionLoss";
 import {explainCodexError} from "./CodexErrorExplanations";
+import {throwIfRequestCancelled, withRequestCancellation} from "./RequestCancellation";
 import {McpOauthCompletions} from "./mcp/McpOauthCompletions";
 import {McpStartupTracker} from "./mcp/McpStartupTracker";
 import type {
@@ -949,7 +950,8 @@ export class CodexAppServerClient {
     }
 
     /** Waits for an observed turn without replacing its owner's completion listener. */
-    async waitForRunningTurn(threadId: string, turnId: string): Promise<void> {
+    async waitForRunningTurn(threadId: string, turnId: string, signal?: AbortSignal): Promise<void> {
+        throwIfRequestCancelled(signal);
         if (this.runningTurnId(threadId) !== turnId) return;
         let release: () => void = () => {};
         const completed = new Promise<void>(resolve => {
@@ -957,7 +959,7 @@ export class CodexAppServerClient {
                 if (event.turn.id === turnId && event.turn.status !== "inProgress") resolve();
             });
         });
-        await this.waitWhileConnected("the end of the active turn", completed, release);
+        await this.waitWhileConnected("the end of the active turn", completed, release, signal);
     }
 
     async awaitCompactionCompleted(threadId: string): Promise<CompactionCompletedNotification> {
@@ -976,25 +978,23 @@ export class CodexAppServerClient {
      * A JSON-RPC response wait needs no such guard: vscode-jsonrpc rejects it on dispose. A notification wait does.
      * `release` removes the registration behind `wait`; it runs once the wait ends either way.
      */
-    waitWhileConnected<T>(what: string, wait: Promise<T>, release: () => void = () => {}): Promise<T> {
-        return new Promise<T>((resolve, reject) => {
-            let ended = false;
-            const end = () => {
-                if (ended) return false;
-                ended = true;
-                removeListener();
-                release();
-                return true;
-            };
-            let removeListener: () => void = () => {};
-            removeListener = this.connectionLoss.onLost(() => {
-                if (end()) reject(new AppServerConnectionLostError(what));
-            });
-            wait.then(
-                value => { if (end()) resolve(value); },
-                error => { if (end()) reject(error); },
-            );
+    async waitWhileConnected<T>(
+        what: string,
+        wait: Promise<T>,
+        release: () => void = () => {},
+        signal?: AbortSignal,
+    ): Promise<T> {
+        let removeListener: () => void = () => {};
+        const connected = new Promise<T>((resolve, reject) => {
+            removeListener = this.connectionLoss.onLost(() => reject(new AppServerConnectionLostError(what)));
+            void wait.then(resolve, reject);
         });
+        try {
+            return await withRequestCancellation(connected, signal);
+        } finally {
+            removeListener();
+            release();
+        }
     }
 
     resolveTurnInterrupted(threadId: string, turnId: string): void {

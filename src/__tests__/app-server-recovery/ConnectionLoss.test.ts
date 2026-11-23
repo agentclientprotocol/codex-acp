@@ -72,6 +72,37 @@ describe("ConnectionLoss", () => {
         expect(listeners.size).toBe(0);
     });
 
+    it.each(["completed", "cancelled", "disconnected"])("releases both listeners when a cancellable wait is %s", async outcome => {
+        const {connection} = fakeConnection();
+        const client = new CodexAppServerClient(connection);
+        const listeners = (client.connectionLoss as unknown as {listeners: Set<unknown>}).listeners;
+        const abort = new AbortController();
+        const added = vi.spyOn(abort.signal, "addEventListener");
+        const removed = vi.spyOn(abort.signal, "removeEventListener");
+        const release = vi.fn();
+        let resolve!: (value: number) => void;
+        const operation = new Promise<number>(done => { resolve = done; });
+        const wait = client.waitWhileConnected("an external turn", operation, release, abort.signal);
+
+        switch (outcome) {
+            case "completed":
+                resolve(1);
+                await expect(wait).resolves.toBe(1);
+                break;
+            case "cancelled":
+                abort.abort();
+                await expect(wait).rejects.toMatchObject({code: -32800});
+                break;
+            case "disconnected":
+                connection.dispose();
+                await expect(wait).rejects.toBeInstanceOf(AppServerConnectionLostError);
+                break;
+        }
+        expect(listeners.size).toBe(0);
+        expect(release).toHaveBeenCalledOnce();
+        expect(removed).toHaveBeenCalledWith("abort", added.mock.calls[0]![1]);
+    });
+
     it("ends a login wait when the connection is lost after the login request failed", async () => {
         const unhandled = vi.fn();
         process.on("unhandledRejection", unhandled);

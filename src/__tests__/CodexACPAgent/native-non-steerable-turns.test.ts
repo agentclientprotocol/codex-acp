@@ -35,6 +35,33 @@ describe.each([1, 2] as const)("native non-steerable turns over ACP v%s", versio
         await client.promptRunFinished();
     });
 
+    it.each(["review", "compact"])("cancels input waiting for an external %s turn without retrying", async kind => {
+        client = await connectSession(version);
+        client.emit(turnStarted("external-turn"));
+        await client.waitForNotifications();
+        client.setTurnStart(async () => {
+            if (client.appServer.runningTurnId(sessionId) === "external-turn") {
+                throw new ResponseError(-32600, `cannot steer a ${kind} turn`);
+            }
+            return {turn: createTurn("inProgress", "next-turn")};
+        });
+        const response = client.sendPrompt([{type: "text", text: "Do not submit this input"}])
+            .then(result => ({result}), error => ({error}));
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+        await settle();
+
+        await client.cancel();
+        if (version === 1) await expect(response).resolves.toMatchObject({result: {stopReason: "cancelled"}});
+        else await expect(response).resolves.toMatchObject({error: {code: -32800}});
+        await client.promptRunFinished();
+        expect(client.turnStartParams).toHaveLength(1);
+
+        client.emit(turnCompleted("external-turn"));
+        await client.waitForNotifications();
+        await settle();
+        expect(client.turnStartParams).toHaveLength(1);
+    });
+
     it("keeps an async answer until an adapter review turn finishes", async () => {
         let answer!: (response: {action: "accept"; content: Record<string, string>}) => void;
         client = await connectSession(version, {
