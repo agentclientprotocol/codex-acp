@@ -98,6 +98,7 @@ describeIntegration("integration: ACP v2 prompt retries", () => {
                 // Deleting the inactive session must also make its retained receipt unreachable.
                 await agent.request(methods.session.delete, {sessionId});
                 const missing = {code: -32002, data: {sessionId}};
+                await expect(agent.request(methods.session.options, {cwd, sessionId})).rejects.toMatchObject(missing);
                 await expect(agent.request(methods.session.resume, {cwd, sessionId})).rejects.toMatchObject(missing);
                 await expect(agent.request(methods.session.fork, {cwd, sessionId})).rejects.toMatchObject(missing);
                 await expect(agent.request(methods.session.setTitle, {sessionId, title: "Too late"})).rejects.toMatchObject(missing);

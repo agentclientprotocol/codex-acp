@@ -2,7 +2,7 @@ import {describe, expect, it, vi} from "vitest";
 import {connectSession, cwd, sessionId} from "./v2-prompt-harness";
 
 describe.each([1, 2] as const)("ACP v%s session paths", version => {
-    it.each(["session/new", "session/resume", "session/fork", "session/list", ...(version === 1 ? ["session/load"] : [])])(
+    it.each(["session/options", "session/new", "session/resume", "session/fork", "session/list", ...(version === 1 ? ["session/load"] : [])])(
         "rejects a relative cwd before dispatching %s", async method => {
             const h = await connectSession(version);
             try {
@@ -15,7 +15,7 @@ describe.each([1, 2] as const)("ACP v%s session paths", version => {
         },
     );
 
-    it.each(["session/new", "session/resume", "session/fork", ...(version === 1 ? ["session/load"] : [])])(
+    it.each(["session/options", "session/new", "session/resume", "session/fork", ...(version === 1 ? ["session/load"] : [])])(
         "rejects relative additional roots before dispatching %s", async method => {
             const h = await connectSession(version);
             try {

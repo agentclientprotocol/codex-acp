@@ -70,7 +70,9 @@ import type {ModeKind} from "./app-server/ModeKind";
 import {arePathBasenamesEqual, arePathsEqual, isAbsolutePathLike, isAbsoluteProtocolPath} from "./PathUtils";
 import {CodexSubagentSubscriptions} from "./subagents/CodexSubagentSubscriptions";
 import {forkSession as runForkSession} from "./SessionFork";
-import type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
+import type {SessionMetadata, SessionMetadataWithThread, SessionOptionMetadata} from "./SessionMetadata";
+import {StoredSessionSettings} from "./StoredSessionSettings";
+import {isArchivedRolloutPath} from "./SessionIndexMutations";
 import {runAccountLogin} from "./CodexAccountLogin";
 import {throwIfRequestCancelled, withRequestCancellation} from "./RequestCancellation";
 import {isKeyedPromptId} from "./AcpV2Prompt";
@@ -81,6 +83,8 @@ import {
     isThreadNotFoundError,
     isThreadNotLoadedError,
     isUnknownThreadError,
+    sessionArchivedRequestError,
+    sessionNotFoundRequestError,
     threadActiveWriterRequestError,
 } from "./CodexThreadErrors";
 import {airCustomInstructions} from "./AirExtension";
@@ -93,11 +97,14 @@ import {
     narrowToListedModels,
 } from "./GatewayModelDiscovery";
 import {findSupportedEffort} from "./ModelConfigOption";
-import {type ProviderStartupConfig, configOverride, expandConfigTables, NO_PROVIDER_STARTUP_CONFIG} from "./CodexConfigOverride";
+import {type ProviderStartupConfig, configOverride, expandConfigTables, NO_PROVIDER_STARTUP_CONFIG, workspaceOptionReader} from "./CodexConfigOverride";
+import {recordOrNull} from "./permissions/json";
 import {disableUnsupportedSkills, withoutUnsupportedSkills} from "./UnsupportedSkills";
 export type {SessionMetadata, SessionMetadataWithThread} from "./SessionMetadata";
 /** A null turn marks unavailable outcome metadata, not a failed turn. */
 export type RecordedSubagentEntry = {item: ThreadItem; completed: boolean; turnId?: string} | {turn: Turn | null};
+
+type LiveSessionOptions = Required<Pick<SessionOptionMetadata, "collaborationMode" | "currentServiceTier" | "activePermissionProfileId">>;
 
 /**
  * The slice of `thread/resume` the session layer consumes, plus whether Codex
@@ -108,12 +115,8 @@ type ResumedThread = {
     model: string | null;
     modelProvider: string;
     reasoningEffort: ReasoningEffort | null;
-    serviceTier: string | null;
-    activePermissionProfileId: string | null;
-    itemsBackwardsCursor: string | null;
-    materialized: boolean;
-    /** The mode that the resume response reports. Null when the thread has no rollout yet. */
-    collaborationMode: ModeKind | null;
+    /** Only thread/resume supplies settings and a cursor into durable history. */
+    rollout: {settings: LiveSessionOptions; itemsBackwardsCursor: string | null} | null;
 };
 
 /**
@@ -177,6 +180,7 @@ export class CodexAcpClient {
     private pendingAccountUpdated: Promise<AccountUpdatedNotification> | null = null;
     private readonly sessionNotificationQueues = new Map<string, Promise<void>>();
     private readonly subagents: CodexSubagentSubscriptions;
+    private readonly storedSessionSettings = new StoredSessionSettings();
     private skillExtraRoots: string[] = [];
     private configPath: string | null = null;
     private verifiedMcpBridge?: McpOverAcpToHttp;
@@ -671,11 +675,14 @@ export class CodexAcpClient {
                 model: response.model,
                 modelProvider: response.modelProvider,
                 reasoningEffort: response.reasoningEffort,
-                serviceTier: response.serviceTier,
-                activePermissionProfileId: response.activePermissionProfile?.id ?? null,
-                itemsBackwardsCursor: response.itemsBackwardsCursor ?? null,
-                materialized: true,
-                collaborationMode: response.collaborationMode?.mode ?? null,
+                rollout: {
+                    settings: {
+                        collaborationMode: response.collaborationMode?.mode ?? this.getCollaborationMode(response.thread.id),
+                        currentServiceTier: response.serviceTier ?? null,
+                        activePermissionProfileId: response.activePermissionProfile?.id ?? null,
+                    },
+                    itemsBackwardsCursor: response.itemsBackwardsCursor ?? null,
+                },
             };
         } catch (err) {
             if (isThreadActiveWriterError(err)) throw threadActiveWriterRequestError(params.threadId, err);
@@ -694,15 +701,7 @@ export class CodexAcpClient {
                 model: response.thread.model,
                 modelProvider: response.thread.modelProvider,
                 reasoningEffort: response.thread.reasoningEffort,
-                serviceTier: null,
-                // thread/read omits permissions; callers restore the config default before the first prompt.
-                activePermissionProfileId: null,
-                // An unmaterialized thread has no persisted history to hydrate:
-                // `thread/turns/list` rejects it outright ("not materialized
-                // yet"), and there is nothing to list either way.
-                itemsBackwardsCursor: null,
-                materialized: false,
-                collaborationMode: null,
+                rollout: null,
             };
         }
     }
@@ -711,6 +710,7 @@ export class CodexAcpClient {
         request: WithAcpMcpServers<acp.ResumeSessionRequest>,
         onSubscribed?: () => void,
         previousInstructions?: SessionInstructions,
+        live?: LiveSessionOptions,
     ): Promise<SessionMetadata> {
         const instructions = await this.resolveSessionInstructions(request, previousInstructions);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
@@ -733,16 +733,13 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
-            // Codex sends no thread/settings/updated on a resume. The response holds the mode.
-            collaborationMode: response.collaborationMode ?? this.getCollaborationMode(response.thread.id),
+            ...this.resumedSessionOptions(response, defaultPermissionProfileId, live),
             threadStatus: response.thread.status,
             sessionTitle: normalizeSessionTitle(listedSessionTitle(response.thread)),
             modelProvider: response.modelProvider,
-            currentServiceTier: response.serviceTier ?? null,
             additionalDirectories,
             skippedMcpServers,
             ...(instructions ? {instructions} : {}),
-            activePermissionProfileId: response.materialized ? response.activePermissionProfileId : defaultPermissionProfileId ?? null,
             ...permissionProfileMetadata,
         }
     }
@@ -774,6 +771,7 @@ export class CodexAcpClient {
         request: WithAcpMcpServers<acp.LoadSessionRequest>,
         onSubscribed?: () => void,
         previousInstructions?: SessionInstructions,
+        live?: LiveSessionOptions,
     ): Promise<SessionMetadataWithThread> {
         const instructions = await this.resolveSessionInstructions(request, previousInstructions);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
@@ -794,14 +792,14 @@ export class CodexAcpClient {
         // A null paginated cursor means there was no durable history at resume time.
         let thread: Thread = {...response.thread, turns: []};
         let history: AsyncIterable<ThreadItemEntry[]> = noItems();
-        if (response.materialized && response.thread.historyMode === "paginated") {
-            if (response.itemsBackwardsCursor !== null) {
+        if (response.rollout && response.thread.historyMode === "paginated") {
+            if (response.rollout.itemsBackwardsCursor !== null) {
                 history = this.codexClient.threadItemEntryPages(
                     response.thread.id,
-                    {lastItemCursor: response.itemsBackwardsCursor},
+                    {lastItemCursor: response.rollout.itemsBackwardsCursor},
                 );
             }
-        } else if (response.materialized) {
+        } else if (response.rollout) {
             // A legacy store reads the whole history in one request.
             const legacy = (await this.codexClient.threadReadWithHistory(response.thread.id)).thread;
             thread = {...legacy, turns: []};
@@ -818,17 +816,14 @@ export class CodexAcpClient {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
-            // Codex sends no thread/settings/updated on a resume. The response holds the mode.
-            collaborationMode: response.collaborationMode ?? this.getCollaborationMode(response.thread.id),
+            ...this.resumedSessionOptions(response, defaultPermissionProfileId, live),
             modelProvider: response.modelProvider,
-            currentServiceTier: response.serviceTier ?? null,
             thread,
             threadStatus: response.thread.status,
             history,
             additionalDirectories,
             skippedMcpServers,
             ...(instructions ? {instructions} : {}),
-            activePermissionProfileId: response.materialized ? response.activePermissionProfileId : defaultPermissionProfileId ?? null,
             ...permissionProfileMetadata,
         };
     }
@@ -904,6 +899,79 @@ export class CodexAcpClient {
     subagentThreadIds(rootSessionId: string): string[] { return this.subagents.childThreadIds(rootSessionId); }
 
     readSubagentThread(threadId: string): Promise<Thread | null> { return this.subagents.readChildThread(threadId); }
+
+    private liveThreadOptions(threadId: string, fallback?: LiveSessionOptions): LiveSessionOptions | undefined {
+        const settings = this.codexClient.getThreadSettings(threadId);
+        return settings ? {
+            collaborationMode: settings.collaborationMode.mode,
+            currentServiceTier: settings.serviceTier,
+            activePermissionProfileId: settings.activePermissionProfile?.id ?? null,
+        } : fallback;
+    }
+
+    private resumedSessionOptions(
+        response: ResumedThread,
+        defaultPermissionProfileId: string | null | undefined,
+        live?: LiveSessionOptions,
+    ): LiveSessionOptions {
+        return response.rollout?.settings ?? this.liveThreadOptions(response.thread.id, live) ?? {
+            collaborationMode: "default",
+            currentServiceTier: null,
+            activePermissionProfileId: defaultPermissionProfileId ?? null,
+        };
+    }
+
+    /** Reads the same workspace defaults and catalog as setup, without opening a thread. */
+    async readSessionOptions(
+        request: acp.SessionOptionsRequest,
+        live?: LiveSessionOptions,
+    ): Promise<SessionOptionMetadata> {
+        const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
+        let thread: Thread | null = null;
+        if (request.sessionId != null) {
+            thread = (await this.codexClient.threadRead({threadId: request.sessionId})).thread;
+            if (thread.id !== request.sessionId) throw sessionNotFoundRequestError(request.sessionId);
+            if (thread.path && isArchivedRolloutPath(thread.path, this.getHomePath())) {
+                throw sessionArchivedRequestError(thread.id);
+            }
+        }
+        const [{readOption, permissionProfileMetadata}, catalog] = await Promise.all([
+            this.readWorkspaceConfig(request.cwd, additionalDirectories),
+            this.fetchCodexModels(),
+        ]);
+        const configured = (key: string) => readOption(config =>
+            typeof config[key] === "string" ? config[key] : undefined) ?? null;
+        const fastMode = readOption(config => recordOrNull(config["features"])?.["fast_mode"]);
+        const models = this.filterAvailableModels(catalog);
+        // A subscribed or running thread keeps its model on resume. A cold resume uses workspace
+        // defaults because getResumeModelProvider always supplies an explicit provider override.
+        const running = live || thread?.status.type === "active" ? thread : null;
+        const model = running?.model ?? configured("model") ?? catalog.find(model => model.isDefault)?.id ?? null;
+        const effort = running ? running.reasoningEffort : configured("model_reasoning_effort");
+        const currentModelId = this.createModelId(models, model, effort).toString();
+        const {defaultPermissionProfileId, ...permissions} = permissionProfileMetadata;
+        const restored = running && this.liveThreadOptions(running.id, live);
+        const saved = thread && !restored ? await this.storedSessionSettings.read(thread) : null;
+        const savedProfile = saved?.permissionProfileId;
+        // Extra writable roots override unnamed permissions; named profiles are resolved by ID in the new workspace.
+        const useSavedProfile = savedProfile !== undefined && !("sandbox_mode" in this.config || "default_permissions" in this.config)
+            && (savedProfile === null
+                ? additionalDirectories.length === 0 && !Object.keys(this.config).some(key =>
+                    key === "sandbox_workspace_write" || key.startsWith("sandbox_workspace_write."))
+                : savedProfile.startsWith(":") || permissions.permissionProfiles.some(profile => profile.id === savedProfile && profile.allowed));
+        const tier = saved?.serviceTier !== undefined && !("service_tier" in this.config)
+            ? saved.serviceTier : configured("service_tier");
+        return {
+            models,
+            currentModelId,
+            ...permissions,
+            ...(restored ?? {
+                collaborationMode: saved?.collaborationMode ?? "default",
+                currentServiceTier: fastMode === false ? null : tier,
+                activePermissionProfileId: useSavedProfile ? savedProfile : defaultPermissionProfileId,
+            }),
+        };
+    }
 
     async newSession(request: WithAcpMcpServers<acp.NewSessionRequest>): Promise<SessionMetadata> {
         const instructions = await this.resolveSessionInstructions(request, undefined, true);
@@ -1212,16 +1280,7 @@ export class CodexAcpClient {
             }])),
         };
         const configWithWorkspaceRoots = mergeSandboxWorkspaceWriteRoots(mergedConfig, additionalDirectories);
-        const permissionProfiles = await this.fetchPermissionProfiles(projectPath);
-        const effectiveConfig = await this.codexClient.configRead({includeLayers: true, cwd: projectPath});
-        const defaultPermissionProfileId = effectiveConfig?.config?.["default_permissions"];
-        // Thread responses retain per-turn overrides; profile modes use the configured approval defaults.
-        const permissionProfileMetadata = {
-            permissionProfiles,
-            defaultPermissionProfileId: typeof defaultPermissionProfileId === "string" ? defaultPermissionProfileId : null,
-            ...(effectiveConfig?.config?.approval_policy != null && {approvalPolicy: effectiveConfig.config.approval_policy}),
-            ...(effectiveConfig?.config?.approvals_reviewer != null && {approvalsReviewer: effectiveConfig.config.approvals_reviewer}),
-        };
+        const {effectiveConfig, permissionProfileMetadata} = await this.readWorkspaceConfig(projectPath, additionalDirectories);
         if (mcpServers.length === 0) {
             return {config: configWithWorkspaceRoots, skippedMcpServers: [], ...permissionProfileMetadata};
         }
@@ -1278,6 +1337,26 @@ export class CodexAcpClient {
         });
         const configuredMcpServers = [localServers, effectiveMcpServers, ...layerMcpServers].filter(isJsonObject);
         return new Set(configuredMcpServers.flatMap(server => Object.keys(server)));
+    }
+
+    private async readWorkspaceConfig(projectPath: string, additionalDirectories: string[]) {
+        const permissionProfiles = await this.fetchPermissionProfiles(projectPath);
+        const effectiveConfig = await this.codexClient.configRead({includeLayers: true, cwd: projectPath});
+        const readOption = workspaceOptionReader(effectiveConfig, [projectPath, ...additionalDirectories], expandConfigTables(this.config, "features"));
+        // A layer's sandbox_mode selects legacy permissions and supersedes a lower layer's named profile.
+        const defaultPermissionProfileId = readOption(config => {
+            if (typeof config["default_permissions"] === "string") return config["default_permissions"];
+            if (typeof config["sandbox_mode"] === "string" && this.config["default_permissions"] == null) return null;
+            return undefined;
+        }) ?? null;
+        // Thread responses retain per-turn overrides; profile modes use the configured approval defaults.
+        const permissionProfileMetadata = {
+            permissionProfiles,
+            defaultPermissionProfileId,
+            ...(effectiveConfig?.config?.approval_policy != null && {approvalPolicy: effectiveConfig.config.approval_policy}),
+            ...(effectiveConfig?.config?.approvals_reviewer != null && {approvalsReviewer: effectiveConfig.config.approvals_reviewer}),
+        };
+        return {effectiveConfig, readOption, permissionProfileMetadata};
     }
 
     private async fetchPermissionProfiles(projectPath: string): Promise<PermissionProfileSummary[]> {
@@ -1635,6 +1714,10 @@ export class CodexAcpClient {
 
     /** The Codex models, narrowed to the ones that the `providers/set` gateway lists. */
     async fetchAvailableModels(): Promise<Model[]> {
+        return this.filterAvailableModels(await this.fetchCodexModels());
+    }
+
+    private async fetchCodexModels(): Promise<Model[]> {
         const models: Model[] = [];
         let cursor: string | null = null;
 
@@ -1644,6 +1727,10 @@ export class CodexAcpClient {
             cursor = response.nextCursor;
         } while (cursor);
 
+        return models;
+    }
+
+    private filterAvailableModels(models: Model[]): Model[] {
         const listed = this.getGatewayListedModels();
         return listed === null ? models : narrowToListedModels(models, listed);
     }

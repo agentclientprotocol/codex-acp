@@ -4,6 +4,7 @@ import {CodexEventHandler, type CompletedPlan, failureWasShownAsMessage, Session
 import {attachmentFileUri, desktopAttachmentHistory} from "./DesktopAttachmentHistory";
 import {CodexApprovalHandler} from "./permissions/CodexApprovalHandler";
 import {isRecord} from "./permissions/json";
+import {validateInitialConfigOptions} from "./SessionConfigOptions";
 import {PermissionLifecycleContext} from "./permissions/lifecycle";
 import {CodexElicitationHandler} from "./CodexElicitationHandler";
 import {renderFileCitations} from "./CodexFileCitations";
@@ -36,12 +37,14 @@ import {
     isThreadNotLoadedError,
     parseExpectedActiveTurnMismatch,
     sessionNotFoundRequestError,
+    storedSessionError,
 } from "./CodexThreadErrors";
 import {requiresLogout} from "./CodexErrorExplanations";
 import {type CodexConnection} from "./CodexJsonRpcConnection";
 import {AppServerRecovery, recoveryLimitsFromEnv} from "./app-server-recovery/AppServerRecovery";
 import {
     CODEX_PROCESS_EXITED_ERROR_CODE,
+    isAppServerUnavailableError,
     SessionReplacedError,
     ThreadRefusedError,
     UnpersistedSessionLostError,
@@ -58,7 +61,7 @@ import {
 } from "./ACPSessionConnection";
 import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
 import {toV1ClientCapabilitiesView} from "./AcpV2ClientCapabilities";
-import {toV1SetSessionConfigOptionRequest, toV2ConfigOptions} from "./AcpV2ConfigOptions";
+import {toV1InitialConfigOptions, toV1SetSessionConfigOptionRequest, toV2ConfigOptions} from "./AcpV2ConfigOptions";
 import type {ReplayedEntities} from "./AcpV2Replay";
 import {toV2AvailableCommands} from "./AcpV2SessionUpdate";
 import {changesSystemPrompt, clientSystemPromptText, toV1SystemPrompt, type SessionInstructions} from "./ClientSystemPrompt";
@@ -230,6 +233,7 @@ import {
     JETBRAINS_META_KEY,
     publishAirSessionMetadata,
 } from "./AirExtension";
+import type {SessionOptionMetadata} from "./SessionMetadata";
 import {SessionIndexService} from "./SessionIndexService";
 import type {SessionIndexTitleState} from "./SessionIndexTitles";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
@@ -249,9 +253,9 @@ import {
 } from "./AgentFileChangeReport";
 
 
-export interface SessionState extends SessionIndexTitleState {
-    sessionId: string,
-    instructions?: SessionInstructions;
+interface SessionOptionState {
+    /** Client selections that a Codex thread read or resume may not yet reflect. */
+    localConfigOverrides?: Set<string>;
     currentModelId: string,
     availableModels: Array<Model>,
     supportedReasoningEfforts: Array<ReasoningEffortOption>,
@@ -259,6 +263,14 @@ export interface SessionState extends SessionIndexTitleState {
     agentMode: AgentMode,
     availableAgentModes: AgentMode[],
     collaborationMode: ModeKind,
+    fastModeEnabled: boolean;
+    currentModelSupportsFast: boolean;
+    clientCapabilities: ClientCapabilities;
+}
+
+export interface SessionState extends SessionIndexTitleState, SessionOptionState {
+    sessionId: string,
+    instructions?: SessionInstructions;
     /** The active turn: its completion, errors and stop reason are matched against this id. */
     currentTurnId: string | null;
     /**
@@ -289,11 +301,7 @@ export interface SessionState extends SessionIndexTitleState {
     cwd: string;
     additionalDirectories: string[];
     mcpServers?: Array<AcpMcpServer>;
-    fastModeEnabled: boolean;
-    currentModelSupportsFast: boolean;
     sessionMcpServers?: Array<string>;
-    /** The capability choices of the client for tool call and plan reports. */
-    clientCapabilities: ClientCapabilities;
     currentGoal?: ThreadGoalSnapshot | null;
     goalRevision: number;
     sessionTitle: string | null;
@@ -863,6 +871,7 @@ export class CodexAcpServer {
             close: { },
             delete: { },
             fork: { },
+            ...(this.isSessionConfigEnabled() && {options: {}}),
             title: {},
             additionalDirectories: {},
             // Standard subagent sessions have no Agent-side capability. Only AIR's contract negotiates both sides.
@@ -952,6 +961,7 @@ export class CodexAcpServer {
                     delete: {},
                     additionalDirectories: {},
                     fork: {},
+                    ...(this.isSessionConfigEnabled() && {options: {}}),
                     title: {},
                     systemPrompt: {},
                 },
@@ -1324,6 +1334,7 @@ export class CodexAcpServer {
             | WithAcpMcpServers<acp.ForkSessionRequest>,
         operation: "new" | "resume" | "fork" = "sessionId" in request ? "resume" : "new",
     ): Promise<[SessionId, LegacySessionModelState, SessionModeState]> {
+        validateInitialConfigOptions(request.configOptions);
         clientSystemPromptText(request.systemPrompt);
         const existingSessionRequest = request as WithAcpMcpServers<acp.ResumeSessionRequest> | WithAcpMcpServers<acp.ForkSessionRequest>;
         const previousInstructions = "sessionId" in request ? this.sessions.get(request.sessionId)?.instructions : undefined;
@@ -1359,7 +1370,7 @@ export class CodexAcpServer {
                     mcpServerStartupVersion = readMcpServerStartupVersion();
                     return this.codexAcpClient.resumeSession(resumeRequest, () => {
                         resumeSubscribed = true;
-                    }, previousInstructions);
+                    }, previousInstructions, this.liveSessionOptions(this.sessions.get(resumeRequest.sessionId)));
                 });
             } catch (err) {
                 settleTrackerReady?.(!resumeSubscribed && this.instructionUpdates.has(resumeRequest.sessionId)
@@ -1394,7 +1405,7 @@ export class CodexAcpServer {
             });
         }
 
-        const {sessionId, currentModelId, models} = sessionMetadata;
+        const {sessionId} = sessionMetadata;
         const authProvider = sessionMetadata.modelProvider ?? this.codexAcpClient.getModelProvider();
         let authState: ActiveAuthState;
         try {
@@ -1416,26 +1427,10 @@ export class CodexAcpServer {
             await this.closeStaleSessionOpen(sessionId, sessionGeneration);
         }
         const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, operation === "resume");
-        const currentModel = this.findCurrentModel(models, currentModelId);
-        const currentModelSupportsFast = modelSupportsFast(currentModel);
         if (this.setupResponseOrdering && operation !== "resume") this.clientDelivery.beginSessionSetup(sessionId);
-        const availableAgentModes = AgentMode.all(
-            sessionMetadata.permissionProfiles,
-            sessionMetadata.approvalPolicy,
-            sessionMetadata.approvalsReviewer,
-        );
         const sessionState: SessionState = {
             sessionId: sessionId,
-            currentModelId: currentModelId,
-            availableModels: models,
-            supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
-            supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
-            agentMode: AgentMode.getInitialAgentMode(
-                availableAgentModes,
-                sessionMetadata.activePermissionProfileId,
-            ),
-            availableAgentModes,
-            collaborationMode: sessionMetadata.collaborationMode,
+            ...this.createSessionOptionState(sessionMetadata, operation === "resume" ? this.sessions.get(sessionId) : undefined),
             currentTurnId: null,
             interruptTurnId: null,
             codexReportedRunningTurnId: null,
@@ -1452,10 +1447,7 @@ export class CodexAcpServer {
             cwd: request.cwd,
             additionalDirectories: sessionMetadata.additionalDirectories,
             mcpServers: requestedMcpServers,
-            fastModeEnabled: serviceTierEnablesFast(sessionMetadata.currentServiceTier),
-            currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
-            clientCapabilities: this.capabilities,
             goalRevision: 0,
             sessionTitle: sessionMetadata.sessionTitle ?? null,
             sessionTitleSource: operation === "resume" ? "unknown" : "unset",
@@ -1481,6 +1473,8 @@ export class CodexAcpServer {
             this.startCodexTurnTracker(sessionId, Promise.resolve(sessionState));
         }
         resumeSubscribed = false;
+
+        if (request.configOptions?.length) await this.applyInitialConfigOptions(sessionState, request.configOptions);
 
         const canPublishSessionUpdates = operation !== "fork";
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
@@ -1512,7 +1506,7 @@ export class CodexAcpServer {
             this.publishCurrentGoalAsync(sessionState, sessionGeneration);
             this.publishAsyncTasksAsync(sessionState, sessionGeneration);
         }
-        const sessionModelState: LegacySessionModelState = this.createModelState(models, currentModelId);
+        const sessionModelState = this.createModelState(sessionState.availableModels, sessionState.currentModelId);
         const sessionModeState: SessionModeState =
             sessionState.agentMode.toSessionModeState(
                 sessionState.clientCapabilities.airClient,
@@ -2051,9 +2045,8 @@ export class CodexAcpServer {
     }
 
     async resumeSessionV2(params: acpV2.ResumeSessionRequest, signal?: AbortSignal): Promise<acpV2.ResumeSessionResponse> {
-        // session.options is not implemented, so initial config values are not applied.
-        const {replayFrom, systemPrompt, configOptions: _configOptions, ...rest} = params;
-        const request = {...rest, systemPrompt: toV1SystemPrompt(systemPrompt)};
+        const {replayFrom, systemPrompt, configOptions, ...rest} = params;
+        const request = {...rest, systemPrompt: toV1SystemPrompt(systemPrompt), ...toV1InitialConfigOptions(configOptions)};
         if (replayFrom != null && replayFrom.type !== "start") {
             throw RequestError.invalidParams(undefined, `Unsupported replayFrom type: ${replayFrom.type}`);
         }
@@ -2144,9 +2137,8 @@ export class CodexAcpServer {
     }
 
     async forkSessionV2(params: acpV2.ForkSessionRequest): Promise<acpV2.ForkSessionResponse> {
-        // session.options is not implemented, so initial config values are not applied.
-        const {systemPrompt, configOptions: _configOptions, ...rest} = params;
-        const request = {...rest, systemPrompt: toV1SystemPrompt(systemPrompt)};
+        const {systemPrompt, configOptions, ...rest} = params;
+        const request = {...rest, systemPrompt: toV1SystemPrompt(systemPrompt), ...toV1InitialConfigOptions(configOptions)};
         const {sessionId} = await this.forkSession(request);
         return {
             sessionId,
@@ -2180,6 +2172,10 @@ export class CodexAcpServer {
     }
 
     async closeSession(params: acp.CloseSessionRequest): Promise<acp.CloseSessionResponse> {
+        return this.closeSessionOnce(params);
+    }
+
+    private async closeSessionOnce(params: acp.CloseSessionRequest, disconnected?: CodexAcpClient): Promise<acp.CloseSessionResponse> {
         logger.log("Closing session...", {sessionId: params.sessionId});
         if (!this.hasLocalSession(params.sessionId)) {
             this.finishSessionDelivery(params.sessionId, []);
@@ -2213,7 +2209,9 @@ export class CodexAcpServer {
                 await activePrompt.completion;
             }
 
-            if (this.recovery === null || this.recovery.isReady() && (!sessionState || this.recovery.sessionIsLive(sessionState))) {
+            if (disconnected) {
+                disconnected.discardSessionSubscription(params.sessionId);
+            } else if (this.recovery === null || this.recovery.isReady() && (!sessionState || this.recovery.sessionIsLive(sessionState))) {
                 await this.runWithProcessCheck(() => this.codexAcpClient.closeSession(params.sessionId));
             } else {
                 // The thread is not loaded in a running app-server: nothing to close there, and no restart for it.
@@ -2297,6 +2295,42 @@ export class CodexAcpServer {
         return this.sessionOpenGenerations.get(sessionId) === this.getSessionGeneration(sessionId);
     }
 
+    private liveSessionOptions(previous: SessionState | undefined) {
+        return previous && (this.recovery === null || this.recovery.sessionIsLive(previous)) ? {
+            collaborationMode: previous.collaborationMode,
+            currentServiceTier: previous.fastModeEnabled ? "fast" : null,
+            activePermissionProfileId: previous.agentMode.permissionProfileId,
+        } : undefined;
+    }
+
+    async sessionOptions(params: acp.SessionOptionsRequest): Promise<acp.SessionOptionsResponse> {
+        if (this.providerUpdate !== null) await this.waitForProviderUpdate();
+        const appServer = this.ensureAppServer();
+        if (appServer) await appServer;
+        const previous = params.sessionId == null ? undefined : this.sessions.get(params.sessionId);
+        const live = this.liveSessionOptions(previous);
+        let metadata: SessionOptionMetadata;
+        try {
+            metadata = await this.runWithProcessCheck(() => this.codexAcpClient.readSessionOptions(params, live));
+        } catch (error) {
+            if (params.sessionId != null) throw storedSessionError(params.sessionId, error, this.sessionIndex.enabled);
+            throw error;
+        }
+        const state = this.createSessionOptionState(metadata, previous);
+        return {
+            modes: state.agentMode.toSessionModeState(state.clientCapabilities.airClient, state.availableAgentModes),
+            ...this.createSessionConfigOptionsResponse(state),
+        };
+    }
+
+    async sessionOptionsV2(params: acpV2.SessionOptionsRequest): Promise<acpV2.SessionOptionsResponse> {
+        const {configOptions} = await this.sessionOptions(params);
+        return {
+            ...(configOptions && {configOptions: toV2ConfigOptions(configOptions)}),
+            availableCommands: toV2AvailableCommands(this.availableCommands.getBuiltinCommands(this.capabilities.airClient)),
+        };
+    }
+
     async newSession(
         params: WithAcpMcpServers<acp.NewSessionRequest>,
     ): Promise<LegacyNewSessionResponse> {
@@ -2323,9 +2357,8 @@ export class CodexAcpServer {
     }
 
     async newSessionV2(params: acpV2.NewSessionRequest): Promise<acpV2.NewSessionResponse> {
-        // session.options is not implemented, so initial config values are not applied.
-        const {systemPrompt, configOptions: _configOptions, ...rest} = params;
-        const request = {...rest, systemPrompt: toV1SystemPrompt(systemPrompt)};
+        const {systemPrompt, configOptions, ...rest} = params;
+        const request = {...rest, systemPrompt: toV1SystemPrompt(systemPrompt), ...toV1InitialConfigOptions(configOptions)};
         const {sessionId} = await this.newSession(request);
         return {
             sessionId,
@@ -3016,27 +3049,66 @@ export class CodexAcpServer {
     }
 
     private async applySessionConfigOption(sessionState: SessionState, params: acp.SetSessionConfigOptionRequest): Promise<void> {
-        await this.updateSessionConfig(sessionState, async () => {
-            switch (params.configId) {
-                case FAST_MODE_CONFIG_ID:
-                    this.applyFastModeChange(sessionState, params);
-                    break;
-                case MODE_CONFIG_ID:
-                    this.applyModeChange(sessionState, this.stringConfigValue(params));
-                    break;
-                case COLLABORATION_MODE_CONFIG_ID:
-                    await this.applyCollaborationModeChange(sessionState, this.stringConfigValue(params));
-                    break;
-                case MODEL_CONFIG_ID:
-                    this.applyModelChange(sessionState, this.stringConfigValue(params));
-                    break;
-                case REASONING_EFFORT_CONFIG_ID:
-                    this.applyReasoningEffortChange(sessionState, this.stringConfigValue(params));
-                    break;
-                default:
-                    throw RequestError.invalidParams();
+        await this.updateSessionConfig(sessionState, () => this.changeConfigOption(sessionState, params));
+    }
+
+    private async applyInitialConfigOptions(
+        state: SessionState,
+        entries: acp.InitialSessionConfigOption[],
+        settleTrackerReady?: (state: null) => void,
+    ): Promise<void> {
+        if (!this.isSessionConfigEnabled()) return;
+        const client = this.codexAcpClient;
+        let options = this.createSessionConfigOptions(state);
+        for (const entry of entries) {
+            const option = options.find(option => option.id === entry.configId);
+            if (!option || typeof option.currentValue !== typeof entry.value) continue;
+            try {
+                await this.changeConfigOption(state, entry);
+            } catch (error) {
+                if (isAppServerUnavailableError(error)) {
+                    settleTrackerReady?.(null);
+                    if (this.sessions.get(state.sessionId) === state) {
+                        await this.closeSessionOnce({sessionId: state.sessionId}, client).catch(closeError => {
+                            logger.error(`Failed to close session ${state.sessionId} after its app-server exited during setup`, closeError);
+                        });
+                    }
+                    throw error;
+                }
+                // A stale choice or a runtime refusal leaves the resolved value in place.
+                logger.log("Ignoring unavailable initial config value", {configId: entry.configId, error: String(error)});
+                continue;
             }
-        });
+            // An applied entry can change the choices and even remove an option.
+            options = this.createSessionConfigOptions(state);
+        }
+    }
+
+    private changeConfigOption(sessionState: SessionState, params: acp.InitialSessionConfigOption): void | Promise<void> {
+        if (params.configId === COLLABORATION_MODE_CONFIG_ID) {
+            return this.applyCollaborationModeChange(sessionState, this.stringConfigValue(params));
+        }
+        this.changeLocalConfigOption(sessionState, params);
+    }
+
+    private changeLocalConfigOption(state: SessionOptionState, params: acp.InitialSessionConfigOption, preferredEffort?: string): void {
+        switch (params.configId) {
+            case FAST_MODE_CONFIG_ID:
+                this.applyFastModeChange(state, params);
+                break;
+            case MODE_CONFIG_ID:
+                this.applyModeChange(state, this.stringConfigValue(params));
+                break;
+            case MODEL_CONFIG_ID:
+                this.applyModelChange(state, this.stringConfigValue(params), preferredEffort);
+                break;
+            case REASONING_EFFORT_CONFIG_ID:
+                this.applyReasoningEffortChange(state, this.stringConfigValue(params));
+                break;
+            default:
+                throw RequestError.invalidParams();
+        }
+        (state.localConfigOverrides ??= new Set()).add(params.configId);
     }
 
     private async updateSessionConfig(sessionState: SessionState, change: () => void | Promise<void>): Promise<void> {
@@ -3052,7 +3124,7 @@ export class CodexAcpServer {
         }
     }
 
-    private applyFastModeChange(sessionState: SessionState, params: acp.SetSessionConfigOptionRequest): void {
+    private applyFastModeChange(sessionState: SessionOptionState, params: acp.InitialSessionConfigOption): void {
         const value = params.value;
         if (typeof value === "boolean") {
             sessionState.fastModeEnabled = value;
@@ -3064,14 +3136,14 @@ export class CodexAcpServer {
         sessionState.fastModeEnabled = value === FAST_MODE_ON;
     }
 
-    private stringConfigValue(params: acp.SetSessionConfigOptionRequest): string {
+    private stringConfigValue(params: acp.InitialSessionConfigOption): string {
         if (typeof params.value !== "string") {
             throw RequestError.invalidParams();
         }
         return params.value;
     }
 
-    private applyModeChange(sessionState: SessionState, value: string): void {
+    private applyModeChange(sessionState: SessionOptionState, value: string): void {
         const newMode = AgentMode.find(value, sessionState.availableAgentModes);
         if (!newMode) {
             throw RequestError.invalidParams();
@@ -3093,7 +3165,7 @@ export class CodexAcpServer {
         sessionState.collaborationMode = mode;
     }
 
-    private applyModelChange(sessionState: SessionState, value: string): void {
+    private applyModelChange(sessionState: SessionOptionState, value: string, preferredEffort?: string): void {
         const model = sessionState.availableModels.find(m => m.id === value);
         if (!model) {
             const currentModel = ModelId.fromString(sessionState.currentModelId).model;
@@ -3102,13 +3174,13 @@ export class CodexAcpServer {
             }
             throw RequestError.invalidParams();
         }
-        const currentEffort = ModelId.fromString(sessionState.currentModelId).effort;
+        const currentEffort = preferredEffort ?? ModelId.fromString(sessionState.currentModelId).effort;
         const effort = findSupportedEffort(model.supportedReasoningEfforts, currentEffort)
             ?? model.defaultReasoningEffort;
         this.applyModelAndEffort(sessionState, model, effort);
     }
 
-    private applyReasoningEffortChange(sessionState: SessionState, value: string): void {
+    private applyReasoningEffortChange(sessionState: SessionOptionState, value: string): void {
         const effort = findSupportedEffort(sessionState.supportedReasoningEfforts, value);
         if (!effort) {
             throw RequestError.invalidParams();
@@ -3133,7 +3205,7 @@ export class CodexAcpServer {
         });
     }
 
-    private applyModelAndEffort(sessionState: SessionState, model: Model, effort: ReasoningEffort): void {
+    private applyModelAndEffort(sessionState: SessionOptionState, model: Model, effort: ReasoningEffort): void {
         sessionState.currentModelId = ModelId.fromComponents(model, effort).toString();
         sessionState.supportedReasoningEfforts = model.supportedReasoningEfforts;
         sessionState.supportedInputModalities = model.inputModalities;
@@ -3170,6 +3242,7 @@ export class CodexAcpServer {
         await this.updateSessionConfig(sessionState, () => {
             sessionState.availableModels = models;
             this.applyModelAndEffort(sessionState, model, reasoningEffort);
+            (sessionState.localConfigOverrides ??= new Set()).add(MODEL_CONFIG_ID).add(REASONING_EFFORT_CONFIG_ID);
         });
 
         return {};
@@ -3478,7 +3551,44 @@ export class CodexAcpServer {
         };
     }
 
-    private createSessionConfigOptions(sessionState: SessionState): Array<acp.SessionConfigOption> {
+    private createSessionOptionState(metadata: SessionOptionMetadata, previous?: SessionState): SessionOptionState {
+        const model = this.findCurrentModel(metadata.models, metadata.currentModelId);
+        const availableAgentModes = AgentMode.all(metadata.permissionProfiles, metadata.approvalPolicy, metadata.approvalsReviewer);
+        const state: SessionOptionState = {
+            currentModelId: metadata.currentModelId,
+            availableModels: metadata.models,
+            supportedReasoningEfforts: model?.supportedReasoningEfforts ?? [],
+            supportedInputModalities: model?.inputModalities ?? ["text", "image"],
+            agentMode: AgentMode.getInitialAgentMode(availableAgentModes, metadata.activePermissionProfileId),
+            availableAgentModes,
+            collaborationMode: metadata.collaborationMode,
+            fastModeEnabled: serviceTierEnablesFast(metadata.currentServiceTier),
+            currentModelSupportsFast: modelSupportsFast(model),
+            clientCapabilities: this.capabilities,
+        };
+        if (previous?.localConfigOverrides) {
+            const {model, effort} = ModelId.fromString(previous.currentModelId);
+            // Local selections survive while a model temporarily hides their picker.
+            const selections: acp.InitialSessionConfigOption[] = [
+                {configId: MODEL_CONFIG_ID, value: model},
+                {configId: REASONING_EFFORT_CONFIG_ID, value: effort},
+                {configId: FAST_MODE_CONFIG_ID, type: "boolean", value: previous.fastModeEnabled},
+                {configId: MODE_CONFIG_ID, value: previous.agentMode.id},
+            ];
+            for (const entry of selections) {
+                if (!previous.localConfigOverrides.has(entry.configId)) continue;
+                try {
+                    this.changeLocalConfigOption(state, entry, effort);
+                } catch (error) {
+                    // The new workspace or model catalog may no longer offer this choice.
+                    if (!(error instanceof RequestError && error.code === -32602)) throw error;
+                }
+            }
+        }
+        return state;
+    }
+
+    private createSessionConfigOptions(sessionState: SessionOptionState): Array<acp.SessionConfigOption> {
         const currentModelId = ModelId.fromString(sessionState.currentModelId);
         const useRecommendedValue = clientSupportsAirCapability(
             this.clientCapabilities,
@@ -3523,7 +3633,7 @@ export class CodexAcpServer {
         return configOptions;
     }
 
-    private createSessionConfigOptionsResponse(sessionState: SessionState): {
+    private createSessionConfigOptionsResponse(sessionState: SessionOptionState): {
         configOptions?: Array<acp.SessionConfigOption>;
     } {
         if (!this.isSessionConfigEnabled()) {
@@ -3696,6 +3806,7 @@ export class CodexAcpServer {
         // live goal-turn frame Codex fires right after resume/load never races ahead of replay.
         settleTrackerReady: (state: SessionState | null) => void;
     }> {
+        validateInitialConfigOptions(request.configOptions);
         clientSystemPromptText(request.systemPrompt);
         const previousInstructions = this.sessions.get(request.sessionId)?.instructions;
         const requestedSessionGeneration = await this.beginSessionOpen(request.sessionId);
@@ -3735,7 +3846,7 @@ export class CodexAcpServer {
                     mcpServerStartupVersion = readMcpServerStartupVersion();
                     return this.codexAcpClient.loadSession(request, () => {
                         subscribed = true;
-                    }, previousInstructions);
+                    }, previousInstructions, this.liveSessionOptions(this.sessions.get(request.sessionId)));
                 });
             } catch (err) {
                 // An auth error that is known within the grace time comes first, as it did when the check ran
@@ -3756,7 +3867,7 @@ export class CodexAcpServer {
             throw err;
         }
 
-        const {sessionId, currentModelId, models, thread} = sessionMetadata;
+        const {sessionId, thread} = sessionMetadata;
         const authProvider = sessionMetadata.modelProvider ?? this.codexAcpClient.getModelProvider();
         let authState: ActiveAuthState;
         try {
@@ -3774,25 +3885,9 @@ export class CodexAcpServer {
             await this.closeStaleSessionOpen(sessionId, requestedSessionGeneration);
         }
         const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, true);
-        const currentModel = this.findCurrentModel(models, currentModelId);
-        const currentModelSupportsFast = modelSupportsFast(currentModel);
-        const availableAgentModes = AgentMode.all(
-            sessionMetadata.permissionProfiles,
-            sessionMetadata.approvalPolicy,
-            sessionMetadata.approvalsReviewer,
-        );
         const sessionState: SessionState = {
             sessionId: sessionId,
-            currentModelId: currentModelId,
-            availableModels: models,
-            supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
-            supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
-            agentMode: AgentMode.getInitialAgentMode(
-                availableAgentModes,
-                sessionMetadata.activePermissionProfileId,
-            ),
-            availableAgentModes,
-            collaborationMode: sessionMetadata.collaborationMode,
+            ...this.createSessionOptionState(sessionMetadata, this.sessions.get(sessionId)),
             currentTurnId: null,
             interruptTurnId: null,
             codexReportedRunningTurnId: null,
@@ -3809,10 +3904,7 @@ export class CodexAcpServer {
             cwd: request.cwd,
             additionalDirectories: sessionMetadata.additionalDirectories,
             mcpServers: requestedMcpServers,
-            fastModeEnabled: serviceTierEnablesFast(sessionMetadata.currentServiceTier),
-            currentModelSupportsFast: currentModelSupportsFast,
             sessionMcpServers: sessionMcpServers,
-            clientCapabilities: this.capabilities,
             goalRevision: 0,
             sessionTitle: null,
             sessionTitleSource: "unset",
@@ -3837,6 +3929,8 @@ export class CodexAcpServer {
         }
         subscribed = false;
 
+        if (request.configOptions?.length) await this.applyInitialConfigOptions(sessionState, request.configOptions, settleTrackerReady);
+
         if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
             this.mcpSessionStartup.begin(sessionId, requestedMcpServers, mcpServerStartupVersion, {
                 publish: true,
@@ -3851,7 +3945,7 @@ export class CodexAcpServer {
             await this.publishAvailableCommands(sessionState, requestedSessionGeneration);
         }
         await this.publishCurrentGoalBestEffort(sessionState, requestedSessionGeneration, true);
-        const sessionModelState: LegacySessionModelState = this.createModelState(models, currentModelId);
+        const sessionModelState = this.createModelState(sessionState.availableModels, sessionState.currentModelId);
         const sessionModeState: SessionModeState =
             sessionState.agentMode.toSessionModeState(
                 sessionState.clientCapabilities.airClient,

@@ -33,7 +33,7 @@ it("sends method- and direction-valid v2 frames through setup, local work, repla
 });
 
 describe.each([1, 2] as const)("ACP v%s SDK upgrade capabilities", version => {
-    it("advertises title and auth status support without claiming other newly exposed SDK methods", async () => {
+    it("advertises title, options and auth status support without claiming other newly exposed SDK methods", async () => {
         const h = await connectSession(version);
         try {
             const initialize = h.wireMessages.find(frame =>
@@ -44,7 +44,7 @@ describe.each([1, 2] as const)("ACP v%s SDK upgrade capabilities", version => {
             expect(session.title).toEqual({});
             expect(session.archive).toBeUndefined();
             expect(session.status).toBeUndefined();
-            expect(session.options).toBeUndefined();
+            expect(session.options).toEqual({});
             expect(session.prompt?.skill).toBeUndefined();
             expect(capabilities.auth.status).toEqual({});
             for (const method of ["session/status", "session/archive", "session/unarchive"]) {

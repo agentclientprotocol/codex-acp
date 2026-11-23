@@ -21,6 +21,7 @@ export interface TestSkill {
 export interface SpawnedAgentFixture {
     readonly connection: acp.ClientContext;
     readonly workspaceDir: string;
+    readonly codexHome: string;
     createSession(mcpServers?: acp.McpServer[]): Promise<LegacyNewSessionResponse>;
     restart(): Promise<SpawnedAgentFixture>;
     writeSkill(skill: TestSkill, rootDir?: string): void;
@@ -205,6 +206,10 @@ class SpawnedAgentFixtureImpl implements SpawnedAgentFixture {
 
     get workspaceDir(): string {
         return this.paths.workspaceDir;
+    }
+
+    get codexHome(): string {
+        return this.paths.codexHome;
     }
 
     async createSession(mcpServers: acp.McpServer[] = []): Promise<LegacyNewSessionResponse> {

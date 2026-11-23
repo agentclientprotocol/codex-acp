@@ -113,6 +113,7 @@ async function connectV2Client(options?: {
     air?: boolean;
     thread?: Partial<Thread>;
     beforeThreadRead?: () => Promise<void>;
+    beforeSettingsUpdate?: () => Promise<void>;
     permissionProfiles?: PermissionProfileSummary[];
     activePermissionProfileId?: string;
     defaultPermissionProfileId?: string;
@@ -131,6 +132,7 @@ async function connectV2Client(options?: {
             return options.listSkills(params as SkillsListParams);
         }
         if (method === "thread/read") await options?.beforeThreadRead?.();
+        if (method === "thread/settings/update") await options?.beforeSettingsUpdate?.();
         if (method === "permissionProfile/list") {
             return {data: options?.permissionProfiles ?? [], nextCursor: null};
         }
@@ -279,8 +281,9 @@ describe('Session lifecycle over ACP v2', () => {
     });
 
     it.each([null, {type: "start"}] as const)(
-        'preserves the default profile on an unprompted v2 resume with replayFrom=%s', async replayFrom => {
+        'preserves the profile and speed on an unprompted v2 resume with replayFrom=%s', async replayFrom => {
             const {connection} = await connectV2Client({
+                serviceTier: "priority",
                 permissionProfiles: [{id: "dev", description: null, allowed: true}],
                 activePermissionProfileId: "dev",
                 defaultPermissionProfileId: "dev",
@@ -289,8 +292,11 @@ describe('Session lifecycle over ACP v2', () => {
             closeClient = () => connection.close();
             await connection.agent.request(acpV2.methods.agent.session.new, {cwd});
 
+            const preview = await connection.agent.request(acpV2.methods.agent.session.options, {sessionId, cwd});
             const response = await connection.agent.request(acpV2.methods.agent.session.resume, {sessionId, cwd, replayFrom});
 
+            expect(response.configOptions).toEqual(preview.configOptions);
+            expect(response.configOptions?.find(option => option.configId === FAST_MODE_CONFIG_ID)?.currentValue).toBe(true);
             expect(response.configOptions?.find(option => option.configId === MODE_CONFIG_ID)?.currentValue)
                 .toBe("permission-profile:dev");
         },
@@ -306,6 +312,16 @@ describe('Session lifecycle over ACP v2', () => {
                 scope: "repo", enabled: true, pluginId: null,
             }],
         }],
+    });
+
+    it('rejects duplicate options on an AIR resume before reserving session delivery', async () => {
+        const {connection, agent} = await connectV2Client({air: true});
+        closeClient = () => connection.close();
+        const option = {configId: "model", type: "id" as const, value: "gpt-5"};
+        await expect(connection.agent.request(acpV2.methods.agent.session.resume, {
+            cwd, sessionId, configOptions: [option, option],
+        })).rejects.toMatchObject({code: -32602});
+        expect(agent()["clientDelivery"].sessionSetupReady(sessionId)).toBeNull();
     });
 
     it.each([false, true])('returns skills and text inputs while preserving AIR metadata (AIR: %s)', async (air) => {
@@ -650,6 +666,31 @@ describe('Session lifecycle over ACP v2', () => {
         expect(updates[0]?.update).toEqual({sessionUpdate: "replay_complete"});
         expect(updates.filter(({update}) => update.sessionUpdate === "replay_complete")).toHaveLength(1);
         expect(updates.at(-1)?.update).toEqual({sessionUpdate: "state_update", state: "idle", background: []});
+    });
+
+    it('applies initial settings before sending replayed messages', async () => {
+        let release!: () => void;
+        const held = new Promise<void>(resolve => { release = resolve; });
+        const beforeSettingsUpdate = vi.fn(() => held);
+        const {connection, updates} = await connectV2Client({replayTurns, beforeSettingsUpdate});
+        closeClient = () => connection.close();
+        const resumed = connection.agent.request(acpV2.methods.agent.session.resume, {
+            sessionId, cwd, replayFrom: {type: "start"},
+            configOptions: [{configId: "collaboration_mode", type: "id", value: "plan"}],
+        });
+        try {
+            await vi.waitFor(() => expect(beforeSettingsUpdate).toHaveBeenCalledOnce());
+            await connection.agent.request(acpV2.methods.agent.session.list, {});
+            expect(updates).toEqual([]);
+        } finally {
+            release();
+        }
+        const response = await resumed;
+        expect(response.configOptions).toContainEqual(expect.objectContaining({
+            configId: "collaboration_mode", currentValue: "plan",
+        }));
+        expect(updates.some(({update}) => update.sessionUpdate === "agent_message_chunk")).toBe(true);
+        expect(updates.some(({update}) => update.sessionUpdate === "config_option_update")).toBe(false);
     });
 
     it('does not activate an inactive session at replay_complete', async () => {
