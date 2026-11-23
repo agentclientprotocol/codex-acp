@@ -983,8 +983,6 @@ export class CodexAcpServer {
                 AIR_SESSION_FAILURE_KEY,
                 AIR_AGENT_FILE_CHANGE_REPORT_KEY,
                 AIR_CUSTOM_INSTRUCTIONS_KEY,
-                AIR_NATIVE_SUBAGENT_SESSIONS_KEY,
-                AIR_ASYNC_TASKS_KEY,
                 AIR_RECOMMENDED_CONFIG_VALUE_KEY,
                 ...this.sessionIndex.agentCapabilities(),
             ];

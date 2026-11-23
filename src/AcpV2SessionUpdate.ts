@@ -125,14 +125,12 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
             return update;
         case "cursor_update":
             throw acp.RequestError.internalError(undefined, "Session cursors are not supported");
-        // Compatibility inputs only; production v2 sessions use standard child sessions and terminals.
         case "subagent_spawned":
         case "subagent_state_update":
-            return {...update, sessionUpdate: "_subagent_update"};
         case "async_task_spawned":
         case "async_task_progress":
         case "async_task_state_update":
-            return {...update, sessionUpdate: `_${update.sessionUpdate}` as const};
+            throw acp.RequestError.internalError(undefined, `'${update.sessionUpdate}' session update does not exist in ACP v2`);
     }
 }
 

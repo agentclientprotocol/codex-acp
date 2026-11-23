@@ -3,6 +3,7 @@ import * as acp from '@agentclientprotocol/sdk/unstable';
 import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import {createAcpAgentRouter} from '../../AcpAgentRouter';
 import {type AcpClientConnection, ACPSessionConnection, AcpV2Connection} from '../../ACPSessionConnection';
+import type {AcpSessionUpdate} from '../../AcpSessionExtensions';
 import {CodexAcpServer} from '../../CodexAcpServer';
 import {CodexAcpClient} from '../../CodexAcpClient';
 import {CodexAppServerClient} from '../../CodexAppServerClient';
@@ -108,45 +109,20 @@ describe('ACPSessionConnection - session/update over ACP v2', () => {
         await expect(dump(received)).toMatchFileSnapshot('data/session-update-v2-tool-calls-and-chunks.json');
     });
 
-    it('preserves the negotiated AIR lifecycle extensions on the v2 wire', async () => {
+    it.each([
+        {sessionUpdate: "subagent_spawned", subagentSessionId: "child-1", name: "Researcher", task: "Review", capabilities: {}},
+        {sessionUpdate: "subagent_state_update", subagentSessionId: "child-1", state: "completed"},
+        {sessionUpdate: "async_task_spawned", asyncTaskId: "task-1", name: "npm test", taskType: "shell", showInTranscript: false, canStop: true},
+        {sessionUpdate: "async_task_progress", asyncTaskId: "task-1", summary: "Tests are running"},
+        {sessionUpdate: "async_task_state_update", asyncTaskId: "task-1", state: "completed"},
+    ] satisfies AcpSessionUpdate[])('rejects the legacy $sessionUpdate update on v2', async update => {
         const {received, view} = await connectV2Client({
             _meta: {jetbrains: {air: {version: 1, capabilities: ["nativeSubagentSessions", "asyncTasks"]}}},
         });
         const session = new ACPSessionConnection(view, "session-1");
 
-        await session.update({
-            sessionUpdate: "subagent_spawned",
-            subagentSessionId: "child-1",
-            name: "Researcher",
-            task: "Look into flaky tests",
-            capabilities: {cancel: true},
-            _meta: {source: "delegation"},
-        });
-        await session.update({sessionUpdate: "subagent_state_update", subagentSessionId: "child-1", state: "completed"});
-        await session.update({
-            sessionUpdate: "async_task_spawned",
-            asyncTaskId: "task-1",
-            name: "npm test",
-            taskType: "shell",
-            showInTranscript: false,
-            canStop: true,
-            toolCallId: "call-1",
-        });
-        await session.update({
-            sessionUpdate: "async_task_progress",
-            asyncTaskId: "task-1",
-            summary: "Tests are running",
-            toolCallId: "call-1",
-        });
-        await session.update({
-            sessionUpdate: "async_task_state_update",
-            asyncTaskId: "task-1",
-            state: "completed",
-            toolCallId: "call-1",
-        });
-
-        await vi.waitFor(() => expect(received).toHaveLength(5));
-        await expect(dump(received)).toMatchFileSnapshot('data/session-update-v2-subagent-and-async-task.json');
+        await expect(session.update(update)).rejects.toThrow(`'${update.sessionUpdate}' session update does not exist in ACP v2`);
+        expect(received).toEqual([]);
     });
 
     it('fails loudly for updates whose v2 shape belongs to a later topic', async () => {

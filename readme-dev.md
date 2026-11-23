@@ -235,8 +235,6 @@ schema alone:
   channel. The same `_meta` v1 attaches to `PromptResponse` is copied onto the v2 idle update.
 - ACP v2 uses standard `subagent_update`, child sessions, terminals, and background snapshots.
   The AIR `nativeSubagentSessions` and `asyncTasks` capabilities select legacy updates only on v1.
-  The v2 converter retains underscore-prefixed mappings for compatibility inputs.
-  Production v2 sessions do not use those private lifecycle updates.
 - Foreground state is independent of prompt acceptance. `running` can precede the user-message
   echo, including while Codex runs hooks. A successful prompt response still waits for insertion.
 - A held prompt can be withdrawn before dispatch. Once dispatched, cancellation can race with
