@@ -124,7 +124,7 @@ describe('agent-owned terminals over ACP v2', () => {
         const item = commandItem("item-shell", {commandActions: []});
 
         client.emit(itemStarted(item));
-        client.emit(itemCompleted(completed(item, "hello\n", 0)));
+        client.emit(itemCompleted(completed(item, "hello\nworld\r\n", 0)));
         await finishTurn(client);
 
         const updates = toolAndTerminalUpdates(client);

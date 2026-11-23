@@ -252,7 +252,7 @@ function toV2TerminalUpdates(meta: TerminalMeta, rawInput: unknown): acpV2.Sessi
             terminalUpdate.cwd = info.cwd;
         }
     }
-    const data = output ? base64(output.data, "terminal_output") : null;
+    const data = output ? terminalBytes(output.data) : null;
     if (exit) {
         if (data !== null) {
             terminalUpdate.output = {data};
@@ -280,10 +280,10 @@ function terminalMetaRecord(value: unknown, key: string): TerminalMetaRecord {
     return value as TerminalMetaRecord;
 }
 
-/** v2 terminal bytes are base64; Codex reports output as already-decoded text. */
-function base64(data: unknown, key: string): string {
+/** Apply PTY newline processing (ONLCR) before encoding the bytes for a v2 terminal. */
+function terminalBytes(data: unknown): string {
     if (typeof data !== "string") {
-        throw acp.RequestError.internalError(undefined, `Malformed '${key}' tool call metadata`);
+        throw acp.RequestError.internalError(undefined, "Malformed 'terminal_output' tool call metadata");
     }
-    return Buffer.from(data, "utf8").toString("base64");
+    return Buffer.from(data.replaceAll("\n", "\r\n"), "utf8").toString("base64");
 }
