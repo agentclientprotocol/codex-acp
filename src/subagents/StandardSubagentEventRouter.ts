@@ -612,7 +612,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         } finally { this.snapshotting = false; }
     }
 
-    async publishStateSnapshots(): Promise<void> {
+    private async publishStateSnapshots(): Promise<void> {
         for (const {child} of [...this.snapshots.values()]) {
             await child.foreground.serializePublication(async () => {
                 const snapshot = this.snapshots.get(child.threadId);

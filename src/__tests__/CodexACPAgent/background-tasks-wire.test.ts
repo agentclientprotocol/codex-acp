@@ -27,17 +27,17 @@ describe.each([1, 2] as const)('Background tasks on ACP v%s', version => {
         expectConformingV2SessionUpdates();
     });
 
-    function createAsyncTasks(enabled: boolean) {
+    function createAsyncTasks() {
         const {session, updates} = sessionForVersion(version, "root");
         const list = vi.fn<() => Promise<ThreadBackgroundTerminalsListResponse>>();
         const appServer = {threadBackgroundTerminalsList: list,
             backgroundTerminalPages: CodexAppServerClient.prototype.backgroundTerminalPages} as unknown as CodexAppServerClient;
-        const tasks = new CodexBackgroundTasks(version === 1 && enabled, "root", appServer, session, version === 2, true);
+        const tasks = new CodexBackgroundTasks(version === 1, "root", appServer, session, version === 2, true);
         return {tasks, list, updates};
     }
 
     it('discovers a process that outlives its turn without a process ID in the start event', async () => {
-        const {tasks, list, updates} = createAsyncTasks(true);
+        const {tasks, list, updates} = createAsyncTasks();
         list.mockResolvedValue({data: [{itemId: "command-1", processId: "42", command: "python -m http.server", cwd: "/workspace"}], nextCursor: null});
 
         await tasks.handleNotification({
@@ -88,38 +88,5 @@ describe.each([1, 2] as const)('Background tasks on ACP v%s', version => {
             },
         ]);
         tasks.clear();
-    });
-
-    it('emits no async task lifecycle when async tasks are disabled' , async () => {
-        const {tasks, list, updates} = createAsyncTasks(false);
-        list.mockResolvedValue({data: [], nextCursor: null});
-
-        await tasks.handleNotification({
-            method: "item/started",
-            params: {
-                threadId: "root",
-                turnId: "turn-1",
-                startedAtMs: 0,
-                item: {
-                    type: "commandExecution",
-                    id: "command-1",
-                    pluginId: null,
-                    scriptPath: null,
-                    command: "python -m http.server",
-                    cwd: "/workspace",
-                    processId: "42",
-                    source: "unifiedExecStartup",
-                    status: "inProgress",
-                    commandActions: [],
-                    aggregatedOutput: null,
-                    exitCode: null,
-                    durationMs: null,
-                },
-            },
-        }, "root");
-        await tasks.sync("root", "root");
-
-        expect(updates).toEqual([]);
-        if (version === 1) expect(list).not.toHaveBeenCalled();
     });
 });
