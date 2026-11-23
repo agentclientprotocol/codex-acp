@@ -223,7 +223,7 @@ export class CodexCommands {
      * See the original cli commands documentation here: https://developers.openai.com/codex/cli/slash-commands/
      * Only AIR gets a command action, in `_meta.jetbrains.air.commandAction`.
      */
-    private getBuiltinCommands(airClient: boolean): AvailableCommand[] {
+    getBuiltinCommands(airClient: boolean): AvailableCommand[] {
         const commandAction = (action: Record<string, unknown>) => {
             const meta = airOnlyMeta(airClient, AIR_COMMAND_ACTION_KEY, action);
             return meta ? {_meta: meta} : {};

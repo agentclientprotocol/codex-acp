@@ -36,25 +36,27 @@ function isGrouped(options: acp.SessionConfigSelectOptions): options is Array<ac
     return first !== undefined && "group" in first;
 }
 
-/**
- * Maps a v2 `session/set_config_option` request onto the v1 request shape the shared dispatcher
- * takes. v2 tags every value with `type`; only the `id` and `boolean` kinds exist for codex-acp's
- * options, so any other kind, or a value that doesn't match its kind, is invalid.
- */
+/** Convert the value shared by session setup and session/set_config_option. */
+function toV1ConfigValue(option: acpV2.InitialSessionConfigOption): acp.InitialSessionConfigOption {
+    const {configId, _meta, value} = option;
+    const base = {configId, ...(_meta !== undefined && {_meta})};
+    if (option.type === "id" && typeof value === "string") {
+        return {...base, value};
+    }
+    if (option.type === "boolean" && typeof value === "boolean") {
+        return {...base, type: "boolean", value};
+    }
+    throw acp.RequestError.invalidParams(undefined, "Unsupported config option value");
+}
+
+export function toV1InitialConfigOptions(options: acpV2.InitialSessionConfigOption[] | undefined): {
+    configOptions?: acp.InitialSessionConfigOption[];
+} {
+    return options == null ? {} : {configOptions: options.map(toV1ConfigValue)};
+}
+
 export function toV1SetSessionConfigOptionRequest(
     params: acpV2.SetSessionConfigOptionRequest,
 ): acp.SetSessionConfigOptionRequest {
-    const base = {
-        sessionId: params.sessionId,
-        configId: params.configId,
-        ...(params._meta !== undefined ? {_meta: params._meta} : {}),
-    };
-    const value: unknown = params.value;
-    if (params.type === "id" && typeof value === "string") {
-        return {...base, value};
-    }
-    if (params.type === "boolean" && typeof value === "boolean") {
-        return {...base, type: "boolean", value};
-    }
-    throw acp.RequestError.invalidParams();
+    return {sessionId: params.sessionId, ...toV1ConfigValue(params)};
 }
