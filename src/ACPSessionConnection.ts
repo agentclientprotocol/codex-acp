@@ -380,7 +380,10 @@ type BackgroundItem =
     | {type: "subagent"; sessionId: string};
 
 function backgroundKey(item: BackgroundItem): string {
-    return item.type === "terminal" ? `terminal:${item.terminalId}` : `subagent:${item.sessionId}`;
+    switch (item.type) {
+        case "terminal": return `terminal:${item.terminalId}`;
+        case "subagent": return `subagent:${item.sessionId}`;
+    }
 }
 
 function rejectStandardMethod(method: string): Promise<never> {

@@ -14,6 +14,7 @@ import type {
     ApprovalHandler,
     CodexAppServerClient,
     ElicitationHandler,
+    ExperimentalTurnStartParams,
 } from "./CodexAppServerClient";
 import type {McpServerStartupWaitOptions, McpStartupResult} from "./mcp/McpStartupTracker";
 import open from "open";
@@ -78,6 +79,7 @@ import {throwIfRequestCancelled, withRequestCancellation} from "./RequestCancell
 import {isKeyedPromptId} from "./AcpV2Prompt";
 import {
     isMissingRolloutError,
+    isNonSteerableTurnError,
     isThreadNotMaterializedError,
     isThreadActiveWriterError,
     isThreadNotFoundError,
@@ -1539,15 +1541,16 @@ export class CodexAcpClient {
         onTurnStarted?: (turnId: string) => void,
         shouldCancel?: () => boolean,
         clientUserMessageId?: string,
+        stopSignal?: AbortSignal,
     ): Promise<TurnCompletedNotification | null> {
         const input = buildPromptItems(request.prompt);
         const effort = modelId.effort as ReasoningEffort | null; //TODO remove unsafe conversion
         await this.refreshSkills(cwd, additionalDirectories);
-        if (shouldCancel?.()) {
+        if (shouldCancel?.() || stopSignal?.aborted) {
             return null;
         }
         const permissionProfileId = agentMode.permissionProfileId;
-        return await this.codexClient.runTurn({
+        return await this.runPromptTurn({
             threadId: request.sessionId,
             input: input,
             approvalPolicy: agentMode.approvalPolicy,
@@ -1563,7 +1566,30 @@ export class CodexAcpClient {
             model: modelId.model,
             serviceTier: serviceTier,
             ...(clientUserMessageId !== undefined ? {clientUserMessageId} : {}),
-        }, onTurnStarted);
+        }, onTurnStarted, shouldCancel, stopSignal);
+    }
+
+    private async runPromptTurn(
+        params: ExperimentalTurnStartParams,
+        onTurnStarted?: (turnId: string) => void,
+        shouldCancel?: () => boolean,
+        stopSignal?: AbortSignal,
+    ): Promise<TurnCompletedNotification | null> {
+        while (!shouldCancel?.() && !stopSignal?.aborted) {
+            const runningTurnId = this.codexClient.runningTurnId(params.threadId);
+            try {
+                return await this.codexClient.runTurn(params, onTurnStarted);
+            } catch (error) {
+                if (!isNonSteerableTurnError(error) || runningTurnId === undefined) throw error;
+                try {
+                    await this.codexClient.waitForRunningTurn(params.threadId, runningTurnId, stopSignal);
+                } catch (error) {
+                    if (stopSignal?.aborted) return null;
+                    throw error;
+                }
+            }
+        }
+        return null;
     }
 
     async setCollaborationMode(sessionId: string, mode: ModeKind, currentModelId: string): Promise<void> {

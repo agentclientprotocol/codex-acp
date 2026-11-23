@@ -517,7 +517,12 @@ export class CodexEventHandler {
                 toolCallTitle(updateEvent),
             );
         }
-        if (handledBySubagents) return;
+        if (handledBySubagents) {
+            if (notification.method === "item/completed") {
+                await this.sessionState.asyncTasks.handleNotification(notification, this.subagents.notificationSessionId(notification));
+            }
+            return;
+        }
         if (ignoredBySubagents) return;
         if (updateEvent === undefined) updateEvent = await this.createUpdateEvent(notification);
         if (updateEvent) {
@@ -779,11 +784,14 @@ export class CodexEventHandler {
                 return this.createThreadGoalUpdatedEvent(notification.params);
             case "thread/goal/cleared":
                 return this.createThreadGoalClearedEvent(notification.params);
-            case "item/commandExecution/terminalInteraction":
-                return this.renderer.render(this.streamsFor(notification.params.threadId).commands.terminalInput(
-                    notification.params.itemId,
-                    notification.params.stdin,
-                ));
+            case "item/commandExecution/terminalInteraction": {
+                const commands = this.streamsFor(notification.params.threadId).commands;
+                if (this.session.forSession(this.subagents.notificationSessionId(notification))
+                    .hasBackgroundItem({type: "terminal", terminalId: notification.params.itemId})) {
+                    commands.observeTerminal(notification.params.itemId);
+                }
+                return this.renderer.render(commands.terminalInput(notification.params.itemId, notification.params.stdin));
+            }
             case "thread/section/changed":
                 // Thread sections have no ACP session update counterpart.
                 return null;

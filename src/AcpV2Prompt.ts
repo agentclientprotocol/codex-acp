@@ -74,13 +74,6 @@ export type UserMessageInsertion = {
     clientUserMessageId: string;
     onInserted: () => Promise<void>;
     /**
-     * Shows a synthetic prompt codex-acp starts itself (the plan-implementation follow-up turn,
-     * a `/goal` continuation) as a live `user_message`, once its own minted `clientUserMessageId`
-     * is echoed back. These turns run inside the original prompt's running…idle pair, so this
-     * only emits the chunks: no response is resolved and no `state_update` is sent.
-     */
-    onSyntheticInserted: (clientUserMessageId: string, prompt: acp.ContentBlock[]) => Promise<void>;
-    /**
      * An adopted turn was already running when Codex steered this input into it.
      * Withdrawing this prompt must not interrupt that turn.
      */
@@ -104,6 +97,12 @@ export function isInsertedUserMessage(
         && event.params.threadId === threadId
         && event.params.item.type === "userMessage"
         && event.params.item.clientId === clientUserMessageId;
+}
+
+/** The identity and cancellation of a native v2 prompt offered to a running turn. */
+export interface V2SteeringPrompt {
+    messageId: string;
+    signal: AbortSignal;
 }
 
 const SUPPORTED_PROMPT_CONTENT_TYPES = new Set(["text", "image", "resource_link", "resource"]);

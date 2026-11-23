@@ -233,11 +233,8 @@ schema alone:
 - On a failed prompt, read `sessionFailure` (`_meta.jetbrains.air.sessionFailure`) and `quota`
   (`_meta.quota`) from the idle `state_update` that ends the turn, not from a separate error
   channel. The same `_meta` v1 attaches to `PromptResponse` is copied onto the v2 idle update.
-- Custom session updates are renamed on v2: `subagent_spawned`/`subagent_state_update` become a
-  single `_subagent_update` (gated on the AIR `nativeSubagentSessions` capability; this contract is
-  retained independently of standard subagent sessions), and
-  `async_task_spawned`/`async_task_state_update` become `_async_task_spawned`/`_async_task_state_update`
-  (gated on the AIR `asyncTasks` capability). Payload shapes are unchanged.
+- ACP v2 uses standard `subagent_update`, child sessions, terminals, and background snapshots.
+  The AIR `nativeSubagentSessions` and `asyncTasks` capabilities select legacy updates only on v1.
 - Foreground state is independent of prompt acceptance. `running` can precede the user-message
   echo, including while Codex runs hooks. A successful prompt response still waits for insertion.
 - A held prompt can be withdrawn before dispatch. Once dispatched, cancellation can race with

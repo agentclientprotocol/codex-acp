@@ -60,7 +60,8 @@ describe("ACP v2 keyed prompts", () => {
     });
 
     it.each(["$/cancel_request", "session/cancel", "session/close"])(
-        "answers both attempts when %s drops a held prompt", async method => {
+        "answers both attempts when %s drops a held command", async method => {
+            const held = {...params, prompt: [{type: "text", text: "/status"}]};
             h = await connectSession();
             const blocker = h.sendPrompt([{type: "text", text: "Block the queue"}]);
             await vi.waitFor(() => expect(h!.turnStartParams).toHaveLength(1));
@@ -70,8 +71,8 @@ describe("ACP v2 keyed prompts", () => {
 
             const seen = vi.spyOn(h.agent, "promptV2");
             const abort = new AbortController();
-            const first = expect(h.request("session/prompt", params)).rejects.toMatchObject({code: -32800});
-            const retry = expect(h.request("session/prompt", params, abort.signal)).rejects.toMatchObject({code: -32800});
+            const first = expect(h.request("session/prompt", held)).rejects.toMatchObject({code: -32800});
+            const retry = expect(h.request("session/prompt", held, abort.signal)).rejects.toMatchObject({code: -32800});
             await vi.waitFor(() => expect(seen).toHaveBeenCalledTimes(2));
             if (method === "$/cancel_request") abort.abort();
             else if (method === "session/cancel") await h.cancel();
@@ -83,14 +84,9 @@ describe("ACP v2 keyed prompts", () => {
 
             h.emit(turnCompleted());
             await h.promptRunFinished();
-            const reinsert = h.request("session/prompt", params);
-            await vi.waitFor(() => expect(h!.turnStartParams).toHaveLength(2));
-            const messageId = h.turnStartParams[1]!["clientUserMessageId"] as string;
-            h.emit(turnStarted("turn-2"));
-            h.emit(itemCompleted(userMessageItem(messageId), "turn-2"));
-            await expect(reinsert).resolves.toEqual({messageId});
-            h.emit(turnCompleted("turn-2"));
+            await expect(h.request("session/prompt", held)).resolves.toEqual({messageId: keyedPromptId(sessionId, key)});
             await h.promptRunFinished(1);
+            expect(h.turnStartParams).toHaveLength(1);
         },
     );
 

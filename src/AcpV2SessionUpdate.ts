@@ -125,39 +125,12 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
             return update;
         case "cursor_update":
             throw acp.RequestError.internalError(undefined, "Session cursors are not supported");
-        // AIR's private contract is selected independently upstream.
-        case "subagent_spawned": {
-            const {subagentSessionId, name, task, _meta} = update;
-            return {
-                sessionUpdate: "_subagent_update",
-                subagentSessionId,
-                name,
-                task,
-                capabilities: {},
-                ...(_meta != null ? {_meta} : {}),
-            };
-        }
-        case "subagent_state_update": {
-            const {subagentSessionId, state, _meta} = update;
-            return {
-                sessionUpdate: "_subagent_update",
-                subagentSessionId,
-                state,
-                ...(_meta != null ? {_meta} : {}),
-            };
-        }
-        // No upstream v2 design exists for async tasks (AIR-private extension); same payload as v1
-        // under a `_`-prefixed tag. Gated on AIR `asyncTasks` upstream, same as above.
+        case "subagent_spawned":
+        case "subagent_state_update":
         case "async_task_spawned":
-            return {...update, sessionUpdate: "_async_task_spawned"};
-        case "async_task_state_update":
-            return {...update, sessionUpdate: "_async_task_state_update"};
-        // Declared as a type but never emitted; no v2 rendering to give it yet.
         case "async_task_progress":
-            throw acp.RequestError.internalError(
-                undefined,
-                `'${update.sessionUpdate}' session update is not supported on an ACP v2 connection yet`,
-            );
+        case "async_task_state_update":
+            throw acp.RequestError.internalError(undefined, `'${update.sessionUpdate}' session update does not exist in ACP v2`);
     }
 }
 
@@ -168,7 +141,6 @@ export function toV2ToolCallContent(content: acp.ToolCallContent): acpV2.ToolCal
             return content;
         // Same shape on v2; the terminal itself is sent by `toV2SessionUpdates`.
         case "terminal":
-            return content;
         case "session":
             return content;
         case "diff":

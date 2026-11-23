@@ -66,17 +66,42 @@ describe.each([1, 2] as const)("ACP v%s direct child cancellation", version => {
             .toMatchFileSnapshot(`data/child-cancellation-v${version}.json`);
     });
 
-    it("cascades through the selected subtree, never to its ancestor or sibling", async () => {
-        await connect();
+    it("keeps cancellation within the protocol scope and preserves unrelated requests", async () => {
+        let answer: (() => void) | undefined;
+        let descendantSignal: AbortSignal | undefined;
+        await connect({onRequestPermission: (request, signal) => new Promise(resolve => {
+            descendantSignal = signal;
+            answer = () => resolve({outcome: {outcome: "selected", optionId: request.options[0]!.optionId}});
+        })});
         await start("coordinator");
         await start("worker", "worker-turn", "/root/coordinator/worker");
         await start("sibling");
-        await h.cancel(id("coordinator"));
-        await vi.waitFor(() => expect(h.turnInterruptCalls()).toHaveLength(2));
-        expect(h.turnInterruptCalls()).toEqual([
-            {threadId: "coordinator", turnId: "coordinator-turn"}, {threadId: "worker", turnId: "worker-turn"},
-        ]);
-        expect(cancellable("sibling")).toBe(true);
+        if (version === 2) {
+            h.emit(on("coordinator", turnCompleted("coordinator-turn")));
+            await flush(h);
+            h.emit(on("coordinator", turnStarted("coordinator-next")));
+            await flush(h);
+        }
+        const approval = h.triggerApproval("item/commandExecution/requestApproval", {
+            threadId: "worker", turnId: "worker-turn", itemId: "descendant-approval", command: "echo ok", cwd,
+            commandActions: [], reason: null, availableDecisions: ["accept", "decline"],
+        });
+        try {
+            await vi.waitFor(() => expect(answer).toBeDefined());
+            await h.cancel(id("coordinator"));
+            const expected = [{threadId: "coordinator", turnId: version === 1 ? "coordinator-turn" : "coordinator-next"}];
+            if (version === 1) expected.push({threadId: "worker", turnId: "worker-turn"});
+            await vi.waitFor(() => expect(h.turnInterruptCalls()).toEqual(expected));
+            expect(cancellable("sibling")).toBe(true);
+            if (version === 1) {
+                await expect(approval).resolves.toEqual({decision: "cancel"});
+            } else {
+                expect(descendantSignal!.aborted).toBe(false);
+                expect(cancellable("worker")).toBe(true);
+                answer!();
+                await expect(approval).resolves.toEqual({decision: "accept"});
+            }
+        } finally { answer?.(); }
     });
 
     it("withdraws only selected requests and rejects an accepted late reply", async () => {

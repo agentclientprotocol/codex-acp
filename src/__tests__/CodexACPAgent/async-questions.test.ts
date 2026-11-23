@@ -1,14 +1,18 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
+import {RequestError} from '@agentclientprotocol/sdk/unstable';
 import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import type {ThreadItem} from '../../app-server/v2';
 import {
+    agentMessageDelta,
     connectSession,
+    createTurn,
     dump,
     itemCompleted,
     itemStarted,
     type PromptSession,
     settle,
     stateUpdates,
+    sessionId,
     turnCompleted,
     turnStarted,
     userMessageItem,
@@ -109,10 +113,45 @@ describe.each([1, 2] as const)('async Codex questions over ACP v%i', (protocolVe
         expect(notices(client)).toEqual([]);
     });
 
-    it('cancels the questions when their turn ends, and reports an answer that arrives after that', async () => {
+    it('keeps the form open after completion and starts one turn for its answer', async () => {
+        let answer!: (response: acpV2.CreateElicitationResponse) => void;
+        let signal!: AbortSignal;
+        const {client, steers} = await connect((_, pending) => {
+            signal = pending;
+            return new Promise(resolve => { answer = resolve; });
+        });
+        await askDuringTurn(client);
+        await vi.waitFor(() => expect(elicitationRequests(client)).toHaveLength(1));
+        await finishTurn(client);
+        expect(signal.aborted).toBe(false);
+        const promptResponseCount = client.transcript.filter(entry => "promptResponse" in entry).length;
+        answer({action: "accept", content: {question_1: "After completion"}});
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(2));
+        const params = client.turnStartParams[1]!;
+        client.emit(turnStarted("turn-2"));
+        client.emit(itemCompleted(userMessageItem(params["clientUserMessageId"] as string), "turn-2"));
+        client.emit(agentMessageDelta("The follow-up answer", "turn-2"));
+        client.emit(turnCompleted("turn-2"));
+        await client.promptRunFinished(1);
+        await settle();
+        expect(steers).toEqual([]);
+        expect(notices(client)).toEqual([]);
+        expect(client.transcript.filter(entry => "promptResponse" in entry)).toHaveLength(promptResponseCount);
+        expect(client.transcript).toContainEqual({sessionUpdate: expect.objectContaining({
+            sessionUpdate: "agent_message_chunk", content: {type: "text", text: "The follow-up answer"},
+        })});
+        if (protocolVersion === 2) {
+            const users = client.transcript.filter(entry => "sessionUpdate" in entry
+                && entry.sessionUpdate.sessionUpdate === "user_message_chunk");
+            expect(users).toHaveLength(1);
+        }
+        await expect(dump({input: params["input"], states: stateUpdates(client.transcript)}))
+            .toMatchFileSnapshot(`data/async-questions-v${protocolVersion}-continued.json`);
+    });
+
+    it('cancels an open form when its session closes and drops a stale answer', async () => {
         let cancelled = false;
         const {client, steers} = await connect((_, signal) => new Promise(resolve => {
-            // A client that still answers after the cancellation.
             signal.addEventListener("abort", () => {
                 cancelled = true;
                 resolve({action: "accept", content: {question_1: "Too late"}});
@@ -121,22 +160,44 @@ describe.each([1, 2] as const)('async Codex questions over ACP v%i', (protocolVe
         await askDuringTurn(client);
         await vi.waitFor(() => expect(elicitationRequests(client)).toHaveLength(1));
         await finishTurn(client);
-        await vi.waitFor(() => expect(notices(client)).toHaveLength(1));
-
-        expect(cancelled).toBe(true);
+        await client.agent.closeSession({sessionId});
+        await vi.waitFor(() => expect(cancelled).toBe(true));
+        await settle();
         expect(steers).toEqual([]);
-        await expect(dump(notices(client))).toMatchFileSnapshot(`data/async-questions-v${protocolVersion}-dropped.json`);
+        expect(client.turnStartParams).toHaveLength(1);
     });
 
-    it('reports an answer that Codex rejects because its turn has ended', async () => {
+    it('reports a rejected continuation and releases the next prompt', async () => {
+        let answer!: (response: acpV2.CreateElicitationResponse) => void;
+        const {client} = await connect(() => new Promise(resolve => { answer = resolve; }));
+        await askDuringTurn(client);
+        await vi.waitFor(() => expect(elicitationRequests(client)).toHaveLength(1));
+        await finishTurn(client);
+        client.setTurnStart(async () => { throw RequestError.internalError(undefined, "Cannot start turn"); });
+        answer({action: "accept", content: {question_1: "After completion"}});
+        await vi.waitFor(() => expect(notices(client)).toHaveLength(1));
+        await client.promptRunFinished(1);
+        await expect(dump(notices(client))).toMatchFileSnapshot(`data/async-questions-v${protocolVersion}-rejected.json`);
+
+        client.setTurnStart(async () => ({turn: createTurn("inProgress", "turn-3")}));
+        const response = client.sendPrompt([{type: "text", text: "Try again"}]);
+        await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(3));
+        const params = client.turnStartParams[2]!;
+        client.emit(turnStarted("turn-3"));
+        client.emit(itemCompleted(userMessageItem(params["clientUserMessageId"] as string), "turn-3"));
+        client.emit(turnCompleted("turn-3"));
+        await response;
+        await client.promptRunFinished(2);
+    });
+
+    it('reports an answer that Codex rejects while its turn still runs', async () => {
         const {client, steers} = await connect(
-            async () => ({action: "accept", content: {question_1: "Late"}}),
-            async () => { throw new Error("no active turn to steer"); },
+            async () => ({action: "accept", content: {question_1: "Rejected"}}),
+            async () => { throw new Error("Invalid answer"); },
         );
         await askDuringTurn(client);
         await vi.waitFor(() => expect(notices(client)).toHaveLength(1));
         await finishTurn(client);
-
         expect(steers).toHaveLength(1);
         await expect(dump(notices(client))).toMatchFileSnapshot(`data/async-questions-v${protocolVersion}-rejected.json`);
     });
