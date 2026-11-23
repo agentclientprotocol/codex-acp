@@ -24,7 +24,7 @@ export function toV2AvailableCommands(commands: acp.AvailableCommand[]): acpV2.A
  * call update, and never reach the client as `_meta`. An update that only carried terminal
  * output renders to no tool call update at all.
  */
-export function toV2SessionUpdates(update: AcpSessionUpdate): acpV2.SessionUpdate[] {
+export function toV2SessionUpdates(update: AcpSessionUpdate, terminalsEndingInCR?: Set<string>): acpV2.SessionUpdate[] {
     if (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") {
         return [toV2SessionUpdate(update)];
     }
@@ -36,6 +36,7 @@ export function toV2SessionUpdates(update: AcpSessionUpdate): acpV2.SessionUpdat
     const terminalUpdates = toV2TerminalUpdates(
         {info: terminal_info, output: terminal_output ?? terminal_output_delta, exit: terminal_exit},
         toolCall.rawInput,
+        terminalsEndingInCR,
     );
     const {sessionUpdate: _tag, toolCallId: _id, ...toolCallFields} = toolCall;
     if (Object.keys(toolCallFields).length === 0 && Object.keys(otherMeta).length === 0) {
@@ -235,7 +236,7 @@ type TerminalMetaRecord = {
  * `terminal_exit` marks completion. Output sent together with the exit is the command's whole
  * output (it is only sent when none was streamed), so it becomes the final snapshot.
  */
-function toV2TerminalUpdates(meta: TerminalMeta, rawInput: unknown): acpV2.SessionUpdate[] {
+function toV2TerminalUpdates(meta: TerminalMeta, rawInput: unknown, terminalsEndingInCR?: Set<string>): acpV2.SessionUpdate[] {
     const info = meta.info == null ? null : terminalMetaRecord(meta.info, "terminal_info");
     const output = meta.output == null ? null : terminalMetaRecord(meta.output, "terminal_output");
     const exit = meta.exit == null ? null : terminalMetaRecord(meta.exit, "terminal_exit");
@@ -252,7 +253,8 @@ function toV2TerminalUpdates(meta: TerminalMeta, rawInput: unknown): acpV2.Sessi
             terminalUpdate.cwd = info.cwd;
         }
     }
-    const data = output ? terminalBytes(output.data) : null;
+    // A final snapshot replaces the stream and starts at its own first byte.
+    const data = output ? terminalBytes(output, exit ? undefined : terminalsEndingInCR) : null;
     if (exit) {
         if (data !== null) {
             terminalUpdate.output = {data};
@@ -280,10 +282,14 @@ function terminalMetaRecord(value: unknown, key: string): TerminalMetaRecord {
     return value as TerminalMetaRecord;
 }
 
-/** Apply PTY newline processing (ONLCR) before encoding the bytes for a v2 terminal. */
-function terminalBytes(data: unknown): string {
+/** A bare LF needs a carriage return to bring the terminal cursor back to column zero. */
+function terminalBytes({data, terminal_id}: TerminalMetaRecord, terminalsEndingInCR?: Set<string>): string {
     if (typeof data !== "string") {
         throw acp.RequestError.internalError(undefined, "Malformed 'terminal_output' tool call metadata");
     }
-    return Buffer.from(data.replaceAll("\n", "\r\n"), "utf8").toString("base64");
+    const followsCR = terminalsEndingInCR?.has(terminal_id);
+    const text = data.replace(/(?<!\r)\n/g, (lf, offset) => offset === 0 && followsCR ? lf : "\r\n");
+    if (data.endsWith("\r")) terminalsEndingInCR?.add(terminal_id);
+    else if (data.length > 0) terminalsEndingInCR?.delete(terminal_id);
+    return Buffer.from(text, "utf8").toString("base64");
 }

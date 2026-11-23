@@ -27,6 +27,7 @@ export class AcpV2Connection {
     private readonly background = new Map<string, Map<string, BackgroundItem>>();
     private readonly synchronizing = new Set<string>();
     private readonly sessionInfo = new Map<string, AcpV2SessionInfo>();
+    private readonly terminalsEndingInCR = new Map<string, Set<string>>();
     private sessionDelivery: AcpClientDelivery | null = null;
     private sendElicitationCompletion: (params: unknown) => Promise<void>;
     readonly replay: AcpV2Replay;
@@ -97,10 +98,22 @@ export class AcpV2Connection {
      * binding. One update can render to several v2 updates (or none), sent in order.
      */
     async updateSession(sessionId: string, update: AcpSessionUpdate, metadata?: acpV2.UpdateSessionNotification["_meta"]): Promise<void> {
-        for (const v2Update of toV2SessionUpdates(update)) {
-            await this.client.notify(acpV2.methods.client.session.update,
-                {sessionId, update: v2Update, ...(metadata !== undefined ? {_meta: metadata} : {})});
+        let trailingCR = this.terminalsEndingInCR.get(sessionId);
+        if (!trailingCR) {
+            trailingCR = new Set();
+            this.terminalsEndingInCR.set(sessionId, trailingCR);
         }
+        for (const v2Update of toV2SessionUpdates(update, trailingCR)) {
+            await this.sendLiveUpdate({sessionId, update: v2Update, ...(metadata !== undefined ? {_meta: metadata} : {})});
+        }
+    }
+
+    sendLiveUpdate(params: acpV2.UpdateSessionNotification): Promise<void> {
+        const {sessionId, update} = params;
+        if (acpV2.SessionUpdate.isTerminalUpdate(update) && update.exitStatus != null) {
+            this.terminalsEndingInCR.get(sessionId)?.delete(update.terminalId);
+        }
+        return this.client.notify(acpV2.methods.client.session.update, params);
     }
 
     /** Sends a `state_update`, which only exists on v2 and so needs no rendering. */
@@ -194,6 +207,7 @@ export class AcpV2Connection {
 
     forgetSession(sessionId: string): void {
         this.forgetForegroundState(sessionId);
+        this.terminalsEndingInCR.delete(sessionId);
         this.background.delete(sessionId);
         this.synchronizing.delete(sessionId);
         this.sessionInfo.get(sessionId)?.dispose();
@@ -429,7 +443,7 @@ export class ACPSessionConnection {
 
     updateTerminal(terminal: acpV2.TerminalUpdate): Promise<void> {
         if (!this.v2Connection) return Promise.resolve();
-        return this.v2Connection.client.notify(acpV2.methods.client.session.update, {
+        return this.v2Connection.sendLiveUpdate({
             sessionId: this.sessionId, update: {sessionUpdate: "terminal_update", ...terminal},
         });
     }
