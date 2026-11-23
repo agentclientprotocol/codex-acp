@@ -1,0 +1,47 @@
+{
+  "stopReason": "end_turn",
+  "usage": {
+    "totalTokens": 1000,
+    "inputTokens": 800,
+    "cachedReadTokens": 0,
+    "cachedWriteTokens": 0,
+    "outputTokens": 200,
+    "thoughtTokens": 0
+  },
+  "_meta": {
+    "quota": {
+      "token_count": {
+        "totalTokens": 1000,
+        "inputTokens": 800,
+        "cachedInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 200,
+        "reasoningOutputTokens": 0
+      },
+      "model_usage": [
+        {
+          "model": "gpt-5.6-sol",
+          "token_count": {
+            "totalTokens": 1000,
+            "inputTokens": 800,
+            "cachedInputTokens": 0,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 200,
+            "reasoningOutputTokens": 0
+          }
+        },
+        {
+          "model": "gpt-5.6-luna",
+          "token_count": {
+            "totalTokens": 50000,
+            "inputTokens": 9000,
+            "cachedInputTokens": 40000,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 1000,
+            "reasoningOutputTokens": 0
+          }
+        }
+      ]
+    }
+  }
+}

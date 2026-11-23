@@ -20,6 +20,7 @@ import {CodexEventHandler, SessionFailureIds} from "../CodexEventHandler";
 import {CodexBackgroundTerminalTasks} from "../async-tasks/CodexBackgroundTerminalTasks";
 import {CodexSessionCompactions} from "../CodexSessionCompactions";
 import {CodexSessionToolCalls} from "../CodexSessionToolCalls";
+import {SubagentTokenUsage} from "../SubagentTokenUsage";
 import {AUTH_STATUS_UPDATE_METHOD} from "../AuthStatusMeta";
 import {ClientCapabilities} from "../tool-calls/ClientCapabilities";
 
@@ -435,6 +436,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         lastTokenUsage: null,
         totalTokenUsage: null,
         promptTokenUsage: null,
+        subagentTokenUsage: new SubagentTokenUsage(sessionId),
         threadHasHistory: true,
         modelContextWindow: null,
         rateLimits: null,
