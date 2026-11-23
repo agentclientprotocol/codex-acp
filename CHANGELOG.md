@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.11.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.10.0...v2.11.0) (2026-11-23)
+
+
+### Features
+
+* experimental support for session options ([#797](https://github.com/agentclientprotocol/codex-acp/issues/797)) ([47f9a07](https://github.com/agentclientprotocol/codex-acp/commit/47f9a0788da6be5d7d3c4fd7b170d75f83e8bbd6))
+
+
+### Bug Fixes
+
+* Closing the gaps for the ACP v2 support ([#744](https://github.com/agentclientprotocol/codex-acp/issues/744)) ([394f2fa](https://github.com/agentclientprotocol/codex-acp/commit/394f2fadcdc7117aeb0c87bccd8897cb1c2a3870))
+* send ACP v2 terminal output with CRLF ([#795](https://github.com/agentclientprotocol/codex-acp/issues/795)) ([e1a0da5](https://github.com/agentclientprotocol/codex-acp/commit/e1a0da5add607d9e549788388eb0584269821b5d))
+
 ## [2.10.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.9.0...v2.10.0) (2026-11-23)
 
 
