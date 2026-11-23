@@ -19,7 +19,7 @@ import {type AcpClientConnection, AcpV2Connection} from "./ACPSessionConnection"
 import type {ServerNotification} from "./app-server";
 import type {ThreadItem, ToolRequestUserInputQuestion} from "./app-server/v2";
 import {buildUserInputSchema, userInputAnswers, userInputAnswerText} from "./CodexElicitationHandler";
-import type {CodexAcpServer} from "./CodexAcpServer";
+import type {SessionSteeringResponse, SessionSteerRequest} from "./AcpExtensions";
 import {clientSupportsFormElicitation} from "./ElicitationCapabilities";
 import {logger} from "./Logger";
 import type {ToolFacts} from "./tool-calls/ToolFacts";
@@ -110,19 +110,24 @@ function isReply(value: unknown): value is AsyncQuestionReply {
         && typeof reply["answer"] === "string";
 }
 
+/** Sends input through the session's shared steering and turn-start queue. */
+export interface AsyncQuestionSteering {
+    executeOrQueueSteeringRequest(params: SessionSteerRequest): Promise<SessionSteeringResponse>;
+}
+
 /** Reaches the ACP client and Codex on behalf of the async questions of one session. */
 export class AsyncQuestionClient {
     /**
      * @param sessionId The session that the questions belong to.
      * @param connection The connection to the ACP client.
      * @param clientCapabilities The capabilities that the ACP client declared.
-     * @param server Owns steering and the queue for starting turns.
+     * @param steering Owns steering and the queue for starting turns.
      */
     constructor(
         private readonly sessionId: string,
         private readonly connection: AcpClientConnection,
         private readonly clientCapabilities: acp.ClientCapabilities | null,
-        private readonly server: CodexAcpServer,
+        private readonly steering: AsyncQuestionSteering,
     ) {}
 
     /** Sends the elicitation without marking the session as waiting for the user. */
@@ -135,7 +140,7 @@ export class AsyncQuestionClient {
 
     /** Sends the reply through the session's shared steering and turn-start queue. */
     async sendReply(text: string): Promise<void> {
-        const response = await this.server.executeOrQueueSteeringRequest({
+        const response = await this.steering.executeOrQueueSteeringRequest({
             sessionId: this.sessionId,
             prompt: [{type: "text", text}],
         });
