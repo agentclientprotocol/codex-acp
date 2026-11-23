@@ -3491,7 +3491,12 @@ export class CodexAcpServer {
         const configOptions: Array<acp.SessionConfigOption> = [];
         // A gateway that lists none of the Codex models leaves no model to offer, so there is no model option at all.
         if (sessionState.availableModels.length > 0) {
-            configOptions.push(createModelConfigOption(sessionState.availableModels, currentModelId.model, recommendedModelId));
+            configOptions.push(createModelConfigOption(
+                sessionState.availableModels,
+                currentModelId.model,
+                recommendedModelId,
+                isAirClient(this.clientCapabilities),
+            ));
         }
         if (sessionState.supportedReasoningEfforts.length > 0) {
             configOptions.push(

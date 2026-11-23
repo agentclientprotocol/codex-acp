@@ -176,11 +176,12 @@ describe('the model of a native subagent session', () => {
         await feed(router, spawn(null), activity("gpt-5.2-codex"));
 
         const parentOption = createModelConfigOption([...MODELS.availableModels], MODELS.currentModel!);
-        const parentEntry = ((parentOption as {options: Array<{value: string}>}).options)
+        const parentEntry = ((parentOption as {options: Array<{value: string; name: string}>}).options)
             .find(option => option.value === "gpt-5.2-codex");
         const childOption = modelOptionOf(sent[1]!.update);
         expect(childOption["currentValue"]).toBe("gpt-5.2-codex");
-        expect(childOption["options"]).toEqual([parentEntry]);
+        const options = childOption["options"] as Array<{value: string; name: string}>;
+        expect(options.map(({value, name}) => ({value, name}))).toEqual([{value: parentEntry!.value, name: parentEntry!.name}]);
     });
 
     it.each([
