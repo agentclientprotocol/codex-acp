@@ -477,13 +477,6 @@ export class CodexEventHandler {
             for (const event of this.subagents.takeBufferedNotifications()) await this.handleNotification(event);
             return;
         }
-        const command = notification.params as {threadId?: string; itemId?: string; item?: {id: string}};
-        const commandId = command.itemId ?? command.item?.id;
-        if (command.threadId !== undefined && commandId !== undefined
-            && this.session.forSession(this.subagents.notificationSessionId(notification))
-                .hasBackgroundItem({type: "terminal", terminalId: commandId})) {
-            this.streamsFor(command.threadId).commands.restoreTerminal(commandId);
-        }
         await this.flushPendingErrors();
         await this.finishCompactionsForNotification(notification);
         const closingChildren = this.subagents.closingChildSessions(notification);
@@ -791,11 +784,14 @@ export class CodexEventHandler {
                 return this.createThreadGoalUpdatedEvent(notification.params);
             case "thread/goal/cleared":
                 return this.createThreadGoalClearedEvent(notification.params);
-            case "item/commandExecution/terminalInteraction":
-                return this.renderer.render(this.streamsFor(notification.params.threadId).commands.terminalInput(
-                    notification.params.itemId,
-                    notification.params.stdin,
-                ));
+            case "item/commandExecution/terminalInteraction": {
+                const commands = this.streamsFor(notification.params.threadId).commands;
+                if (this.session.forSession(this.subagents.notificationSessionId(notification))
+                    .hasBackgroundItem({type: "terminal", terminalId: notification.params.itemId})) {
+                    commands.observeTerminal(notification.params.itemId);
+                }
+                return this.renderer.render(commands.terminalInput(notification.params.itemId, notification.params.stdin));
+            }
             case "thread/section/changed":
                 // Thread sections have no ACP session update counterpart.
                 return null;

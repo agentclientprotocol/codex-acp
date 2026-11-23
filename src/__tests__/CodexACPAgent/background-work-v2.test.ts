@@ -118,6 +118,40 @@ describe("ACP v2 background work", () => {
         else expect(marker).toBe(-1);
     });
 
+    it.each([
+        {kind: "output", text: "still running", method: "item/commandExecution/outputDelta"},
+        {kind: "input", text: "\ny\n", method: "item/commandExecution/terminalInteraction"},
+    ] as const)("routes $kind to a restored terminal without its start event", async ({kind, text, method}) => {
+        h = await connectSession();
+        h.setCodexResponse("thread/backgroundTerminals/list", async () => ({data: [terminal], nextCursor: null}));
+        await h.request("session/resume", {sessionId, cwd});
+        const before = scoped().length;
+
+        h.emit({method, params: {threadId: sessionId, turnId: "old-turn", itemId: terminal.itemId,
+            ...(kind === "output" ? {delta: text} : {processId: terminal.processId, stdin: "y"})}} as ServerNotification);
+        await flush();
+
+        expect(scoped().slice(before)).toEqual([
+            {sessionUpdate: "terminal_output_chunk", terminalId: terminal.itemId, data: Buffer.from(text).toString("base64")},
+        ]);
+    });
+
+    it("reports an exit on a restored terminal without its start event", async () => {
+        h = await connectSession();
+        h.setCodexResponse("thread/backgroundTerminals/list", async () => ({data: [terminal], nextCursor: null}));
+        await h.request("session/resume", {sessionId, cwd});
+        const before = scoped().length;
+
+        h.emit(itemCompleted({...commandExecutionItem(terminal.itemId, "completed"), aggregatedOutput: "done"}));
+        await flush();
+
+        expect(scoped().slice(before)).toContainEqual(expect.objectContaining({
+            sessionUpdate: "terminal_update", terminalId: terminal.itemId, exitStatus: {exitCode: 0, signal: null},
+            output: {data: Buffer.from("done").toString("base64")},
+        }));
+        expect(list()).toEqual([]);
+    });
+
     it("retains a terminal on a list error and delists it only after publishing an observed exit", async () => {
         h = await connectSession();
         const listTerminals = vi.fn(async () => ({data: [terminal], nextCursor: null}));

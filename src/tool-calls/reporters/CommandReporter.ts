@@ -67,11 +67,6 @@ export class CommandReporter {
         }
     }
 
-    restoreTerminal(itemId: string): void {
-        this.nonTerminalCommands.delete(itemId);
-        this.terminalCommands.add(itemId);
-    }
-
     /** A chunk of command output. AIR gets the output of a read, search or list command at the end. */
     outputDelta(itemId: string, delta: string): ToolFacts {
         if (delta.length > 0) this.standardStreamedCommands.add(itemId);
