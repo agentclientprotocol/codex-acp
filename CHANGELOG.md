@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.10.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.9.0...v2.10.0) (2026-11-23)
+
+
+### Features
+
+* send per-model reasoning efforts in the model config option ([#789](https://github.com/agentclientprotocol/codex-acp/issues/789)) ([15c3808](https://github.com/agentclientprotocol/codex-acp/commit/15c3808576dd349226dfb559094029d8a326f258))
+
 ## [2.9.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.8.0...v2.9.0) (2026-11-21)
 
 
