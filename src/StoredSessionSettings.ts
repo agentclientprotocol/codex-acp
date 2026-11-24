@@ -17,7 +17,7 @@ type StoredSettings = {
 type Rollout = {file: FileHandle; compressed: boolean};
 const MAX_CACHED_THREADS = 128;
 
-async function openRollout(path: string): Promise<Rollout> {
+export async function openRollout(path: string): Promise<Rollout> {
     const plain = path.replace(/\.zst$/, "");
     try {
         return {file: await open(plain, "r"), compressed: false};

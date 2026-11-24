@@ -48,6 +48,19 @@ describe.each([1, 2] as const)("_session/batch_get over ACP v%i", version => {
         expect(backend).not.toHaveBeenCalled();
     });
 
+    it("negotiates text separately and validates include on both protocols", async () => {
+        const old = await connect(version, ["sessionIndex"]);
+        expect(old.initialize._meta.jetbrains.air.capabilities).not.toContain("sessionTranscriptText");
+        const meta = {jetbrains: {air: {include: "transcriptRevision", cwd: process.cwd()}}};
+        await expect(old.request(SESSION_BATCH_GET_METHOD, {sessionIds: ["one"], _meta: meta})).rejects.toMatchObject({code: -32602});
+        const current = await connect(version, ["sessionIndex", "sessionTranscriptText"]);
+        expect(current.initialize._meta.jetbrains.air.capabilities).toContain("sessionTranscriptText");
+        expect(await current.request(SESSION_BATCH_GET_METHOD, {sessionIds: ["missing"], _meta: meta})).toEqual({sessions: []});
+        for (const air of [{include: []}, {include: "bad"}, {include: "transcriptRevision", cwd: "relative"}]) {
+            await expect(current.request(SESSION_BATCH_GET_METHOD, {sessionIds: ["one"], _meta: {jetbrains: {air}}})).rejects.toMatchObject({code: -32602});
+        }
+    });
+
     it("is advertised with sessionIndex and reads only metadata", async () => {
         const {request, initialize, backend} = await connect(version, ["sessionIndex"]);
         expect(initialize._meta.jetbrains.air.capabilities).toContain("sessionBatchGet");

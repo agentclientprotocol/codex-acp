@@ -1253,7 +1253,7 @@ A thread that is not loaded here has no `state`. A change of `state` is a row ch
 members outside the recent list page. Check for `sessionBatchGet` in
 `initialize.result._meta.jetbrains.air.capabilities` before calling it.
 
-The params object contains only `sessionIds`: an array of distinct, non-blank
+The params object contains `sessionIds` and optional `_meta`. `sessionIds` is an array of distinct, non-blank
 strings. IDs match exactly, without trimming or case normalization. Malformed
 params, duplicates or extra fields return `Invalid params` (`-32602`). The
 adapter sets no limit on the number of IDs; the client chooses the batch size
@@ -1314,6 +1314,31 @@ unindexed IDs and read legacy rollout metadata, so lookup latency can depend on
 total stored history. Native legacy `thread/read` can also return a
 creation-based `updatedAt` where `thread/list` reports the stored update time;
 exact timestamp equality is not guaranteed.
+
+#### Stored transcript text
+
+A client can declare `sessionTranscriptText` with `sessionIndex` in its versioned AIR capabilities.
+The adapter advertises `sessionTranscriptText` only after that opt-in. This applies to ACP v1 and v2.
+
+Set `_meta.jetbrains.air.include` to `transcriptRevision` or `transcriptTextSnapshot`.
+Include exactly one session ID and its absolute directory in `_meta.jetbrains.air.cwd`.
+An invalid mode, ID count, directory, or missing opt-in returns `-32602`.
+A different directory or unavailable transcript returns no row.
+
+Both modes add `_meta.jetbrains.air.transcriptTextSnapshot` to the row.
+The revision mode returns `{revision}` without hydrating messages.
+The snapshot mode returns `{revision, messages, truncated}`.
+Each message has `{role, text}`. The roles are `user`, `assistant`, and `compact_summary` when available.
+The revision identifies transcript contents independently of the title or list timestamp.
+An edit during a read fails the request. The client can retry.
+Ordinary list and batch requests contain no transcript text.
+
+The adapter reads paginated items through the app-server. Legacy history uses a bounded full-history read.
+Archived and old sessions remain eligible, including compressed rollouts.
+The projection excludes tools, reasoning, and non-text input.
+The current app-server exposes compaction markers without summary text.
+Such a marker preserves available matches and sets `truncated: true`; it creates no synthetic summary.
+A response beyond the projection budget also preserves complete messages and sets `truncated: true`.
 
 ### Session list subscription
 

@@ -1,4 +1,5 @@
 import {once} from "node:events";
+import {zstdCompressSync} from "node:zlib";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -26,6 +27,11 @@ describeIntegration("integration: session batch metadata", () => {
                     id, timestamp, cwd: home, originator: "codex_cli_rs", cli_version: "0.164.0", source: "cli", model_provider: "openai",
                 }},
                 {timestamp, type: "event_msg", payload: {type: "user_message", message: title, images: [], local_images: [], text_elements: []}},
+                {timestamp, type: "response_item", payload: {type: "message", role: "user", content: [{type: "input_text", text: title}]}},
+                {timestamp, type: "response_item", payload: {type: "message", role: "assistant", content: [{type: "output_text", text: "Stored assistant response"}]}},
+                {timestamp, type: "event_msg", payload: {type: "agent_message", message: "Stored assistant response"}},
+                {timestamp, type: "response_item", payload: {type: "reasoning", summary: [{type: "summary_text", text: "Private reasoning"}], content: null, encrypted_content: null}},
+                {timestamp, type: "response_item", payload: {type: "function_call_output", call_id: "tool-1", output: "Private tool output"}},
             ].map(line => JSON.stringify(line)).join("\n") + "\n");
             fs.utimesSync(file, new Date(timestamp), new Date(timestamp));
             return file;
@@ -34,7 +40,7 @@ describeIntegration("integration: session batch metadata", () => {
         const selected = rollout(old, "Selected current copy", "2026-01-01T01:00:00");
         // A mature legacy rollout's mtime differs from its creation/session_meta timestamp.
         fs.utimesSync(selected, new Date("2026-01-15T00:00:00Z"), new Date("2026-01-15T00:00:00Z"));
-        rollout(archived, "Archived session", "2026-01-01T02:00:00", true);
+        const archivedFile = rollout(archived, "Archived session", "2026-01-01T02:00:00", true);
         fs.writeFileSync(rollout(corrupt, "Unreadable", "2026-01-01T03:00:00"), "invalid json\n");
         for (let index = 0; index < 60; index++) {
             rollout(`00000000-0000-4000-8000-${(100 + index).toString(16).padStart(12, "0")}`, `Recent ${index}`, "2026-02-01T00:00:00");
@@ -44,7 +50,7 @@ describeIntegration("integration: session batch metadata", () => {
         const index = fixture.getCodexAcpAgent().sessionIndex;
         try {
             await fixture.getCodexAcpClient().initialize({});
-            index.configure({_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionIndex"]}}}});
+            index.configure({_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionIndex", "sessionTranscriptText"]}}}});
             // Populate the backend index as its normal discovery does; batchGet itself never lists.
             await fixture.getCodexAppServerClient().threadList({limit: 100, sourceKinds: [], modelProviders: []});
             await fixture.getCodexAppServerClient().threadList({limit: 100, archived: true, sourceKinds: [], modelProviders: []});
@@ -65,6 +71,25 @@ describeIntegration("integration: session batch metadata", () => {
             const all = await index.list({_meta: {jetbrains: {air: {list: {limit: 100, archived: "all"}}}}});
             const withoutUpdatedAt = ({updatedAt: _updatedAt, ...row}: (typeof result.sessions)[number]) => row;
             expect(result.sessions.map(withoutUpdatedAt)).toEqual([archived, old].map(id => withoutUpdatedAt(all.sessions.find(row => row.sessionId === id)!)));
+            for (const sessionId of [old, archived]) {
+                const read = async (include: string) => {
+                    const response = await index.batchGet({sessionIds: [sessionId], _meta: {jetbrains: {air: {include, cwd: home}}}});
+                    return (response.sessions[0]!._meta as any).jetbrains.air.transcriptTextSnapshot;
+                };
+                const revision = await read("transcriptRevision");
+                const snapshot = await read("transcriptTextSnapshot");
+                expect(snapshot.revision).toBe(revision.revision);
+                expect(snapshot.messages).toEqual([
+                    {role: "user", text: sessionId === old ? "Selected current copy" : "Archived session"},
+                    {role: "assistant", text: "Stored assistant response"},
+                ]);
+                expect(snapshot.truncated).toBe(false);
+                expect(await index.batchGet({sessionIds: [sessionId], _meta: {jetbrains: {air: {include: "transcriptTextSnapshot", cwd: path.join(home, "other")}}}})).toEqual({sessions: []});
+            }
+            fs.writeFileSync(archivedFile + ".zst", zstdCompressSync(fs.readFileSync(archivedFile)));
+            fs.unlinkSync(archivedFile);
+            const compressed = await index.batchGet({sessionIds: [archived], _meta: {jetbrains: {air: {include: "transcriptTextSnapshot", cwd: home}}}});
+            expect((compressed.sessions[0]!._meta as any).jetbrains.air.transcriptTextSnapshot.messages).toContainEqual({role: "assistant", text: "Stored assistant response"});
             // The supported native read has creation-based updatedAt for legacy rollouts; list uses its stored update.
             expect(result.sessions[1]!.updatedAt).toBe("2026-01-01T01:00:00.000Z");
             expect(all.sessions.find(row => row.sessionId === old)!.updatedAt).toBe("2026-01-15T00:00:00.000Z");
