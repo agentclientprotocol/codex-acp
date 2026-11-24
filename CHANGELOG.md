@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.12.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.11.0...v2.12.0) (2026-11-24)
+
+
+### Features
+
+* session cursors and in-place session rewind ([#801](https://github.com/agentclientprotocol/codex-acp/issues/801)) ([caedc6d](https://github.com/agentclientprotocol/codex-acp/commit/caedc6d6b471c2d802039026d8921f43abaff3e1))
+
 ## [2.11.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.10.0...v2.11.0) (2026-11-23)
 
 
