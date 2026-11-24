@@ -16,6 +16,8 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 - Compact file changes through the negotiated [AIR diff patch extension](docs/air-extensions.md#diff-patch).
 - For AIR, one tool call shape with each fact in one field, as the [tool call contract](docs/air-extensions.md#tool-call-contract) defines. Other clients keep the earlier fields.
 - [Native ACP subagent sessions](docs/subagent-sessions.md) with separate child histories and permissions. ACP v2 selects the standard route without capability negotiation.
+- [Session cursors](docs/session-cursors.md): `cursor_update` positions and `session/fork` at a cursor.
+- Editing a user message in place with [`_session/rewind`](docs/air-extensions.md#session-rewind) for AIR.
 - Mid-turn input through the [_session/steering extension](docs/steering.md), with an opt-in host-owned fallback when no turn can accept it.
 - [Async Codex questions](docs/async-questions.md) as non-blocking form elicitations, with answers steered into the turn that asked them.
 - [Background terminal tasks](docs/background-work.md) with standard ACP v2 state and terminal Stop. ACP v1 retains the Air extension.

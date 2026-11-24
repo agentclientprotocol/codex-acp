@@ -13,6 +13,7 @@ import {clientSupportsFormElicitation, clientSupportsUrlElicitation} from '../..
 import {ClientCapabilities} from '../../tool-calls/ClientCapabilities';
 import {clientSupportsCompaction} from '../../CodexSessionCompactions';
 import {clientSupportsNotices} from '../../SessionNotice';
+import {clientSupportsCursors} from '../../SessionCursors';
 import {createMockConnections} from './test-utils';
 
 const v2ClientCapabilities: acpV2.ClientCapabilities = {
@@ -198,6 +199,7 @@ describe('ACP v2 client capability normalization', () => {
         expect(ClientCapabilities.from(view).planUpdates).toBe(true);
         expect(clientSupportsCompaction(view)).toBe(true);
         expect(clientSupportsNotices(view)).toBe(true);
+        expect(clientSupportsCursors(view)).toBe(true);
         expect(clientSupportsFormElicitation(view)).toBe(false);
         expect(clientSupportsUrlElicitation(view)).toBe(false);
         expect(clientSupportsAirCapability(view, AIR_NATIVE_SUBAGENT_SESSIONS_KEY)).toBe(false);

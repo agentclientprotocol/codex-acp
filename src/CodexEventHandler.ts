@@ -707,6 +707,8 @@ export class CodexEventHandler {
                     title: this.sessionState.sessionTitle,
                 };
             case "thread/status/changed":
+                // `thread/revert` reloads the thread: it reports `notLoaded`, then `idle`, as before the rewind.
+                if (this.sessionState.rewinding && notification.params.threadId === this.sessionState.sessionId) return null;
                 return this.createCodexSessionInfoUpdate({
                     threadStatus: notification.params.status,
                 });

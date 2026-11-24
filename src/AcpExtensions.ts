@@ -16,6 +16,8 @@ import {
     type AsyncTaskStopExtRequest,
 } from "./async-tasks/AsyncTaskExtension";
 
+import {SESSION_REWIND_METHOD, type SessionRewindRequest} from "./SessionRewind";
+
 export {
     AUTH_STATUS_META_KEY,
     AUTH_STATUS_UPDATE_METHOD,
@@ -79,6 +81,7 @@ export type ExtMethodRequest =
     | SessionSteeringExtRequest
     | GoalControlExtRequest
     | AsyncTaskStopExtRequest
+    | SessionRewindExtRequest
 
 export function isExtMethodRequest(request: { method: string, params: Record<string, unknown> }): request is ExtMethodRequest {
     return request.method === "authentication/status"
@@ -87,7 +90,8 @@ export function isExtMethodRequest(request: { method: string, params: Record<str
         || request.method === GOAL_CONTROL_METHOD
         || request.method === LEGACY_GOAL_CONTROL_METHOD
         || request.method === SESSION_STEERING_METHOD
-        || request.method === ASYNC_TASK_STOP_METHOD;
+        || request.method === ASYNC_TASK_STOP_METHOD
+        || request.method === SESSION_REWIND_METHOD;
 }
 
 /**
@@ -110,6 +114,11 @@ export type LegacySetSessionModelExtRequest = {
 export type GoalControlExtRequest = {
     method: typeof GOAL_CONTROL_METHOD | typeof LEGACY_GOAL_CONTROL_METHOD;
     params: GoalControlRequest;
+}
+
+export type SessionRewindExtRequest = {
+    method: typeof SESSION_REWIND_METHOD;
+    params: SessionRewindRequest;
 }
 
 export async function legacySetSessionModel(

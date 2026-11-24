@@ -153,6 +153,20 @@
         }
       },
       {
+        "sessionUpdate": {
+          "cursorId": "before:turn-2",
+          "capabilities": {
+            "fork": {}
+          },
+          "anchor": {
+            "messageId": "<messageId>",
+            "position": "before",
+            "type": "user_message"
+          },
+          "sessionUpdate": "cursor_update"
+        }
+      },
+      {
         "promptResponse": {
           "messageId": "<messageId>"
         }
