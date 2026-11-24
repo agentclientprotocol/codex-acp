@@ -77,7 +77,9 @@ Clients can [query authentication status](docs/auth-status.md) before starting a
 - `DEFAULT_AUTH_REQUEST` - ACP auth request JSON used when Codex requires authentication.
 - `INITIAL_AGENT_MODE` - initial mode id: `read-only`, `workspace-write`, `agent`, `agent-full-access`, or `permission-profile:<profile-id>`.
 - `NO_BROWSER` - hide browser-based ChatGPT auth when set.
-- `APP_SERVER_LOGS` - directory for adapter logs.
+- `APP_SERVER_LOGS` - directory for adapter logs. When set, app-server stderr is also copied to `app-server.log`.
+
+App-server stderr is always forwarded unchanged to adapter stderr.
 
 ## Development
 
