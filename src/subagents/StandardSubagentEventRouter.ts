@@ -863,6 +863,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         const threadId = (notification.params as {threadId?: unknown}).threadId;
         return typeof threadId === "string" ? this.children.get(threadId)?.sessionId ?? this.rootSessionId : this.rootSessionId;
     }
+    subagentSessionId(threadId: string): string | null { return this.associations.sessionId(this.rootSessionId, threadId); }
     takeBufferedNotifications(): ServerNotification[] { return this.replayQueue.splice(0); }
     async waitForMaterializedSession(threadId: string): Promise<string | null> {
         if (this.retired) return null;

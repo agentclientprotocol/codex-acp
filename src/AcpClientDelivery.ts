@@ -128,6 +128,8 @@ export class AcpClientDelivery {
         const update = this.reports.prepare(params.sessionId, params.update, replay);
         if (update === null) return;
         await send({...params, update});
+        // During a v2 replay `send` resolves while the update is still held back.
+        this.reports.sent(params.sessionId, update);
         // A fresh announcement reopens a child view after its parent is resumed.
         if (update.sessionUpdate === "subagent_update") this.openSession(update.sessionId);
         if (update.sessionUpdate === "subagent_spawned") this.openSession(update.subagentSessionId);

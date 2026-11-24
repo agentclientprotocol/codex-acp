@@ -202,6 +202,24 @@ describe("AcpClientDelivery", () => {
         }]);
     });
 
+    it("counts a tool call report as sent only when the client connection has written it", async () => {
+        const {client, notify} = createClient();
+        let written!: () => void;
+        notify.mockReturnValueOnce(new Promise<void>(resolve => { written = resolve; }));
+        const delivery = new AcpClientDelivery(client);
+        const sending = delivery.notify(acp.methods.client.session.update, {
+            sessionId: "s",
+            update: {sessionUpdate: "tool_call", toolCallId: "t", title: "Run", status: "in_progress"},
+        });
+        const sent = delivery.reports.whenSent("s", "t", AbortSignal.timeout(1000));
+        await expect(Promise.race([sent, Promise.resolve("waiting")])).resolves.toBe("waiting");
+
+        written();
+        await sending;
+
+        await expect(sent).resolves.toBe(true);
+    });
+
     it("drops an update that repeats every reported field", async () => {
         const {client, notify} = createClient();
         const connection = new AcpClientDelivery(client).asClientConnection();

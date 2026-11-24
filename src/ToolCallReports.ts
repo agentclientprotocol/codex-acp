@@ -46,6 +46,13 @@ export class ToolCallReports {
     private readonly unfinishedToolCalls = new Map<string, Set<string>>();
 
     /**
+     * The unfinished tool calls that the client has a report of, per session. `prepare` runs before the report is
+     * sent, so a tool call enters {@link unfinishedToolCalls} first.
+     */
+    private readonly sentToolCalls = new Map<string, Set<string>>();
+    private readonly sentWaiters = new Map<string, Set<() => void>>();
+
+    /**
      * Returns the update to send, without the fields that did not change.
      * Returns `null` when nothing is left to send.
      */
@@ -55,7 +62,7 @@ export class ToolCallReports {
         }
         const key = `${sessionId}\u0000${update.toolCallId}`;
         if (!replay) update = this.withLiveStatus(sessionId, update);
-        this.trackUnfinished(sessionId, update);
+        this.trackUnfinished(this.unfinishedToolCalls, sessionId, update);
         const prepared = update.sessionUpdate === "tool_call"
             ? this.recordStart(key, update)
             : this.recordUpdate(key, update);
@@ -93,6 +100,7 @@ export class ToolCallReports {
             if (key.startsWith(prefix)) this.openToolCalls.delete(key);
         }
         this.unfinishedToolCalls.delete(sessionId);
+        this.sentToolCalls.delete(sessionId);
     }
 
     /** The ids of the tool calls of `sessionId` that the client shows as pending or running. */
@@ -100,21 +108,53 @@ export class ToolCallReports {
         return [...this.unfinishedToolCalls.get(sessionId) ?? []];
     }
 
-    private trackUnfinished(sessionId: string, update: ToolCallReport): void {
+    private trackUnfinished(unfinished: Map<string, Set<string>>, sessionId: string, update: ToolCallReport): void {
         const status = update.status;
-        const ids = this.unfinishedToolCalls.get(sessionId);
+        const ids = unfinished.get(sessionId);
         if (status === "completed" || status === "failed") {
             ids?.delete(update.toolCallId);
-            if (ids?.size === 0) this.unfinishedToolCalls.delete(sessionId);
+            if (ids?.size === 0) unfinished.delete(sessionId);
             return;
         }
         // An update without a status of a tool call that the client does not show as running changes nothing.
         if (update.sessionUpdate !== "tool_call" && status !== "pending" && status !== "in_progress") return;
         if (ids === undefined) {
-            this.unfinishedToolCalls.set(sessionId, new Set([update.toolCallId]));
+            unfinished.set(sessionId, new Set([update.toolCallId]));
         } else {
             ids.add(update.toolCallId);
         }
+    }
+
+    /** Records an update that `prepare` returned, once it has been sent to the client. */
+    sent(sessionId: string, update: UpdateSessionEvent): void {
+        if (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") return;
+        this.trackUnfinished(this.sentToolCalls, sessionId, update);
+        if (!this.sentToolCalls.get(sessionId)?.has(update.toolCallId)) return;
+        for (const wake of this.sentWaiters.get(`${sessionId}\u0000${update.toolCallId}`) ?? []) wake();
+    }
+
+    /**
+     * Resolves `true` once the client has a report of the unfinished tool call on that session.
+     * Resolves `false` when `signal` aborts first.
+     */
+    whenSent(sessionId: string, toolCallId: string, signal: AbortSignal): Promise<boolean> {
+        if (this.sentToolCalls.get(sessionId)?.has(toolCallId)) return Promise.resolve(true);
+        if (signal.aborted) return Promise.resolve(false);
+        const key = `${sessionId}\u0000${toolCallId}`;
+        const waiters = this.sentWaiters.get(key) ?? new Set();
+        this.sentWaiters.set(key, waiters);
+        return new Promise(resolve => {
+            const settle = (sent: boolean) => {
+                waiters.delete(wake);
+                if (waiters.size === 0) this.sentWaiters.delete(key);
+                signal.removeEventListener("abort", abort);
+                resolve(sent);
+            };
+            const wake = () => settle(true);
+            const abort = () => settle(false);
+            waiters.add(wake);
+            signal.addEventListener("abort", abort, {once: true});
+        });
     }
 
     /** Forgets the open record of one tool call. The next update of the tool call carries every field again. */
