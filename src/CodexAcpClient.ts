@@ -1694,6 +1694,9 @@ export class CodexAcpClient {
             sortKey: "recency_at",
             modelProviders: modelProviders,
             sourceKinds: sourceKinds,
+            cwd: requestedCwd,
+            sortKey: "updated_at",
+            sortDirection: "desc",
             useStateDbOnly: true,
         });
 
@@ -1704,6 +1707,7 @@ export class CodexAcpClient {
             updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
         });
 
+        // App Server owns pagination; normalize the returned page for ACP path compatibility.
         let sessions = listResponse.data.map(mapThreadToSession);
         if (requestedCwd) {
             const filtered = listResponse.data
