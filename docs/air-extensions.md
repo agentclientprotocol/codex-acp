@@ -28,6 +28,7 @@ It describes only this adapter.
 - [Session index](#session-index)
 - [Context compaction](#context-compaction)
 - [Session fork point](#session-fork-point)
+- [Session rewind](#session-rewind)
 - [Presentation hints](#presentation-hints)
 - [Predicted follow-up prompt](#predicted-follow-up-prompt)
 - [Removed keys](#removed-keys)
@@ -171,6 +172,7 @@ A client that is not AIR gets no `jetbrains` key and no `goal` key in the `initi
 | `nativeSubagentSessions` | Reports a Codex subagent as a native ACP child session. | [Native subagent sessions](#native-subagent-sessions) |
 | `codexHooks` | Lets AIR review and trust startup hooks before it opens a session. | [Hook trust](#hook-trust) |
 | `sessionIndex` | Serves `session/list` as the session index of AIR, as the ACP session list extensions RFD and RFD #2161 describe, adds rename and archive requests, and pushes the changed rows of a cwd to a subscription. | [Session index](#session-index) |
+| `sessionRewind` | Accepts `_session/rewind`, and announces its session cursors with the `rewind` capability. ACP v1 only. | [Session rewind](#session-rewind) |
 
 Five agent capabilities come with `sessionIndex` and are listed exactly when it is. The client does not declare them:
 
@@ -720,6 +722,7 @@ A client must not assume support for an action that is not advertised.
 
 The client sends `_session/goal` with `sessionId` and `action`.
 `set` also requires a non-blank `objective`.
+While a [session rewind](#session-rewind) runs, `set` and `resume` fail with `invalidRequest` (`-32600`): retry after the rewind.
 `/goal` stays the user-facing way to set, pause, resume, or clear a goal.
 The adapter still accepts `_codex/session/goal_control` as a legacy alias. It does not advertise the alias.
 
@@ -1453,6 +1456,54 @@ It adds this object to the `session/fork` request:
 - An invalid field fails the request with `invalidParams`.
 - When no message matches, the request fails with `invalidParams`.
 - The fork keeps the history up to the turn that holds the message.
+
+## Session rewind
+
+AIR edits a user message by removing that message and everything after it from the Codex thread, in the same session: same session id, no fork.
+`_session/rewind` asks the agent for that, at a [session cursor](session-cursors.md):
+
+```json
+{ "sessionId": "0f7c…", "cursorId": "before:<turn id>" }
+```
+
+The response is `{ "rewound": true }`, which means that the cut is live and persisted, or `{ "rewound": false, "reason": "<reason>" }` when nothing changed.
+The client keeps its own history then.
+
+- ACP v1 only. The agent lists `sessionRewind` in its `initialize` capabilities only for an AIR client that declares it. Every other client, and every ACP v2 client, gets the method not found (`-32601`).
+- `cursorId` is a cursor that the session announced with the `rewind` capability: the cursor before a turn that starts with a visible user message.
+  The agent adds `rewind` to a cursor only for a declared v1 client, and only when the thread has paginated history and is not ephemeral: Codex cannot revert another thread. Other cursors keep `{ "fork": {} }`, and a request that names one fails with `-32602`.
+  The first turn has no cursor, so a client offers no edit for it.
+- The cut removes the cursor's turn and every later turn. The session no longer announces those cursors, and a request that names one fails with `-32602` as an unknown cursor.
+- A live v1 prompt is not reported to the client that sent it, so its cursor is anchored `after` the last entity that the client holds.
+  After a rewind that is the entity that the client held before the removed message. If the agent holds no such record, for example after the session was resumed without a replay, the next prompt gets no cursor.
+- The adapter clears the predicted follow-up prompt of the session: it was for the removed turns.
+- The reload that `thread/revert` makes sends the client no update.
+- A prompt sent while the rewind runs waits for it, and runs on the rewound thread.
+- `_session/goal` `set` and `resume` can start a turn, so while the rewind runs they fail with `-32600` (`Session <id> is being rewound: retry after the rewind`). `pause` and `clear` are not affected.
+
+| `reason`          | When                                                                                                                                                                                                      |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `busy`            | A prompt runs, is queued or starts, Codex runs a turn that no prompt started (such as a goal continuation), or a steering request or a system prompt update is in flight. AIR stops the turn before it sends the request. |
+| `backgroundWork`  | A background terminal command or a native subagent runs. The reload of the thread would kill it.                                                                                                         |
+| `providerRefused` | `thread/revert` failed and the turn is still in the thread. The conversation is as it was.                                                                                                               |
+
+A `thread/revert` that fails after the cut, which the thread shows by no longer listing the turn, counts as `rewound: true`.
+When the thread cannot be read to tell, the request fails with the error of `thread/revert`.
+
+The request fails with `-32602` for:
+
+- a `cursorId` that is not a rewind cursor of the session: an unknown id, an id that is no cursor, the cursor of the first turn, of a turn that does not start with a visible user message, or of a turn that is still running (or follows one that is);
+- a session whose thread cannot be reverted (legacy or ephemeral history);
+- a session id that names a native subagent's child session.
+
+A `sessionId` that the agent does not hold fails with `-32002`.
+
+### Codex mapping
+
+The adapter calls `thread/revert` with `{ threadId, beforeTurnId }`, where `beforeTurnId` is the turn of the cursor. Codex persists the cut.
+Every `thread/revert` call, even a failing one, reloads the thread: that interrupts a running turn and kills the background terminals.
+So the adapter decides `busy` and `backgroundWork` before it calls.
+File changes are not reverted. The files stay as the removed turns left them.
 
 ## Presentation hints
 

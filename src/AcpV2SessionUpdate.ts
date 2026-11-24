@@ -123,8 +123,9 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
         }
         case "subagent_update":
             return update;
+        // Same shape. Only the type of an unknown anchor variant differs, and the adapter sends known ones.
         case "cursor_update":
-            throw acp.RequestError.internalError(undefined, "Session cursors are not supported");
+            return update as acpV2.SessionUpdate;
         case "subagent_spawned":
         case "subagent_state_update":
         case "async_task_spawned":

@@ -72,6 +72,8 @@ import type {
     ThreadListResponse,
     ThreadReadParams,
     ThreadReadResponse,
+    ThreadRevertParams,
+    ThreadRevertResponse,
     ThreadTurnsListParams,
     ThreadTurnsListResponse,
     ThreadItem,
@@ -712,6 +714,11 @@ export class CodexAppServerClient {
 
     async threadRead(params: ThreadReadParams): Promise<ThreadReadResponse> {
         return await this.sendRequest({ method: "thread/read", params: params });
+    }
+
+    /** Drops the turn `beforeTurnId` and every later one. Reloads the thread, which interrupts its running turn. */
+    async threadRevert(params: ThreadRevertParams): Promise<ThreadRevertResponse> {
+        return await this.sendRequest({method: "thread/revert", params});
     }
 
     async threadTurnsList(params: ThreadTurnsListParams): Promise<ThreadTurnsListResponse> {

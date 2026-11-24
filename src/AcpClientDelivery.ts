@@ -1,5 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk/unstable";
 import type {AcpClientConnection, UpdateSessionEvent} from "./ACPSessionConnection";
+import {LastReportedEntity} from "./SessionCursors";
 import {ToolCallReports} from "./ToolCallReports";
 
 type SessionUpdateParams = {sessionId: string; update: UpdateSessionEvent};
@@ -12,6 +13,8 @@ type SessionUpdateParams = {sessionId: string; update: UpdateSessionEvent};
  */
 export class AcpClientDelivery {
     readonly reports: ToolCallReports;
+    /** What a v1 live cursor anchors to: the last entity that the client holds. */
+    readonly entities = new LastReportedEntity();
     private readonly sessionRequests = new Map<string, Set<AbortController>>();
     private readonly closedSessions = new Set<string>();
     private readonly urlElicitations = new Map<string, {sessionId: string | null}>();
@@ -91,6 +94,7 @@ export class AcpClientDelivery {
     /** Final teardown updates have been sent. Nothing else may publish for this session lifetime. */
     closeSession(sessionId: string): void {
         this.closedSessions.add(sessionId);
+        this.entities.forget(sessionId);
         this.finishSessionSetup(sessionId);
         for (const [id, scope] of this.urlElicitations) {
             if (scope.sessionId === sessionId) this.urlElicitations.delete(id);
@@ -128,6 +132,7 @@ export class AcpClientDelivery {
         const update = this.reports.prepare(params.sessionId, params.update, replay);
         if (update === null) return;
         await send({...params, update});
+        this.entities.sending(params.sessionId, update);
         // A fresh announcement reopens a child view after its parent is resumed.
         if (update.sessionUpdate === "subagent_update") this.openSession(update.sessionId);
         if (update.sessionUpdate === "subagent_spawned") this.openSession(update.subagentSessionId);

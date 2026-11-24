@@ -1,0 +1,26 @@
+[
+  {
+    "cursorId": "before:turn-2",
+    "capabilities": {
+      "fork": {}
+    },
+    "anchor": {
+      "messageId": "agent-1",
+      "position": "after",
+      "type": "agent_message"
+    },
+    "sessionUpdate": "cursor_update"
+  },
+  {
+    "cursorId": "before:turn-3",
+    "capabilities": {
+      "fork": {}
+    },
+    "anchor": {
+      "messageId": "agent-1",
+      "position": "after",
+      "type": "agent_message"
+    },
+    "sessionUpdate": "cursor_update"
+  }
+]

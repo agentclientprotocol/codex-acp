@@ -8,6 +8,8 @@ import type {Model} from "./app-server/v2";
 import type {SessionMetadata} from "./SessionMetadata";
 import type {AcpMcpServer, WithAcpMcpServers} from "./McpServerConfig";
 import type {SessionInstructions} from "./ClientSystemPrompt";
+import type {CursorTurn} from "./SessionCursors";
+import {isRewindableThread} from "./SessionRewind";
 
 export type SessionForkDependencies = {
     codexClient: CodexAppServerClient;
@@ -25,6 +27,8 @@ export type SessionForkDependencies = {
     releaseFailedFork(threadId: string): Promise<void>;
     /** `thread/fork` answered with the thread of the fork. */
     forkCreated(threadId: string): void;
+    /** Finds the turns around the cursor of a fork at a session cursor. */
+    resolveCursorTurn(sessionId: string, cursorId: string): Promise<CursorTurn>;
 };
 
 export async function forkSession(
@@ -34,7 +38,7 @@ export async function forkSession(
     instructions?: SessionInstructions,
 ): Promise<SessionMetadata> {
     await dependencies.refreshSkills(request.cwd, additionalDirectories);
-    const lastTurnId = await resolveForkTurnId(request, dependencies.codexClient);
+    const lastTurnId = await resolveForkTurnId(request, dependencies);
     const {config, skippedMcpServers, defaultPermissionProfileId: _defaultPermissionProfileId, ...permissionProfileMetadata} = await dependencies.createSessionConfig(
         request.cwd,
         additionalDirectories,
@@ -71,19 +75,27 @@ export async function forkSession(
         additionalDirectories,
         skippedMcpServers,
         activePermissionProfileId: response.activePermissionProfile?.id ?? null,
+        rewindable: isRewindableThread(response.thread),
         ...permissionProfileMetadata,
         ...(instructions ? {instructions} : {}),
     };
 }
 
 async function resolveForkTurnId(
-    request: Pick<acp.ForkSessionRequest, "sessionId" | "_meta">,
-    codexClient: CodexAppServerClient,
+    request: Pick<acp.ForkSessionRequest, "sessionId" | "_meta" | "cursorId">,
+    dependencies: Pick<SessionForkDependencies, "codexClient" | "resolveCursorTurn">,
 ): Promise<string | undefined> {
     const forkPoint = readAirForkPoint(request._meta);
+    if (request.cursorId != null) {
+        if (forkPoint) {
+            throw RequestError.invalidParams(undefined, "A fork takes either a cursorId or an AIR fork point, not both");
+        }
+        // The fork keeps the turns before the cursor's turn: `lastTurnId` is the last turn that stays.
+        return (await dependencies.resolveCursorTurn(request.sessionId, request.cursorId)).previousTurnId;
+    }
     if (!forkPoint) return undefined;
 
-    const history = await codexClient.threadReadWithHistory(request.sessionId);
+    const history = await dependencies.codexClient.threadReadWithHistory(request.sessionId);
     const candidateIds = airForkMessageIdCandidates(forkPoint.messageId);
     const itemTurnId = candidateIds
         .map(candidateId => history.thread.turns.find(turn => turn.items.some(item => item.id === candidateId))?.id)

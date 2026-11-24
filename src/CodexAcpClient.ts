@@ -70,7 +70,8 @@ import {createCodexCollaborationMode} from "./CollaborationModeConfig";
 import type {ModeKind} from "./app-server/ModeKind";
 import {arePathBasenamesEqual, arePathsEqual, isAbsolutePathLike, isAbsoluteProtocolPath} from "./PathUtils";
 import {CodexSubagentSubscriptions} from "./subagents/CodexSubagentSubscriptions";
-import {forkSession as runForkSession} from "./SessionFork";
+import {isRewindableThread} from "./SessionRewind";
+import {forkSession as runForkSession, type SessionForkDependencies} from "./SessionFork";
 import type {SessionMetadata, SessionMetadataWithThread, SessionOptionMetadata} from "./SessionMetadata";
 import {StoredSessionSettings} from "./StoredSessionSettings";
 import {isArchivedRolloutPath} from "./SessionIndexMutations";
@@ -738,6 +739,7 @@ export class CodexAcpClient {
             ...this.resumedSessionOptions(response, defaultPermissionProfileId, live),
             threadStatus: response.thread.status,
             sessionTitle: normalizeSessionTitle(listedSessionTitle(response.thread)),
+            rewindable: isRewindableThread(response.thread),
             modelProvider: response.modelProvider,
             additionalDirectories,
             skippedMcpServers,
@@ -751,6 +753,7 @@ export class CodexAcpClient {
         releaseFailedFork: (threadId: string) => Promise<void> = threadId => this.closeSession(threadId),
         forkCreated: (threadId: string) => void = () => {},
         previousInstructions?: SessionInstructions,
+        resolveCursorTurn?: SessionForkDependencies["resolveCursorTurn"],
     ): Promise<SessionMetadata> {
         const instructions = await this.resolveSessionInstructions(request, previousInstructions);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
@@ -766,6 +769,9 @@ export class CodexAcpClient {
             getCollaborationMode: sessionId => this.getCollaborationMode(sessionId),
             releaseFailedFork,
             forkCreated,
+            resolveCursorTurn: resolveCursorTurn ?? (async () => {
+                throw new Error("Forking at a session cursor needs a cursor resolver");
+            }),
         }, instructions);
     }
 
@@ -821,6 +827,7 @@ export class CodexAcpClient {
             ...this.resumedSessionOptions(response, defaultPermissionProfileId, live),
             modelProvider: response.modelProvider,
             thread,
+            rewindable: isRewindableThread(response.thread),
             threadStatus: response.thread.status,
             history,
             additionalDirectories,
@@ -1001,6 +1008,7 @@ export class CodexAcpClient {
             models: codexModels,
             collaborationMode: this.getCollaborationMode(response.thread.id),
             ...(response.thread.status?.type === "active" ? {threadStatus: response.thread.status} : {}),
+            rewindable: isRewindableThread(response.thread),
             modelProvider: response.modelProvider,
             currentServiceTier: response.serviceTier ?? null,
             additionalDirectories,

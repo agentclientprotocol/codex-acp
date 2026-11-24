@@ -1,0 +1,114 @@
+[
+  {
+    "messageId": "u1",
+    "content": {
+      "text": "Text of u1",
+      "type": "text"
+    },
+    "sessionUpdate": "user_message_chunk"
+  },
+  {
+    "messageId": "a1",
+    "content": {
+      "text": "Text of a1",
+      "type": "text"
+    },
+    "sessionUpdate": "agent_message_chunk"
+  },
+  {
+    "messageId": "u2",
+    "content": {
+      "text": "Text of u2",
+      "type": "text"
+    },
+    "sessionUpdate": "user_message_chunk"
+  },
+  {
+    "cursorId": "before:turn-2",
+    "capabilities": {
+      "fork": {}
+    },
+    "anchor": {
+      "messageId": "u2",
+      "position": "before",
+      "type": "user_message"
+    },
+    "sessionUpdate": "cursor_update"
+  },
+  {
+    "messageId": "a2",
+    "content": {
+      "text": "Text of a2",
+      "type": "text"
+    },
+    "sessionUpdate": "agent_message_chunk"
+  },
+  {
+    "messageId": "u2-steer",
+    "content": {
+      "text": "Text of u2-steer",
+      "type": "text"
+    },
+    "sessionUpdate": "user_message_chunk"
+  },
+  {
+    "messageId": "a2-after-steer",
+    "content": {
+      "text": "Text of a2-after-steer",
+      "type": "text"
+    },
+    "sessionUpdate": "agent_message_chunk"
+  },
+  {
+    "messageId": "a3",
+    "content": {
+      "text": "Text of a3",
+      "type": "text"
+    },
+    "sessionUpdate": "agent_message_chunk"
+  },
+  {
+    "messageId": "a4",
+    "content": {
+      "text": "Text of a4",
+      "type": "text"
+    },
+    "sessionUpdate": "agent_message_chunk"
+  },
+  {
+    "messageId": "u4-late",
+    "content": {
+      "text": "Text of u4-late",
+      "type": "text"
+    },
+    "sessionUpdate": "user_message_chunk"
+  },
+  {
+    "messageId": "u5",
+    "content": {
+      "text": "Text of u5",
+      "type": "text"
+    },
+    "sessionUpdate": "user_message_chunk"
+  },
+  {
+    "cursorId": "before:turn-5",
+    "capabilities": {
+      "fork": {}
+    },
+    "anchor": {
+      "messageId": "u5",
+      "position": "before",
+      "type": "user_message"
+    },
+    "sessionUpdate": "cursor_update"
+  },
+  {
+    "messageId": "a5",
+    "content": {
+      "text": "Text of a5",
+      "type": "text"
+    },
+    "sessionUpdate": "agent_message_chunk"
+  }
+]

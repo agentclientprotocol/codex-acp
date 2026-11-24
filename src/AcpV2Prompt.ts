@@ -76,8 +76,9 @@ export type UserMessageInsertion = {
     /**
      * An adopted turn was already running when Codex steered this input into it.
      * Withdrawing this prompt must not interrupt that turn.
+     * `cursor` is whether the turn starts with this prompt after an earlier turn, so the prompt has a cursor.
      */
-    onTurnStarted?: (turn: {threadId: string, turnId: string, adopted: boolean}) => void;
+    onTurnStarted?: (turn: {threadId: string, turnId: string, adopted: boolean, cursor: boolean}) => void;
     /** Reports terminal work failure without changing the v1 prompt response or depending on AIR. */
     onFailure?: (error: acpV2.Error) => void;
 };
