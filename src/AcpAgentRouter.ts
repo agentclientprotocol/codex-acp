@@ -91,9 +91,11 @@ function createRouter(
     createAgent: CreateAgent,
     responses: AcpResponseDelivery,
 ): acpV2.AgentProtocolRouter {
-    const mcp = new acp.McpOverAcpCaller();
-    const bridge = new McpOverAcpHttpBridge(mcp);
     let codexAcpServer: CodexAcpServer | null = null;
+    const mcp = new acp.McpOverAcpCaller();
+    const bridge = new McpOverAcpHttpBridge(mcp, {
+        attribution: request => codexAcpServer?.mcpRequestAttribution(request.params, request.signal),
+    });
     const getAgent = (params?: {sessionId?: unknown}): CodexAcpServer => {
         if (!codexAcpServer) {
             throw acp.RequestError.internalError("ACP agent is not connected");

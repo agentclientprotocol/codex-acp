@@ -297,6 +297,11 @@ export class CodexSubagentEventRouter {
             : this.rootSessionId;
     }
 
+    /** The ACP session that reports the items of a subagent thread, or `null` when subagents get no session. */
+    subagentSessionId(threadId: string): string | null {
+        return this.supported ? threadId : null;
+    }
+
     closingChildSessions(notification: ServerNotification): ClosingChildSession[] {
         if (!this.supported) return [];
         if (notification.method === "turn/completed") {

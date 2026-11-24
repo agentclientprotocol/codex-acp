@@ -1,30 +1,50 @@
 import * as acp from "@agentclientprotocol/sdk/unstable";
 import * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
+import {spawn} from "node:child_process";
 import {once} from "node:events";
-import {mkdtempSync} from "node:fs";
+import {appendFileSync, mkdirSync, mkdtempSync} from "node:fs";
 import {createServer} from "node:http";
 import type {AddressInfo} from "node:net";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
+import {Readable, Writable} from "node:stream";
 import {fileURLToPath} from "node:url";
-import {expect, it} from "vitest";
+import {expect, it, vi} from "vitest";
 import {createAcpAgentRouter} from "../../AcpAgentRouter";
+import {AgentMode} from "../../AgentMode";
 import {CodexAcpClient} from "../../CodexAcpClient";
 import {CodexAcpServer} from "../../CodexAcpServer";
 import {CodexAppServerClient} from "../../CodexAppServerClient";
 import {startCodexConnection} from "../../CodexJsonRpcConnection";
 import {removeDirectoryWithRetry, writeCodexHomeConfig} from "../acp-test-utils";
-import {describeIntegration} from "./integration-fixture";
+import {describeIntegration, INTEGRATION_MODEL_ID} from "./integration-fixture";
+import {functionCallResponse, startMockResponsesServer, textResponse} from "./mock-responses-server";
 
-async function connectClient(version: 1 | 2, stream: acp.Stream, provider: acp.McpOverAcpProvider) {
+async function connectClient(
+    version: 1 | 2, stream: acp.Stream, provider: acp.McpOverAcpProvider, capabilities: Record<string, unknown> = {},
+) {
     if (version === 1) {
         const {agent} = acp.client().onRequest(acp.methods.client.mcp.message, provider.handleRequest).connect(stream);
-        await agent.request(acp.methods.agent.initialize, {protocolVersion: 1});
+        await agent.request(acp.methods.agent.initialize, {protocolVersion: 1, clientCapabilities: capabilities});
         return {agent, closeSession: (sessionId: string) => agent.request(acp.methods.agent.session.close, {sessionId})};
     }
     const {agent} = acpV2.client().onRequest(acpV2.methods.client.mcp.message, provider.handleRequest).connect(stream);
-    await agent.request(acpV2.methods.agent.initialize, {protocolVersion: 2, info: {name: "test", version: "1"}});
+    await agent.request(acpV2.methods.agent.initialize, {protocolVersion: 2, info: {name: "test", version: "1"}, capabilities});
     return {agent, closeSession: (sessionId: string) => agent.request(acpV2.methods.agent.session.close, {sessionId})};
+}
+
+/** Passes the adapter's output on, and gives `observe` each JSON-RPC message in it, in the order the adapter wrote them. */
+function observed(output: ReadableStream<Uint8Array>, observe: (message: any) => void): ReadableStream<Uint8Array> {
+    const decoder = new TextDecoder();
+    let unfinished = "";
+    return output.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+            const lines = (unfinished + decoder.decode(chunk, {stream: true})).split("\n");
+            unfinished = lines.pop()!;
+            for (const line of lines) if (line.trim()) observe(JSON.parse(line));
+            controller.enqueue(chunk);
+        },
+    }));
 }
 
 const progress = {progressToken: "missing-tool", progress: 1};
@@ -146,9 +166,11 @@ describeIntegration("integration: MCP-over-ACP", () => {
             expect(result).toMatchObject({content: [{type: "text", text: "hello from ACP"}]});
             expect(requests[0]?.method).toBe("server/discover");
             expect(requests.map(r => r.method)).toContain("tools/list");
+            // A call through the app-server API is no tool call of the session. Codex names only its thread.
             expect(requests.filter(r => r.method === "tools/call")).toMatchObject([{
-                serverId: declaration.serverId, params: {name: "echo", arguments: {message: "hello"}},
+                serverId: declaration.serverId, sessionId: session.sessionId, params: {name: "echo", arguments: {message: "hello"}},
             }]);
+            expect(requests.some(r => r.toolCallId !== undefined)).toBe(false);
             expect(requests.every(r => r.protocolVersion === acp.MCP_PROTOCOL_VERSION)).toBe(true);
             expect(new Set(requests.map(r => r.requestId)).size).toBe(requests.length);
 
@@ -166,5 +188,114 @@ describeIntegration("integration: MCP-over-ACP", () => {
             removeDirectoryWithRetry(cwd);
         }
         await expect(fetch(endpoint.url)).rejects.toThrow();
+    });
+
+    // The mock model makes the root agent call the client's tool, then a subagent call it.
+    it.each([
+        {version: 1, childSessions: "standard"},
+        {version: 2, childSessions: "standard"},
+        {version: 1, childSessions: "air"},
+        {version: 1, childSessions: "none"},
+    ] as const)("names the session and tool call of a tool call (ACP v$version, child sessions: $childSessions)", async ({version, childSessions}) => {
+        const mock = await startMockResponsesServer();
+        const scripts = {root: 0, worker: 0};
+        mock.setResponseHandler(async request => {
+            const metadata = (request as {client_metadata?: Record<string, string>}).client_metadata?.["x-codex-turn-metadata"];
+            const agentName = metadata ? (JSON.parse(metadata) as {agent_name?: string}).agent_name : undefined;
+            if (agentName === "/root/worker") {
+                return scripts.worker++ === 0
+                    ? functionCallResponse("child-echo", "echo", {message: "from child"}, "mcp__client_tools")
+                    : textResponse("CHILD_DONE");
+            }
+            switch (scripts.root++) {
+                case 0: return functionCallResponse("root-echo", "echo", {message: "from root"}, "mcp__client_tools");
+                case 1: return functionCallResponse("delegate-once", "spawn_agent", {
+                    message: "Call echo", task_name: "worker", fork_turns: "none",
+                }, "collaboration");
+                default: return textResponse("ROOT_DONE");
+            }
+        });
+        const temporaryRoot = join(process.cwd(), "node_modules", ".cache", "codex-acp-tests");
+        mkdirSync(temporaryRoot, {recursive: true});
+        const root = mkdtempSync(join(temporaryRoot, "mcp-attribution-"));
+        const cwd = join(root, "workspace");
+        const codexHome = join(root, "codex-home");
+        mkdirSync(cwd);
+        mkdirSync(codexHome);
+        writeCodexHomeConfig(codexHome, {
+            model: INTEGRATION_MODEL_ID.model, model_reasoning_effort: INTEGRATION_MODEL_ID.effort,
+            web_search: "disabled", model_provider: "integration",
+            "model_providers.integration.name": "Local integration mock",
+            "model_providers.integration.base_url": mock.baseUrl, "model_providers.integration.wire_api": "responses",
+        });
+        appendFileSync(join(codexHome, "config.toml"), "\nfeatures.multi_agent = true\nfeatures.multi_agent_v2 = true\n");
+        // Full access, so that Codex does not ask before it calls the tool.
+        const adapter = spawn(process.execPath, ["--import", "tsx", "src/index.ts"], {
+            cwd: process.cwd(), env: {...process.env, CODEX_HOME: codexHome, INITIAL_AGENT_MODE: AgentMode.AgentFullAccess.id},
+            stdio: ["pipe", "pipe", "pipe"],
+        });
+        let stderr = "";
+        adapter.stderr.on("data", chunk => { stderr += chunk.toString(); });
+        const provider = new acp.McpOverAcpProvider();
+        // The child sessions and tool calls that the adapter had told the client about when it wrote each request.
+        const announced = new Set<string>();
+        const reported = new Set<string>();
+        const requests: Array<Record<string, unknown>> = [];
+        const output = observed(Readable.toWeb(adapter.stdout) as ReadableStream<Uint8Array>, ({id, method, params}) => {
+            if (method === "session/update") {
+                const {sessionId, update} = params;
+                if (update.sessionUpdate === "subagent_update") announced.add(update.sessionId);
+                if (update.sessionUpdate === "subagent_spawned") announced.add(update.subagentSessionId);
+                if (update.toolCallId) reported.add(`${sessionId} ${update.toolCallId}`);
+            } else if (method === "mcp/message" && id !== undefined) {
+                const {sessionId, toolCallId} = params;
+                requests.push({
+                    method: params.method, sessionId, toolCallId,
+                    ...(params.method === "tools/call" ? {
+                        message: params.params.arguments.message,
+                        toolCallReported: reported.has(`${sessionId} ${toolCallId}`),
+                        childAnnounced: announced.has(sessionId),
+                    } : {}),
+                });
+            }
+        });
+        try {
+            const {agent} = await connectClient(version, acp.ndJsonStream(Writable.toWeb(adapter.stdin), output), provider, {
+                auth: {_meta: {gateway: true}},
+                ...(version === 1 && childSessions === "standard" ? {subagents: {}} : {}),
+                ...(childSessions === "air" ? {_meta: {jetbrains: {air: {version: 1, capabilities: ["nativeSubagentSessions"]}}}} : {}),
+            });
+            const request = (method: string, params: unknown): Promise<any> =>
+                (agent as {request(method: string, params: unknown, options: {cancellationSignal: AbortSignal}): Promise<unknown>})
+                    .request(method, params, {cancellationSignal: AbortSignal.timeout(20_000)});
+            await request(version === 1 ? "authenticate" : "auth/login", {
+                methodId: "gateway", _meta: {gateway: {baseUrl: mock.baseUrl, headers: {}}},
+            });
+            const {declaration} = provider.registerServer(agent, {name: "client tools", handler: serve});
+            const {sessionId} = await request("session/new", {cwd, mcpServers: [declaration]});
+            await request("session/prompt", {sessionId, prompt: [{type: "text", text: "Call echo, then delegate"}]});
+            await vi.waitFor(() => expect(requests.filter(r => r["method"] === "tools/call"), stderr).toHaveLength(2), {timeout: 15_000});
+
+            const calls = requests.filter(r => r["method"] === "tools/call");
+            const fromRoot = {method: "tools/call", message: "from root", sessionId, toolCallId: "root-echo",
+                toolCallReported: true, childAnnounced: false};
+            if (childSessions !== "none") {
+                expect(calls).toEqual([fromRoot, {method: "tools/call", message: "from child",
+                    sessionId: expect.any(String), toolCallId: "child-echo",
+                    toolCallReported: true, childAnnounced: true}]);
+            } else {
+                // The client has no session for the subagent and no report of its tool call.
+                expect(calls).toEqual([fromRoot, {method: "tools/call", message: "from child",
+                    sessionId, toolCallId: undefined, toolCallReported: false, childAnnounced: false}]);
+            }
+            // Discovery and listing are not part of a tool call. Codex does not say which thread sent them.
+            const others = requests.filter(r => r["method"] !== "tools/call");
+            expect(others.map(r => r["method"])).toEqual(expect.arrayContaining(["server/discover", "tools/list"]));
+            expect(others.every(r => r["sessionId"] === undefined && r["toolCallId"] === undefined)).toBe(true);
+        } finally {
+            adapter.kill();
+            await mock.close();
+            removeDirectoryWithRetry(root);
+        }
     });
 });

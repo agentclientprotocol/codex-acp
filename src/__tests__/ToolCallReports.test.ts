@@ -191,6 +191,37 @@ describe("ToolCallReports turn end", () => {
     });
 });
 
+describe("ToolCallReports sent reports", () => {
+    const start = {sessionUpdate: "tool_call", toolCallId: "tool-1", title: "Run", status: "in_progress"} as const;
+    const finish = {sessionUpdate: "tool_call_update", toolCallId: "tool-1", status: "completed"} as const;
+
+    it("resolves a waiter when the report of the tool call is sent on its session", async () => {
+        const reports = new ToolCallReports();
+        const waiting = reports.whenSent("s", "tool-1", AbortSignal.timeout(1000));
+        reports.sent("other", start);
+        reports.sent("s", {...start, toolCallId: "tool-2"});
+        await expect(Promise.race([waiting, Promise.resolve("waiting")])).resolves.toBe("waiting");
+
+        reports.sent("s", start);
+
+        await expect(waiting).resolves.toBe(true);
+        await expect(reports.whenSent("s", "tool-1", AbortSignal.abort())).resolves.toBe(true);
+    });
+
+    it.each([
+        ["never sent", (_reports: ToolCallReports) => {}],
+        ["finished", (reports: ToolCallReports) => { reports.sent("s", start); reports.sent("s", finish); }],
+        ["released at the turn end", (reports: ToolCallReports) => { reports.sent("s", start); reports.releaseOpen("s"); }],
+    ])("resolves false at the abort for a tool call that was %s", async (_name, arrange) => {
+        const reports = new ToolCallReports();
+        arrange(reports);
+        const abort = new AbortController();
+        const waiting = reports.whenSent("s", "tool-1", abort.signal);
+        abort.abort();
+        await expect(waiting).resolves.toBe(false);
+    });
+});
+
 describe("ToolCallReports late output", () => {
     it("drops output chunks that arrive after the tool call finished", () => {
         const reports = new ToolCallReports();
