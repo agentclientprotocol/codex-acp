@@ -13,6 +13,15 @@ const PERMISSION_PROFILE_MODE_PREFIX = "permission-profile:";
 
 type AgentModeKind = "plan" | "auto_review" | "standard" | "full_access";
 
+/**
+ * The permissions Codex resolved for a thread, as reported by `thread/start`,
+ * `thread/resume`, and `thread/fork`. A field is null when the response omitted it.
+ */
+export type ResolvedPermissions = {
+    approvalPolicy: AskForApproval | null;
+    sandboxPolicy: SandboxPolicy | null;
+};
+
 export class AgentMode {
     readonly id: string;
     readonly name: string;
@@ -193,6 +202,7 @@ export class AgentMode {
     static getInitialAgentMode(
         availableModes: AgentMode[] = AgentMode.all(),
         activePermissionProfileId: string | null = null,
+        resolvedPermissions: ResolvedPermissions | null = null,
     ): AgentMode {
         const predefinedAgentMode = process.env["INITIAL_AGENT_MODE"];
         if (predefinedAgentMode) {
@@ -204,6 +214,34 @@ export class AgentMode {
                 return profileMode;
             }
         }
+        if (resolvedPermissions !== null) {
+            const resolvedMode = AgentMode.fromResolvedPermissions(resolvedPermissions, availableModes);
+            if (resolvedMode !== null) {
+                return resolvedMode;
+            }
+        }
         return AgentMode.DEFAULT_AGENT_MODE;
+    }
+
+    /** The built-in mode that matches the sandbox and approval policy Codex resolved for a thread, or null when none does. */
+    private static fromResolvedPermissions(
+        {approvalPolicy, sandboxPolicy}: ResolvedPermissions,
+        availableModes: AgentMode[],
+    ): AgentMode | null {
+        const find = (mode: AgentMode): AgentMode | null =>
+            availableModes.find(candidate => candidate.id === mode.id) ?? null;
+        if (sandboxPolicy === null) {
+            return null;
+        }
+        switch (sandboxPolicy.type) {
+            case "dangerFullAccess":
+                return approvalPolicy === "never" ? find(AgentMode.AgentFullAccess) : null;
+            case "readOnly":
+                return approvalPolicy === "on-request" ? find(AgentMode.ReadOnly) : null;
+            case "workspaceWrite":
+                return approvalPolicy === "on-request" ? find(AgentMode.Agent) : null;
+            case "externalSandbox":
+                return null;
+        }
     }
 }
