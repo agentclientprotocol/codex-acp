@@ -75,6 +75,7 @@ import {forkSession as runForkSession, type SessionForkDependencies} from "./Ses
 import type {SessionMetadata, SessionMetadataWithThread, SessionOptionMetadata} from "./SessionMetadata";
 import {StoredSessionSettings} from "./StoredSessionSettings";
 import {isArchivedRolloutPath} from "./SessionIndexMutations";
+import {SessionOutputs} from "./SessionOutputs";
 import {runAccountLogin} from "./CodexAccountLogin";
 import {throwIfRequestCancelled, withRequestCancellation} from "./RequestCancellation";
 import {isKeyedPromptId} from "./AcpV2Prompt";
@@ -187,6 +188,7 @@ export class CodexAcpClient {
     private skillExtraRoots: string[] = [];
     private configPath: string | null = null;
     private verifiedMcpBridge?: McpOverAcpToHttp;
+    readonly sessionOutputs = SessionOutputs.fromEnvironment();
 
     constructor(
         codexClient: CodexAppServerClient,
@@ -716,6 +718,7 @@ export class CodexAcpClient {
         live?: LiveSessionOptions,
     ): Promise<SessionMetadata> {
         const instructions = await this.resolveSessionInstructions(request, previousInstructions);
+        const developerInstructions = await this.withOutputInstructions(request.cwd, instructions?.text !== undefined ? instructions.developerInstructions : undefined);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
@@ -727,7 +730,7 @@ export class CodexAcpClient {
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
-            ...(instructions?.text !== undefined ? {developerInstructions: instructions.developerInstructions} : {}),
+            ...(developerInstructions !== undefined ? {developerInstructions} : {}),
         }, request, previousInstructions);
         onSubscribed?.();
         const codexModels = await this.fetchAvailableModels();
@@ -782,6 +785,7 @@ export class CodexAcpClient {
         live?: LiveSessionOptions,
     ): Promise<SessionMetadataWithThread> {
         const instructions = await this.resolveSessionInstructions(request, previousInstructions);
+        const developerInstructions = await this.withOutputInstructions(request.cwd, instructions?.text !== undefined ? instructions.developerInstructions : undefined);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
@@ -793,7 +797,7 @@ export class CodexAcpClient {
             cwd: request.cwd,
             modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
-            ...(instructions?.text !== undefined ? {developerInstructions: instructions.developerInstructions} : {}),
+            ...(developerInstructions !== undefined ? {developerInstructions} : {}),
         }, request, previousInstructions);
         onSubscribed?.();
         // Resume cursors bound durable history; later turns arrive through live events.
@@ -985,7 +989,7 @@ export class CodexAcpClient {
     async newSession(request: WithAcpMcpServers<acp.NewSessionRequest>): Promise<SessionMetadata> {
         const instructions = await this.resolveSessionInstructions(request, undefined, true);
         const additionalDirectories = readAdditionalDirectories(request.cwd, request.additionalDirectories, request._meta);
-        const developerInstructions = instructions?.developerInstructions;
+        const developerInstructions = await this.withOutputInstructions(request.cwd, instructions?.developerInstructions);
         await this.refreshSkills(request.cwd, additionalDirectories);
 
         const {config, skippedMcpServers, defaultPermissionProfileId: _defaultPermissionProfileId, ...permissionProfileMetadata} =
@@ -1017,6 +1021,15 @@ export class CodexAcpClient {
             activePermissionProfileId: response.activePermissionProfile?.id ?? null,
             ...permissionProfileMetadata,
         };
+    }
+
+    private async withOutputInstructions(cwd: string, instructions: string | undefined): Promise<string | undefined> {
+        if (!this.sessionOutputs) return instructions;
+        const baseline = instructions ?? this.config["developer_instructions"]
+            ?? (await this.codexClient.configRead({cwd, includeLayers: false}))?.config?.developer_instructions;
+        return typeof baseline === "string" && baseline.length
+            ? baseline + "\n\n" + this.sessionOutputs.instructions
+            : this.sessionOutputs.instructions;
     }
 
     private async resolveSessionInstructions(

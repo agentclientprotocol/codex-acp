@@ -41,6 +41,7 @@ import {
     storedSessionError,
 } from "./CodexThreadErrors";
 import {requiresLogout} from "./CodexErrorExplanations";
+import {OUTPUTS_CAPABILITY, OUTPUTS_LIST, OUTPUTS_READ, outputSession, type SessionOutputs} from "./SessionOutputs";
 import {type CodexConnection} from "./CodexJsonRpcConnection";
 import {AppServerRecovery, recoveryLimitsFromEnv} from "./app-server-recovery/AppServerRecovery";
 import {
@@ -1020,6 +1021,7 @@ export class CodexAcpServer {
             steering: {
                 supported: true,
             },
+            ...(this.codexAcpClient.sessionOutputs ? {[OUTPUTS_CAPABILITY]: {version: 1}} : {}),
             ...(this.capabilities.airClient ? {
                 [JETBRAINS_META_KEY]: {
                     [AIR_META_KEY]: {
@@ -1034,6 +1036,18 @@ export class CodexAcpServer {
                 },
             } : {}),
         };
+    }
+
+    listSessionOutputs(sessionId: string) {
+        const outputs = this.codexAcpClient.sessionOutputs;
+        if (!outputs) throw RequestError.methodNotFound(OUTPUTS_LIST);
+        return outputs.list(sessionId);
+    }
+
+    readSessionOutput(params: Parameters<SessionOutputs["read"]>[0]) {
+        const outputs = this.codexAcpClient.sessionOutputs;
+        if (!outputs) throw RequestError.methodNotFound(OUTPUTS_READ);
+        return outputs.read(params);
     }
 
     async listHooks(cwd: string): Promise<HooksListEntry> {
@@ -2386,6 +2400,10 @@ export class CodexAcpServer {
         if (appServer) await appServer;
         logger.log("Deleting session...", {sessionId: params.sessionId});
         const sessionId = params.sessionId;
+        const outputs = this.codexAcpClient.sessionOutputs;
+        if (outputs && !outputSession.safeParse(params).success) {
+            throw RequestError.invalidParams(undefined, "Invalid session ID");
+        }
         const shouldCloseLocalSession = this.hasLocalSession(sessionId);
 
         this.beginSessionCloseFence(sessionId);
@@ -2396,8 +2414,9 @@ export class CodexAcpServer {
                 this.bumpSessionGeneration(sessionId);
             }
 
-            if (this.sessionIndex.enabled) {
-                await this.sessionIndex.deleteThread(sessionId, this.protocolVersion === 2 || shouldCloseLocalSession);
+            if (this.sessionIndex.enabled || outputs) {
+                await this.sessionIndex.deleteThread(sessionId, !!outputs || this.protocolVersion === 2 || shouldCloseLocalSession);
+                await outputs?.remove(sessionId);
             } else {
                 await this.runWithProcessCheck(() => this.codexAcpClient.deleteSession(sessionId));
             }
