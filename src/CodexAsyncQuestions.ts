@@ -220,9 +220,10 @@ export class AsyncQuestionElicitations {
         questions: readonly ToolRequestUserInputQuestion[],
         response: acp.CreateElicitationResponse,
     ): Promise<void> {
+        if (!this.requests.has(message.id)) return;
         const answers = userInputAnswers(response, questions, this.clientCapabilities);
         const replies = questions.flatMap((question, index): AsyncQuestionReply[] => {
-            const answer = userInputAnswerText(answers[question.id]?.answers ?? []);
+            const answer = asyncQuestionAnswerText(response.action, answers[question.id]?.answers ?? []);
             return answer.length === 0 ? [] : [{
                 questionItemId: asyncQuestionItemId(message.id, index),
                 question: question.question,
@@ -230,16 +231,26 @@ export class AsyncQuestionElicitations {
             }];
         });
         if (replies.length === 0) return;
-        if (this.requests.has(message.id)) {
-            try {
-                await this.client.sendReply(formatAsyncQuestionReply(replies));
-                return;
-            } catch (error) {
-                logger.log("Async question answer was not delivered", {sessionId: this.sessionId, error});
-            }
+        try {
+            await this.client.sendReply(formatAsyncQuestionReply(replies));
+        } catch (error) {
+            logger.log("Async question answer was not delivered", {sessionId: this.sessionId, error});
+            await this.client.reportDroppedAnswer();
         }
-        logger.log("Dropped an async question answer", {sessionId: this.sessionId});
-        await this.client.reportDroppedAnswer();
+    }
+}
+
+function asyncQuestionAnswerText(action: acp.CreateElicitationResponse["action"], answers: readonly string[]): string {
+    // Codex has no dismissal field in its reply envelope. Send the outcome as the answer text.
+    switch (action) {
+        case "accept":
+            return userInputAnswerText(answers);
+        case "decline":
+            return "The user declined to answer this question.";
+        case "cancel":
+            return "The user cancelled the question form without answering.";
+        default:
+            return "";
     }
 }
 

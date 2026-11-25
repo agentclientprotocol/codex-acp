@@ -24,8 +24,10 @@ the questions were accepted, and the turn goes on.
 - Both protocol versions stream that turn's output through `session/update`.
   On v1, no new `session/prompt` request owns its completion or usage response.
   On v2, standard `state_update` notifications report its running state and completion.
-- Declining or cancelling sends nothing; the agent keeps its own default.
+- Declining or cancelling sends an explicit result for each question through the same reply path.
+  The answer text says that the user declined or cancelled. The adapter does not interrupt the turn.
 - The form stays open after its turn ends. Closing the session or losing its app-server cancels it.
+  These cancellations do not send a reply or start a new turn.
 - A rejected answer produces a warning notice where the client supports notices.
 - On ACP v2, request metadata lists Air's companion field IDs under
   `_meta.jetbrains.air.customAnswerFields`. The note stays part of its choice.
