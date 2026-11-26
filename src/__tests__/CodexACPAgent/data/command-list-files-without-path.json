@@ -6,6 +6,7 @@
       "update": {
         "sessionUpdate": "tool_call",
         "toolCallId": "command-list-no-path",
+        "name": "exec_command",
         "kind": "read",
         "title": "List files",
         "status": "completed"

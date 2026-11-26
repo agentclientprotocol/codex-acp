@@ -6,6 +6,7 @@
       "update": {
         "sessionUpdate": "tool_call_update",
         "toolCallId": "command-123",
+        "name": "exec_command",
         "status": "completed",
         "_meta": {
           "terminal_output_delta": {

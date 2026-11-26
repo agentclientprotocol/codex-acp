@@ -1,6 +1,7 @@
 [
   {
     "toolCallId": "item-add",
+    "name": "apply_patch",
     "title": "Editing files",
     "kind": "edit",
     "status": "in_progress",
@@ -22,6 +23,16 @@
         "type": "diff"
       }
     ],
+    "rawInput": {
+      "changes": [
+        {
+          "path": "/workspace/added.ts",
+          "kind": {
+            "type": "add"
+          }
+        }
+      ]
+    },
     "sessionUpdate": "tool_call_update"
   },
   {

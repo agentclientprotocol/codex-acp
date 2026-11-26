@@ -7,6 +7,7 @@
   },
   {
     "toolCallId": "item-shell",
+    "name": "exec_command",
     "title": "npm test",
     "kind": "execute",
     "status": "in_progress",

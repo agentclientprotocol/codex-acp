@@ -1,6 +1,7 @@
 [
   {
     "toolCallId": "item-delete",
+    "name": "apply_patch",
     "title": "Editing files",
     "kind": "edit",
     "status": "in_progress",
@@ -22,6 +23,16 @@
         "type": "diff"
       }
     ],
+    "rawInput": {
+      "changes": [
+        {
+          "path": "/workspace/deleted.ts",
+          "kind": {
+            "type": "delete"
+          }
+        }
+      ]
+    },
     "sessionUpdate": "tool_call_update"
   },
   {

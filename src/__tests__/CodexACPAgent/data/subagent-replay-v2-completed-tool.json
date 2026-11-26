@@ -13,6 +13,7 @@
     "sessionId": "thread-1:subagent:worker",
     "update": {
       "toolCallId": "command",
+      "name": "exec_command",
       "title": "sleep 12",
       "kind": "execute",
       "status": "completed",

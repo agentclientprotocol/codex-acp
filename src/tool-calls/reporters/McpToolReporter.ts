@@ -1,8 +1,8 @@
 import type {ThreadItem} from "../../app-server/v2";
-import type {ToolFacts} from "../ToolFacts";
+import type {PermissionToolFacts, ToolFacts} from "../ToolFacts";
 import {toTerminalToolStatus, toToolStatus} from "./ToolStatus";
 
-type McpToolCallItem = ThreadItem & {type: "mcpToolCall"};
+export type McpToolCallItem = ThreadItem & {type: "mcpToolCall"};
 
 /**
  * Reports a Codex MCP tool call.
@@ -12,15 +12,17 @@ type McpToolCallItem = ThreadItem & {type: "mcpToolCall"};
 export class McpToolReporter {
     static started(item: McpToolCallItem): ToolFacts {
         return {
-            toolCallId: item.id,
+            ...mcpIdentity(item),
             report: "start",
             kind: "execute",
             title: `mcp.${item.server}.${item.tool}`,
             status: toToolStatus(item.status),
-            input: mcpInput(item),
             ...resultFacts(item),
-            mcp: true,
         };
+    }
+
+    static permission(item: McpToolCallItem): PermissionToolFacts {
+        return {...mcpIdentity(item), kind: "execute", status: "pending"};
     }
 
     static completed(item: McpToolCallItem): ToolFacts {
@@ -37,6 +39,10 @@ export class McpToolReporter {
     static progress(itemId: string, message: string): ToolFacts {
         return {toolCallId: itemId, report: "update", standard: {mcpProgress: message.trim()}};
     }
+}
+
+function mcpIdentity(item: McpToolCallItem): Pick<ToolFacts, "toolCallId" | "name" | "input" | "mcp"> {
+    return {toolCallId: item.id, name: "mcp_tool_call", input: mcpInput(item), mcp: true};
 }
 
 function mcpInput(item: McpToolCallItem): Record<string, unknown> {

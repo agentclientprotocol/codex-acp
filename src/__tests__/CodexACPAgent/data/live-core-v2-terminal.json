@@ -50,6 +50,7 @@
     "sessionId": "thread-1:subagent:worker",
     "update": {
       "toolCallId": "terminal",
+      "name": "exec_command",
       "title": "sleep 12",
       "kind": "execute",
       "status": "in_progress",

@@ -5,6 +5,7 @@
       "sessionId": "test-session-id",
       "toolCall": {
         "toolCallId": "elicitation:test-session-id:tool-server:1",
+        "name": "mcp_tool_call",
         "kind": "execute",
         "status": "pending",
         "title": "MCP tool call approval",
