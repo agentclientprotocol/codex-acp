@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.12.1](https://github.com/agentclientprotocol/codex-acp/compare/v2.12.0...v2.12.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* update codex to 0.172.0 ([#800](https://github.com/agentclientprotocol/codex-acp/issues/800)) ([61b214e](https://github.com/agentclientprotocol/codex-acp/commit/61b214e774faf251fa1e3fe08fed5451da52056a))
+
 ## [2.12.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.11.0...v2.12.0) (2026-11-24)
 
 
