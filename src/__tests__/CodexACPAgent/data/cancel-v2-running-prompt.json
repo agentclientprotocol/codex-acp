@@ -65,12 +65,6 @@
   },
   {
     "sessionUpdate": {
-      "title": "Hello",
-      "sessionUpdate": "session_info_update"
-    }
-  },
-  {
-    "sessionUpdate": {
       "terminalId": "unfinished",
       "command": "sleep 12",
       "cwd": "/workspace",

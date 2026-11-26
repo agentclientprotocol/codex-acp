@@ -3,8 +3,8 @@ import {TitleGenerator} from "../TitleGenerator";
 import type {CodexAppServerClient} from "../CodexAppServerClient";
 import {deferred} from "./acp-test-utils";
 
-function createGenerator(client: Partial<CodexAppServerClient>) {
-    return new TitleGenerator(client as CodexAppServerClient, "thread-id", "/test/cwd", () => "unset");
+function createGenerator(client: Partial<CodexAppServerClient>, publishFallback: (text: string) => Promise<void> = async () => {}) {
+    return new TitleGenerator(client as CodexAppServerClient, "thread-id", "/test/cwd", () => "unset", publishFallback);
 }
 
 describe("TitleGenerator.waitForIdle", () => {
@@ -14,9 +14,12 @@ describe("TitleGenerator.waitForIdle", () => {
         await expect(generator.waitForIdle(50)).resolves.toBeUndefined();
     });
 
-    it("waits for the rename echo notification before settling", async () => {
-        const turn = deferred<{turn: {items: {type: string; text: string}[]}}>();
-        const threadSetName = vi.fn().mockResolvedValue({});
+    it.each(["before", "after"])("settles when the rename echo arrives %s the write acknowledgement", async when => {
+        const turn = deferred<{turn: {status: "completed"; items: {type: string; text: string}[]}}>();
+        const threadSetName = vi.fn(async () => {
+            if (when === "before") generator.observeRename();
+            return {};
+        });
         const generator = createGenerator({
             threadStart: vi.fn().mockResolvedValue({thread: {id: "ephemeral"}}),
             runTurn: vi.fn().mockReturnValue(turn.promise),
@@ -25,25 +28,20 @@ describe("TitleGenerator.waitForIdle", () => {
 
         generator.onUserMessage("hello");
         let settled = false;
-        const idle = generator.waitForIdle(5_000).then(() => {
+        const idle = generator.waitForIdle(1_000).then(() => {
             settled = true;
         });
         await Promise.resolve();
         expect(settled).toBe(false);
 
-        turn.resolve({turn: {items: [{type: "agentMessage", text: '{"title":"A short title"}'}]}});
-        // Flush the microtask chain (extract title -> threadSetName -> start
-        // waiting for the echo) without resolving the echo itself yet.
-        for (let i = 0; i < 10; i++) {
-            await Promise.resolve();
+        turn.resolve({turn: {status: "completed", items: [{type: "agentMessage", text: '{"title":"A short title"}'}]}});
+        await vi.waitFor(() => expect(threadSetName).toHaveBeenCalledWith({threadId: "thread-id", name: "A short title"}));
+        if (when === "after") {
+            expect(settled).toBe(false);
+            generator.observeRename();
         }
-        expect(threadSetName).toHaveBeenCalledWith({threadId: "thread-id", name: "A short title"});
-        expect(settled).toBe(false);
-
-        // The thread/name/updated notification for this rename arrives.
-        generator.observeRename();
         await idle;
-        expect(settled).toBe(true);
+        expect(generator.isGenerating).toBe(false);
     });
 
     it("gives up after the timeout rather than holding the caller open", async () => {
@@ -58,22 +56,47 @@ describe("TitleGenerator.waitForIdle", () => {
         await expect(generator.waitForIdle(20)).resolves.toBeUndefined();
     });
 
-    it("stops waiting once a failed generation has settled", async () => {
+    it("publishes the fallback once when the title thread cannot start", async () => {
+        const fallback = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
         const generator = createGenerator({
             threadStart: vi.fn().mockRejectedValue(new Error("no ephemeral threads")),
             runTurn: vi.fn(),
             threadSetName: vi.fn(),
-        } as unknown as Partial<CodexAppServerClient>);
+        } as unknown as Partial<CodexAppServerClient>, fallback);
 
         generator.onUserMessage("hello");
 
         await expect(generator.waitForIdle(5_000)).resolves.toBeUndefined();
+        generator.onUserMessage("second prompt");
+        expect(fallback.mock.calls).toEqual([["hello"]]);
+    });
+});
+
+describe("TitleGenerator fallback", () => {
+    it.each([
+        {status: "failed", output: '{"title":"Partial title"}'},
+        {status: "interrupted", output: '{"title":"Partial title"}'},
+        {status: "completed", output: "invalid JSON"},
+        {status: "completed", output: '{"title":null}'},
+        {status: "completed", output: '{"title":"  "}'},
+    ])("uses the prompt when a $status title turn returns $output", async ({status, output}) => {
+        const fallback = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
+        const threadSetName = vi.fn();
+        const generator = createGenerator({
+            threadStart: vi.fn().mockResolvedValue({thread: {id: "ephemeral"}}),
+            runTurn: vi.fn().mockResolvedValue({turn: {status, items: [{type: "agentMessage", text: output}]}}),
+            threadSetName,
+        }, fallback);
+        generator.onUserMessage("first prompt");
+        await generator.waitForIdle(1_000);
+        expect(threadSetName).not.toHaveBeenCalled();
+        expect(fallback.mock.calls).toEqual([["first prompt"]]);
     });
 });
 
 describe("TitleGenerator prompt", () => {
     it("sends only the start of a long first message to the title model", async () => {
-        const runTurn = vi.fn().mockResolvedValue({turn: {items: []}});
+        const runTurn = vi.fn().mockResolvedValue({turn: {status: "completed", items: []}});
         const generator = createGenerator({
             threadStart: vi.fn().mockResolvedValue({thread: {id: "ephemeral"}}),
             runTurn,

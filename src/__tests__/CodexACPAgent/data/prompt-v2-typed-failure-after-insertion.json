@@ -65,12 +65,6 @@
   },
   {
     "sessionUpdate": {
-      "title": "Hello",
-      "sessionUpdate": "session_info_update"
-    }
-  },
-  {
-    "sessionUpdate": {
       "error": {
         "code": -32603,
         "message": "You've hit your usage limit."

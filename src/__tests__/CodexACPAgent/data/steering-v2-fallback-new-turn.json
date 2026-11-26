@@ -53,12 +53,6 @@
     }
   },
   {
-    "sessionUpdate": {
-      "title": "start fresh",
-      "sessionUpdate": "session_info_update"
-    }
-  },
-  {
     "codexNotification": "turn/completed"
   },
   {

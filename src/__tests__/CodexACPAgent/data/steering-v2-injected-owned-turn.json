@@ -58,12 +58,6 @@
     }
   },
   {
-    "sessionUpdate": {
-      "title": "Hello",
-      "sessionUpdate": "session_info_update"
-    }
-  },
-  {
     "codexNotification": "item/started"
   },
   {

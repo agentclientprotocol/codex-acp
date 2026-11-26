@@ -31,6 +31,8 @@ export type SessionMetadata = SessionOptionMetadata & {
     mcpStartupFailures?: McpStartupFailure[],
     instructions?: SessionInstructions,
     sessionTitle?: string | null,
+    /** Codex's display preview for a resumed thread without a saved name. */
+    sessionPreviewTitle?: string | null,
     /** Whether `thread/revert` takes the thread, see `isRewindableThread`. */
     rewindable?: boolean,
 }

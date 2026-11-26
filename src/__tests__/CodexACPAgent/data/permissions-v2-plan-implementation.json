@@ -23,12 +23,6 @@
   },
   {
     "sessionUpdate": {
-      "title": "Hello",
-      "sessionUpdate": "session_info_update"
-    }
-  },
-  {
-    "sessionUpdate": {
       "plan": {
         "planId": "plan-item",
         "content": "1. Do the change.",

@@ -106,7 +106,6 @@ describe('session/prompt over ACP v2', () => {
         client.emit(itemStarted(userMessageItem(clientUserMessageId)));
         client.emit(itemCompleted(userMessageItem(clientUserMessageId)));
         const {messageId} = await response;
-        await vi.waitFor(() => expect(sessionUpdates(client.transcript)).toContainEqual({sessionUpdate: "session_info_update", title: "Hello"}));
         client.emit(turnCompleted());
         await client.promptRunFinished();
         await settle();
@@ -228,8 +227,7 @@ describe('session/prompt over ACP v2', () => {
         // Reported once, as v1 reports it once on the prompt response.
         expect(sessionUpdates(transcript).map(update => update.sessionUpdate))
             .not.toEqual(expect.arrayContaining(["agent_message_chunk"]));
-        expect(sessionUpdates(transcript).filter(update => update.sessionUpdate === "session_info_update"))
-            .toEqual([{sessionUpdate: "session_info_update", title: "Hello"}]);
+        expect(sessionUpdates(transcript).filter(update => update.sessionUpdate === "session_info_update")).toEqual([]);
         const idle = sessionUpdates(transcript).at(-1) as {_meta?: Record<string, any>};
         expect(idle._meta?.["jetbrains"]?.air?.sessionFailure).toMatchObject({severity: "error"});
         expect(idle._meta?.["quota"]).toBeDefined();
@@ -774,7 +772,6 @@ describe('session/prompt over ACP v2', () => {
         client.emit(turnStarted());
         client.emit(itemCompleted(userMessageItem(clientUserMessageId ?? null, text)));
         const messageId = version === 2 ? (await response).messageId as string : "<messageId>";
-        await vi.waitFor(() => expect(sessionUpdates(client.transcript)).toContainEqual({sessionUpdate: "session_info_update", title: text}));
         client.emit(itemCompleted({type: "plan", id: "plan-item", text: "1. Do the change."}));
         await vi.waitFor(() => expect(sessionUpdates(client.transcript)).toContainEqual(expect.objectContaining(
             version === 2 ? {sessionUpdate: "plan_update", plan: expect.objectContaining({planId: "plan-item"})}

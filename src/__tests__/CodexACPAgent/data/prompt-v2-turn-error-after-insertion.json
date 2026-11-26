@@ -68,12 +68,6 @@
       },
       {
         "sessionUpdate": {
-          "title": "Hello",
-          "sessionUpdate": "session_info_update"
-        }
-      },
-      {
-        "sessionUpdate": {
           "messageId": "<agentMessageId>",
           "content": {
             "text": "You've hit your usage limit.\n\n",

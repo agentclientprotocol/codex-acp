@@ -965,7 +965,7 @@ describe("_session/rename", () => {
         await openLocalSession(fixture, threadId);
         vi.spyOn(appServer, "threadStart").mockResolvedValue({thread: {id: "ephemeral"}} as never);
         vi.spyOn(appServer, "runTurn").mockResolvedValue({
-            turn: {items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]},
+            turn: {status: "completed", items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]},
         } as never);
         const automaticWrite = deferred<void>();
         const started: string[] = [];
@@ -991,7 +991,7 @@ describe("_session/rename", () => {
         expect(applied).toEqual(["Automatic", "Explicit"]);
     });
 
-    it("skips an automatic title that is generated after an explicit rename", async () => {
+    it.each(["succeeds", "fails"] as const)("keeps an explicit rename when generation later %s", async outcome => {
         const {fixture, agent, appServer} = await createAgent("plain");
         await openLocalSession(fixture, threadId);
         const turn = deferred<unknown>();
@@ -1002,10 +1002,19 @@ describe("_session/rename", () => {
         titleGen.onUserMessage("Fix the build");
 
         await agent.sessionIndex.setTitle({sessionId: threadId, title: "Explicit"});
-        turn.resolve({turn: {items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]}});
+        if (outcome === "succeeds") {
+            turn.resolve({turn: {status: "completed", items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]}});
+        } else {
+            turn.reject(new Error("Title generation failed"));
+        }
         await titleGen.waitForIdle(1_000);
 
         expect(threadSetName.mock.calls.map(call => call[0].name)).toEqual(["Explicit"]);
+        const titles = fixture.getAcpConnectionEvents([]).flatMap(event => {
+            const update = event.method === "sessionUpdate" ? event.args[0].update : undefined;
+            return update?.sessionUpdate === "session_info_update" && update.title ? [update.title] : [];
+        });
+        expect(titles).toEqual(["Explicit"]);
     });
 
     it("skips the automatic title of a session that was closed before its rename", async () => {
@@ -1021,7 +1030,7 @@ describe("_session/rename", () => {
 
         await agent.closeSession({sessionId: threadId});
         await agent.sessionIndex.rename({sessionId: threadId, title: "Explicit"});
-        turn.resolve({turn: {items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]}});
+        turn.resolve({turn: {status: "completed", items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]}});
         await titleGen.waitForIdle(1_000);
 
         expect(threadSetName.mock.calls.map(call => call[0].name)).toEqual(["Explicit"]);
@@ -1032,7 +1041,7 @@ describe("_session/rename", () => {
         await openLocalSession(fixture, threadId);
         vi.spyOn(appServer, "threadStart").mockResolvedValue({thread: {id: "ephemeral"}} as never);
         vi.spyOn(appServer, "runTurn").mockResolvedValue({
-            turn: {items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]},
+            turn: {status: "completed", items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]},
         } as never);
         const threadSetName = vi.spyOn(appServer, "threadSetName")
             .mockRejectedValueOnce(new Error("app-server busy"))
@@ -1049,7 +1058,7 @@ describe("_session/rename", () => {
         await openLocalSession(fixture, threadId);
         const turn = deferred<unknown>();
         vi.spyOn(appServer, "threadStart").mockResolvedValue({thread: {id: "ephemeral"}} as never);
-        const titleTurn = {turn: {items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]}};
+        const titleTurn = {turn: {status: "completed", items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]}};
         vi.spyOn(appServer, "runTurn").mockReturnValueOnce(turn.promise as never).mockResolvedValue(titleTurn as never);
         const renameWrite = deferred<Record<string, never>>();
         const threadSetName = vi.spyOn(appServer, "threadSetName")

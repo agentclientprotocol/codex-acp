@@ -1367,6 +1367,7 @@ export class CodexAcpServer {
         clientSystemPromptText(request.systemPrompt);
         const existingSessionRequest = request as WithAcpMcpServers<acp.ResumeSessionRequest> | WithAcpMcpServers<acp.ForkSessionRequest>;
         const previousInstructions = "sessionId" in request ? this.sessions.get(request.sessionId)?.instructions : undefined;
+        const pendingTitle = operation === "resume" ? this.pendingTitleGenerator(existingSessionRequest.sessionId) : null;
         const requestedSessionGeneration = operation === "resume"
             ? await this.beginSessionOpen(existingSessionRequest.sessionId)
             : null;
@@ -1482,23 +1483,16 @@ export class CodexAcpServer {
             mcpServers: requestedMcpServers,
             sessionMcpServers: sessionMcpServers,
             goalRevision: 0,
-            sessionTitle: sessionMetadata.sessionTitle ?? null,
-            sessionTitleSource: operation === "resume" ? "unknown" : "unset",
+            sessionTitle: sessionMetadata.sessionTitle ?? sessionMetadata.sessionPreviewTitle ?? null,
+            sessionTitleSource: sessionMetadata.sessionTitle ? "explicit" : operation === "resume" ? "unknown" : "unset",
             subagents: this.createSubagentRouter(sessionId),
             asyncTasks: this.createAsyncTasks(sessionId),
             compactions: new CodexSessionCompactions(),
             toolCallReports: this.clientDelivery.reports,
             openToolCalls: new CodexSessionToolCalls(),
         };
-        sessionState.titleGen = new TitleGenerator(
-            this.codexAcpClient.appServerClient,
-            sessionId,
-            sessionState.cwd,
-            () => sessionState.sessionTitleSource,
-            this.sessionIndex.titleWriter(sessionId),
-        );
         sessionState.promptSuggestions = this.createPromptSuggestions(sessionState);
-        this.installSessionState(sessionState, sessionMetadata.threadStatus);
+        this.installSessionState(sessionState, sessionMetadata.threadStatus, pendingTitle);
         this.recovery?.markLoaded(sessionState, openGeneration);
         if (settleTrackerReady) {
             settleTrackerReady(sessionState);
@@ -1692,11 +1686,23 @@ export class CodexAcpServer {
         );
     }
 
-    private installSessionState(sessionState: SessionState, threadStatus?: SessionMetadata["threadStatus"]): void {
+    private installSessionState(
+        sessionState: SessionState, threadStatus: SessionMetadata["threadStatus"], pendingTitle: TitleGenerator | null,
+    ): void {
         const previous = this.sessions.get(sessionState.sessionId);
         if (previous?.asyncTasks !== sessionState.asyncTasks) previous?.asyncTasks.clear();
         // The new state holds no suggestion, so the old one must drop its result in flight and clear what it published.
         void previous?.promptSuggestions?.clear();
+        if (previous?.titleGen && (previous.titleGen.isGenerating || previous.titleGen === pendingTitle)) {
+            // The prompt preview can be stale even if generation finished while Codex was reopening the thread.
+            sessionState.titleGen = previous.titleGen;
+            if (sessionState.sessionTitleSource !== "explicit") {
+                sessionState.sessionTitle = previous.sessionTitle;
+                sessionState.sessionTitleSource = previous.sessionTitleSource;
+            }
+        } else {
+            sessionState.titleGen = this.createTitleGenerator(sessionState);
+        }
         this.sessions.set(sessionState.sessionId, sessionState);
         this.clientDelivery.openSession(sessionState.sessionId);
         const v2 = AcpV2Connection.of(this.connection);
@@ -3987,6 +3993,7 @@ export class CodexAcpServer {
         validateInitialConfigOptions(request.configOptions);
         clientSystemPromptText(request.systemPrompt);
         const previousInstructions = this.sessions.get(request.sessionId)?.instructions;
+        const pendingTitle = this.pendingTitleGenerator(request.sessionId);
         const requestedSessionGeneration = await this.beginSessionOpen(request.sessionId);
         const loadStartedAt = performance.now();
         const graceLeftMs = () => ACCOUNT_READ_LOAD_GRACE_MS - (performance.now() - loadStartedAt);
@@ -4063,6 +4070,7 @@ export class CodexAcpServer {
             await this.closeStaleSessionOpen(sessionId, requestedSessionGeneration);
         }
         const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, true);
+        const savedTitle = normalizeSessionTitle(thread.name);
         const sessionState: SessionState = {
             sessionId: sessionId,
             ...this.createSessionOptionState(sessionMetadata, this.sessions.get(sessionId)),
@@ -4087,23 +4095,16 @@ export class CodexAcpServer {
             mcpServers: requestedMcpServers,
             sessionMcpServers: sessionMcpServers,
             goalRevision: 0,
-            sessionTitle: null,
-            sessionTitleSource: "unset",
+            sessionTitle: savedTitle,
+            sessionTitleSource: savedTitle === null ? "unset" : "explicit",
             subagents: this.createSubagentRouter(sessionId, true),
             asyncTasks: this.createAsyncTasks(sessionId),
             compactions: new CodexSessionCompactions(),
             toolCallReports: this.clientDelivery.reports,
             openToolCalls: new CodexSessionToolCalls(),
         };
-        sessionState.titleGen = new TitleGenerator(
-            this.codexAcpClient.appServerClient,
-            sessionId,
-            sessionState.cwd,
-            () => sessionState.sessionTitleSource,
-            this.sessionIndex.titleWriter(sessionId),
-        );
         sessionState.promptSuggestions = this.createPromptSuggestions(sessionState);
-        this.installSessionState(sessionState, sessionMetadata.threadStatus ?? thread.status);
+        this.installSessionState(sessionState, sessionMetadata.threadStatus ?? thread.status, pendingTitle);
         this.recovery?.markLoaded(sessionState, openGeneration);
         if (knownAccount === "pending") {
             this.applyLateAccountRead(sessionState, authorization, authStatusVersionAtStart);
@@ -4462,6 +4463,7 @@ export class CodexAcpServer {
             return;
         }
 
+        if (sessionState.titleGen?.isGenerating) return;
         const historyTitle = this.findFirstUserMessageTitle(firstItems)
             ?? normalizeSessionTitle(thread.preview);
         await this.publishFallbackSessionTitle(sessionState, historyTitle);
@@ -4477,6 +4479,28 @@ export class CodexAcpServer {
             if (title) return title;
         }
         return null;
+    }
+
+    private pendingTitleGenerator(sessionId: string): TitleGenerator | null {
+        const generator = this.sessions.get(sessionId)?.titleGen;
+        return generator?.isGenerating ? generator : null;
+    }
+
+    private createTitleGenerator({sessionId, cwd}: SessionState): TitleGenerator {
+        const lifetime = this.getSessionGeneration(sessionId);
+        return new TitleGenerator(
+            this.codexAcpClient.appServerClient,
+            sessionId,
+            cwd,
+            () => this.sessions.get(sessionId)?.sessionTitleSource ?? "unknown",
+            async text => {
+                const current = this.sessions.get(sessionId);
+                if (current && this.getSessionGeneration(sessionId) === lifetime && !this.sessionIsClosing(sessionId)) {
+                    await this.publishFallbackSessionTitle(current, normalizeSessionTitle(text));
+                }
+            },
+            this.sessionIndex.titleWriter(sessionId),
+        );
     }
 
     private createPromptSuggestions(sessionState: SessionState): PromptSuggestionGenerator | undefined {
@@ -4546,8 +4570,11 @@ export class CodexAcpServer {
             .filter(block => block.type === "text")
             .map(block => block.text)
             .join(" ").trim();
-        sessionState.titleGen?.onUserMessage(text);
-        await this.publishFallbackSessionTitle(sessionState, normalizeSessionTitle(text));
+        if (sessionState.titleGen) {
+            sessionState.titleGen.onUserMessage(text);
+        } else {
+            await this.publishFallbackSessionTitle(sessionState, normalizeSessionTitle(text));
+        }
     }
 
     /** Whether the client is AIR on v1 and declared `sessionRewind`: only it knows `_session/rewind`. */
