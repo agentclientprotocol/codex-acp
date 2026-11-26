@@ -2,6 +2,7 @@ import type * as acp from "@agentclientprotocol/sdk/unstable";
 import type {UpdateSessionEvent} from "../ACPSessionConnection";
 import {AIR_CONTEXT_COMPACTION_KEY, AIR_SUBAGENT_KEY, withAirMeta} from "../AirExtension";
 import type {ClientCapabilities} from "./ClientCapabilities";
+import {MCP_APP_TOOL_CALL_KEY} from "../McpApps";
 import type {CommandEnd, PermissionToolFacts, StandardToolCallFields, ToolFacts} from "./ToolFacts";
 
 type ToolCallReport = Extract<UpdateSessionEvent, {sessionUpdate: "tool_call" | "tool_call_update"}>;
@@ -91,6 +92,7 @@ export class AcpToolCallRenderer {
             ...(facts.terminalOutput === undefined ? {} : this.outputChunk(terminalId, facts.terminalOutput, true)),
             ...(facts.terminalExit === undefined ? {} : terminalExit(terminalId, facts.terminalExit.exitCode)),
             ...mcpMeta(facts),
+            ...this.mcpAppMeta(facts),
         };
         if (facts.subagent) meta = withAirMeta(meta, AIR_SUBAGENT_KEY, true);
         if (facts.contextCompaction !== undefined) {
@@ -113,7 +115,13 @@ export class AcpToolCallRenderer {
             ...(end === undefined ? {} : this.commandEndMeta(terminalId, end)),
             ...(facts.standard?.mcpProgress === undefined ? {} : {mcp_output_delta: {data: facts.standard.mcpProgress}}),
             ...mcpMeta(facts),
+            ...this.mcpAppMeta(facts),
         };
+    }
+
+    /** `_meta.mcpApp` of an app tool, for a client that declares `_meta.mcpApps` (see `docs/mcp-apps.md`). */
+    private mcpAppMeta(facts: ToolFacts): Record<string, unknown> {
+        return facts.mcpApp !== undefined && this.capabilities.mcpApps ? {[MCP_APP_TOOL_CALL_KEY]: facts.mcpApp} : {};
     }
 
     private outputChunk(terminalId: string, data: string, terminal: boolean): Record<string, unknown> {

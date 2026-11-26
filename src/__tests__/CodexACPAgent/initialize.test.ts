@@ -66,6 +66,11 @@ describe('CodexACPAgent - initialize', () => {
                 },
                 _meta: {
                     authStatus: {},
+                    mcpApps: {
+                        version: 1,
+                        resourcesRead: "_session/mcp/resources/read",
+                        toolsCall: "_session/mcp/tools/call",
+                    },
                 },
             },
             authMethods: getCodexAuthMethods(),

@@ -147,6 +147,17 @@ import {
     type SessionSteeringResponse,
     type SessionSteerRequest,
 } from "./AcpExtensions";
+import type {JsonValue} from "./app-server/serde_json/JsonValue";
+import {
+    MCP_APPS_KEY,
+    mcpAppsCapability,
+    refuseCheckedCall,
+    toCallToolResult,
+    type McpCallToolResult,
+    type McpResourcesReadRequest,
+    type McpResourcesReadResponse,
+    type McpToolsCallRequest,
+} from "./McpApps";
 import {AcpToolCallRenderer} from "./tool-calls/AcpToolCallRenderer";
 import {ClientCapabilities} from "./tool-calls/ClientCapabilities";
 import {CommandReporter} from "./tool-calls/reporters/CommandReporter";
@@ -923,6 +934,8 @@ export class CodexAcpServer {
                     // Presence means "this agent pushes `_auth/status_update`". It
                     // never carries a payload, and the client never asks for one.
                     [AUTH_STATUS_META_KEY]: authStatusCapability(),
+                    // `_session/mcp/resources/read` and `_session/mcp/tools/call`, see `docs/mcp-apps.md`.
+                    [MCP_APPS_KEY]: mcpAppsCapability(),
                 },
             },
             authMethods: getCodexAuthMethods(_params.clientCapabilities),
@@ -981,6 +994,10 @@ export class CodexAcpServer {
                     ...(this.isSessionConfigEnabled() && {options: {}}),
                     title: {},
                     systemPrompt: {},
+                },
+                _meta: {
+                    // `_session/mcp/resources/read` and `_session/mcp/tools/call`, see `docs/mcp-apps.md`.
+                    [MCP_APPS_KEY]: mcpAppsCapability(),
                 },
             },
             authMethods: getCodexAuthMethodsV2(clientCapabilities),
@@ -1048,6 +1065,44 @@ export class CodexAcpServer {
         const appServer = this.ensureAppServer();
         if (appServer) await appServer;
         return {trusted: await this.runWithProcessCheck(() => trustCodexHooks(this.codexAcpClient.appServerClient, cwd, hooks))};
+    }
+
+    /** `_session/mcp/resources/read`: Codex reads the `ui://` resource from the server of the session's thread. */
+    async readMcpResource(params: McpResourcesReadRequest): Promise<McpResourcesReadResponse> {
+        const sessionState = await this.mcpAppsSession(params.sessionId);
+        const response = await this.runWithProcessCheck(() => this.codexAcpClient.appServerClient.mcpResourceRead({
+            threadId: sessionState.sessionId,
+            server: params.server,
+            uri: params.uri,
+            // Lets Codex pick the resource of the app that made the call.
+            ...(params.toolCallId === undefined ? {} : {originCallId: params.toolCallId}),
+        }));
+        return {contents: response.contents};
+    }
+
+    /**
+     * `_session/mcp/tools/call`: the tool runs on the session's thread, outside a turn, and its
+     * result goes to the client only. Codex runs it without an approval, so `checkPermissions` is refused.
+     */
+    async callMcpTool(params: McpToolsCallRequest): Promise<McpCallToolResult> {
+        refuseCheckedCall(params);
+        const sessionState = await this.mcpAppsSession(params.sessionId);
+        const response = await this.runWithProcessCheck(() => this.codexAcpClient.appServerClient.mcpServerToolCall({
+            threadId: sessionState.sessionId,
+            server: params.server,
+            tool: params.name,
+            arguments: (params.arguments ?? {}) as JsonValue,
+        }));
+        return toCallToolResult(response);
+    }
+
+    private async mcpAppsSession(sessionId: string): Promise<SessionState> {
+        const sessionState = this.sessions.get(sessionId);
+        if (!sessionState) throw RequestError.invalidParams(undefined, `Unknown session: ${sessionId}`);
+        if (this.providerUpdate !== null) await this.waitForProviderUpdate();
+        const sessionReady = this.ensureSessionReady(sessionState);
+        if (sessionReady) await sessionReady;
+        return sessionState;
     }
 
     async extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {

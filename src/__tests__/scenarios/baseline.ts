@@ -1,4 +1,5 @@
 import {canonical, type RecordedMessage} from "./scenario-harness";
+import {MCP_APPS_KEY, mcpAppsCapability} from "../../McpApps";
 
 /**
  * The comparison of the messages for a client that is not AIR with the messages of the adapter before the AIR extensions.
@@ -144,6 +145,7 @@ const MCP_COMMAND = {
  * Session config options put permissions and collaboration modes after the model options.
  * Initialize also advertises text-only append system prompts, client-set titles, and session options.
  * It no longer advertises `sessionCapabilities.subagents`, which the subagent RFD does not define for an Agent.
+ * It also advertises `_meta.mcpApps`, the MCP Apps methods of `docs/mcp-apps.md`.
  * Only a command that equals the baseline `/mcp` command changes.
  */
 export function withFeatureChanges(messages: RecordedMessage[]): RecordedMessage[] {
@@ -158,6 +160,7 @@ export function withFeatureChanges(messages: RecordedMessage[]): RecordedMessage
                 return {...message, params: {...params, agentCapabilities: {
                     ...capabilities, auth: {...capabilities?.["auth"] as Json, status: {}},
                     sessionCapabilities: {...kept, systemPrompt: {}, title: {}, options: {}},
+                    _meta: {...capabilities?.["_meta"] as Json, [MCP_APPS_KEY]: mcpAppsCapability()},
                 }}};
             }
         }

@@ -17,6 +17,12 @@ import {
 } from "./AcpExtensions";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
 import {SESSION_REWIND_METHOD} from "./SessionRewind";
+import {
+    MCP_RESOURCES_READ_METHOD,
+    MCP_TOOLS_CALL_METHOD,
+    mcpResourcesReadParamsParser,
+    mcpToolsCallParamsParser,
+} from "./McpApps";
 import {CODEX_HOOKS_LIST_METHOD, CODEX_HOOKS_TRUST_METHOD} from "./CodexHookTrust";
 import {
     SESSION_ARCHIVE_METHOD,
@@ -239,6 +245,8 @@ function createRouter(
         .onRequest(CODEX_HOOKS_LIST_METHOD, hooksListParamsParser, (ctx) => getAgent().listHooks(ctx.params.cwd))
         .onRequest(CODEX_HOOKS_TRUST_METHOD, hooksTrustParamsParser, (ctx) => getAgent().trustHooks(ctx.params.cwd, ctx.params.hooks))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent(ctx.params).extMethod(GOAL_CONTROL_METHOD, ctx.params))
+        .onRequest(MCP_RESOURCES_READ_METHOD, mcpResourcesReadParamsParser, (ctx) => getAgent().readMcpResource(ctx.params))
+        .onRequest(MCP_TOOLS_CALL_METHOD, mcpToolsCallParamsParser, (ctx) => getAgent(ctx.params).callMcpTool(ctx.params))
         .onRequest(SESSION_RENAME_METHOD, sessionRenameParamsParser, (ctx) => getAgent(ctx.params).sessionIndex.rename(ctx.params))
         .onRequest(SESSION_BATCH_GET_METHOD, sessionBatchGetParamsParser, (ctx) => getAgent().sessionIndex.batchGet(ctx.params))
         .onRequest(SESSION_ARCHIVE_METHOD, sessionArchiveParamsParser, (ctx) => getAgent(ctx.params).sessionIndex.setArchived(ctx.params, true))
@@ -292,6 +300,8 @@ function createRouter(
         .onRequest(acpV2.methods.agent.providers.disable, (ctx) => getAgent().disableProvider(ctx.params))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent(ctx.params).extMethod(SESSION_STEERING_METHOD, ctx.params))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent(ctx.params).extMethod(GOAL_CONTROL_METHOD, ctx.params))
+        .onRequest(MCP_RESOURCES_READ_METHOD, mcpResourcesReadParamsParser, (ctx) => getAgent().readMcpResource(ctx.params))
+        .onRequest(MCP_TOOLS_CALL_METHOD, mcpToolsCallParamsParser, (ctx) => getAgent(ctx.params).callMcpTool(ctx.params))
         .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent(ctx.params).extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
         .onRequest(SESSION_RENAME_METHOD, sessionRenameParamsParser, (ctx) => getAgent(ctx.params).sessionIndex.rename(ctx.params))
         .onRequest(SESSION_BATCH_GET_METHOD, sessionBatchGetParamsParser, (ctx) => getAgent().sessionIndex.batchGet(ctx.params))
