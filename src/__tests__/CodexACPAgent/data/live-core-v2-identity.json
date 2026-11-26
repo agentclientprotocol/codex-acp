@@ -11,6 +11,7 @@
   {
     "sessionId": "thread-1:subagent:worker",
     "update": {
+      "background": [],
       "state": "running",
       "sessionUpdate": "state_update"
     }
@@ -20,9 +21,24 @@
     "update": {
       "sessionId": "thread-1:subagent:worker",
       "state": {
+        "background": [],
         "state": "running"
       },
       "sessionUpdate": "subagent_update"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "messageId": "item-user",
+      "recipientSessionId": "thread-1:subagent:worker",
+      "content": [
+        {
+          "text": "Agent delegation",
+          "type": "text"
+        }
+      ],
+      "sessionUpdate": "session_message"
     }
   },
   {
@@ -40,6 +56,7 @@
     "sessionId": "thread-1:subagent:worker",
     "update": {
       "stopReason": "end_turn",
+      "background": [],
       "state": "idle",
       "sessionUpdate": "state_update"
     }
@@ -50,6 +67,7 @@
       "sessionId": "thread-1:subagent:worker",
       "state": {
         "stopReason": "end_turn",
+        "background": [],
         "state": "idle"
       },
       "sessionUpdate": "subagent_update"
@@ -58,6 +76,7 @@
   {
     "sessionId": "thread-1:subagent:worker",
     "update": {
+      "background": [],
       "state": "running",
       "sessionUpdate": "state_update"
     }
@@ -67,6 +86,7 @@
     "update": {
       "sessionId": "thread-1:subagent:worker",
       "state": {
+        "background": [],
         "state": "running"
       },
       "sessionUpdate": "subagent_update"
@@ -87,6 +107,7 @@
     "sessionId": "thread-1:subagent:worker",
     "update": {
       "stopReason": "end_turn",
+      "background": [],
       "state": "idle",
       "sessionUpdate": "state_update"
     }
@@ -97,6 +118,7 @@
       "sessionId": "thread-1:subagent:worker",
       "state": {
         "stopReason": "end_turn",
+        "background": [],
         "state": "idle"
       },
       "sessionUpdate": "subagent_update"

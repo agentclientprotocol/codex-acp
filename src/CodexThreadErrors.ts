@@ -77,6 +77,12 @@ export function isNoActiveTurnError(err: unknown): boolean {
     return errorText(err).includes("no active turn to interrupt");
 }
 
+/** Review and compact turns reject input until the turn ends. */
+export function isNonSteerableTurnError(err: unknown): boolean {
+    const text = errorText(err).toLowerCase();
+    return text.includes("cannot steer a review turn") || text.includes("cannot steer a compact turn");
+}
+
 /**
  * `turn/interrupt` answers this when Codex has since moved on to another turn --
  * most commonly a review's child turn -- registered after the id we sent. The
@@ -129,6 +135,18 @@ export function sessionNotFoundRequestError(sessionId: string): RequestError {
 
 /** The `data.reason` of the error for a request that an archived session does not take. */
 export const SESSION_ARCHIVED_REASON = "archived";
+
+/** Without a separate archive operation, an archived thread is a soft-deleted ACP session. */
+export function storedSessionError(sessionId: string, err: unknown, separateArchive: boolean): unknown {
+    const data = err instanceof RequestError ? err.data : null;
+    const archived = errorText(err).startsWith(`session ${sessionId} is archived.`)
+        || data !== null && typeof data === "object" && "reason" in data && data.reason === SESSION_ARCHIVED_REASON;
+    if (archived) return separateArchive ? sessionArchivedRequestError(sessionId) : sessionNotFoundRequestError(sessionId);
+    if (!(err instanceof RequestError) && (isUnknownThreadError(err) || isThreadNotFoundError(err))) {
+        return sessionNotFoundRequestError(sessionId);
+    }
+    return err;
+}
 
 /** The ACP error for a request that Codex refuses because the thread is archived. */
 export function sessionArchivedRequestError(sessionId: string): RequestError {

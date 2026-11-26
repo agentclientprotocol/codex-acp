@@ -17,6 +17,23 @@ function nested(depth: number, leaf: unknown): unknown {
     return value;
 }
 
+/** The largest depth that `serialize` handles before the stack runs out. */
+function deepest(serialize: (value: unknown) => unknown): number {
+    let low = 1;
+    let high = 100_000;
+    while (low < high) {
+        const middle = Math.ceil((low + high) / 2);
+        try {
+            serialize(nested(middle, 1));
+            low = middle;
+        } catch (error) {
+            if (!(error instanceof RangeError)) throw error;
+            high = middle - 1;
+        }
+    }
+    return low;
+}
+
 class Box {
     constructor(readonly value: number) {}
 }
@@ -59,7 +76,7 @@ describe("jsonSnapshot", () => {
         }
     });
 
-    it("reads the value like JSON.stringify: each getter and toJSON once, in the same order, with the same keys", () => {
+    it.each([0, 300])("reads each getter and toJSON once, in JSON.stringify order with the same keys, at depth %i", (depth) => {
         const trace = (log: string[]) => {
             const item = {
                 get a() {
@@ -75,9 +92,9 @@ describe("jsonSnapshot", () => {
         };
         const stringified: string[] = [];
         const snapshotted: string[] = [];
-        const expected = JSON.stringify(trace(stringified));
+        const expected = JSON.stringify(nested(depth, trace(stringified)));
 
-        expect(text(jsonSnapshot(trace(snapshotted)))).toBe(expected);
+        expect(text(jsonSnapshot(nested(depth, trace(snapshotted))))).toBe(expected);
         expect(snapshotted).toEqual(stringified);
         expect(snapshotted).toEqual(["get a", "toJSON a", "get b", "toJSON 1"]);
     });
@@ -125,13 +142,16 @@ describe("jsonSnapshot", () => {
         }
     });
 
-    it("leaves values nested thousands deep to JSON.stringify", () => {
-        const deep = nested(4000, 1);
+    it("serializes values nested thousands deep and reuses unchanged snapshots", () => {
+        // A holder without a prototype keeps `JSON.stringify` on its recursive path, like `serializeNatively`.
+        const depth = deepest((value) => JSON.stringify({__proto__: null, value}));
+        const deep = nested(depth, 1);
+        const expected = JSON.stringify(deep);
         const snapshot = jsonSnapshot(deep);
 
-        expect(text(snapshot)).toBe(JSON.stringify(deep));
-        expect(sameJson(jsonSnapshot(nested(4000, 1), snapshot), snapshot)).toBe(true);
-        expect(sameJson(jsonSnapshot(nested(4000, 2), snapshot), snapshot)).toBe(false);
+        expect(text(snapshot)).toBe(expected);
+        expect(jsonSnapshot(nested(depth, 1), snapshot)).toBe(snapshot);
+        expect(sameJson(jsonSnapshot(nested(depth, 2), snapshot), snapshot)).toBe(false);
     });
 
     it("reuses the text of a value that JSON.stringify serialized", () => {

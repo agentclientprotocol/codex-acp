@@ -99,6 +99,7 @@ const reviewReplayTurns: Thread["turns"] = [
                 id: "review-summary",
                 text: "Review complete.",
                 phase: null,
+                moderation: null,
                 memoryCitation: null,
                 delivery: null,
                 questions: null,
@@ -126,6 +127,7 @@ const reviewReplayTurns: Thread["turns"] = [
                 id: "ordinary-reply",
                 text: "OK",
                 phase: null,
+                moderation: null,
                 memoryCitation: null,
                 delivery: null,
                 questions: null,
@@ -149,6 +151,7 @@ const reviewReplayTurns: Thread["turns"] = [
                 id: "review2-summary",
                 text: "Second review complete.",
                 phase: null,
+                moderation: null,
                 memoryCitation: null,
                 delivery: null,
                 questions: null,
@@ -225,7 +228,7 @@ async function connectV2Client(options?: {
     const codexAcpClient = new CodexAcpClient(new CodexAppServerClient(mocks.mockCodexConnection as any));
     vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
     vi.spyOn(codexAcpClient, "getAgentConfiguredModelProvider").mockResolvedValue("openai");
-    vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+    vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, userId: null, requiresOpenaiAuth: false});
     vi.spyOn(codexAcpClient, "awaitMcpServerStartup").mockResolvedValue({ready: [], failed: [], cancelled: []});
     const router = createAcpAgentRouter((connection) => new CodexAcpServer(connection, codexAcpClient));
     const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
@@ -334,7 +337,7 @@ describe('ACP v2 resume replay: review-mode ids, reviewer-prompt hiding, primers
             itemsView: "full",
             items: [
                 {...commandExecutionItem("command", "completed"), aggregatedOutput: "Recorded output"},
-                {type: "mcpToolCall", id: "mcp", server: "docs", tool: "lookup", status: "completed",
+                {type: "mcpToolCall", id: "mcp", server: "docs", environmentId: null, tool: "lookup", status: "completed",
                     arguments: {}, appContext: null, mcpAppUi: null, pluginId: null, readOnlyHint: null,
                     result: null, error: null, durationMs: null},
                 {type: "contextCompaction", id: "compaction"},
@@ -500,6 +503,7 @@ describe('resume replay of Codex file citations', () => {
             id: "cited-reply",
             text: 'The limit is 12.\n\n:codex-file-citation{path="policy.txt" purpose="source"}',
             phase: null,
+            moderation: null,
             memoryCitation: null,
             delivery: null,
             questions: null,
@@ -581,7 +585,7 @@ describe('resume replay of async question answers', () => {
         expectConformingV2SessionUpdates();
     });
 
-    it('replays answers as the questions and their answers on v2', async () => {
+    it('replays v2 answers as completed interactions and keeps quoted envelopes as messages', async () => {
         const {connection, updates} = await connectV2Client({replayTurns: answerTurns});
         try {
             await connection.agent.request(acpV2.methods.agent.session.resume, {
@@ -593,8 +597,11 @@ describe('resume replay of async question answers', () => {
             connection.close();
         }
 
+        const interactions = updates.filter(({update}) => update.sessionUpdate === "tool_call_update");
         const chunks = updates.filter(({update}) => update.sessionUpdate === "user_message_chunk");
-        await expect(dump(chunks)).toMatchFileSnapshot('data/v2-resume-replay-async-question-answers.json');
+        expect(chunks).toHaveLength(1);
+        expect(chunks[0]?.update).toMatchObject({messageId: "quoted"});
+        await expect(dump([...interactions, ...chunks])).toMatchFileSnapshot('data/v2-resume-replay-async-question-answers.json');
     });
 
     it('replays answers as the questions and their answers on v1', async () => {

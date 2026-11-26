@@ -127,7 +127,7 @@ describe.each([1, 2] as const)("ACP v%s child configuration snapshots", version 
         const configuration = h.scopedUpdates.findIndex(entry => entry.sessionId === childId && entry.update.sessionUpdate === "config_option_update");
         expect(configuration).toBeGreaterThan(announcement);
         await expect(h.request("session/set_config_option", {sessionId: childId, configId: "model", value: "child-beta",
-            ...(version === 2 ? {type: "id"} : {})})).rejects.toMatchObject({code: -32600});
+            ...(version === 2 ? {type: "id"} : {})})).rejects.toMatchObject({code: -32602});
         expect(h.agent.getSessionState(sessionId).currentModelId).toBe(parent);
         await expect(JSON.stringify(configurations(h), null, 2)).toMatchFileSnapshot(`data/child-configuration-v${version}.json`);
     });
@@ -360,12 +360,14 @@ describe.each([1, 2] as const)("ACP v%s child configuration snapshots", version 
         const start = h.wireMessages.length;
         await load();
         await flush(h);
-        expect(configurations(h)).toHaveLength(1);
-        const boundary = configurations(h).length;
         h.emit({method: "thread/started", params: {thread: {...createThread(), id: worker, parentThreadId: "other-root",
             model: "foreign-current-model", reasoningEffort: "low"}}});
         await flush(h);
-        expect(configurations(h)).toHaveLength(boundary);
+        if (version === 2) {
+            expect(configurations(h)).toEqual([]);
+            return;
+        }
+        expect(configurations(h)).toHaveLength(1);
         expect(configurations(h)[0]!.configOptions.map(option => option.currentValue)).toEqual(["historical-model", "high"]);
         const frames = h.wireMessages.slice(start).flatMap(frame => Array.isArray(frame) ? frame : [frame]);
         const response = frames.findIndex(frame => "result" in frame && frame.result !== null

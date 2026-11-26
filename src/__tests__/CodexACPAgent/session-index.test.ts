@@ -75,7 +75,7 @@ async function createAgent(kind: ClientKind, threads: Thread[] = [createThread()
 
 async function openLocalSession(fixture: CodexMockTestFixture, sessionId: string, additionalDirectories: string[] = []): Promise<void> {
     const client = fixture.getCodexAcpClient();
-    vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+    vi.spyOn(client, "getAccount").mockResolvedValue({account: null, userId: null, requiresOpenaiAuth: false});
     vi.spyOn(client, "newSession").mockResolvedValue({
         sessionId,
         currentModelId: "model-id[medium]",
@@ -876,7 +876,7 @@ describe("_session/list/subscribe", () => {
 
             expect(listChanges(fixture).flatMap(changes => changes.sessions.map((row: acp.SessionInfo) => row.cwd))).toEqual([dir]);
             agent.sessionIndex.dispose();
-            fs.rmSync(link);
+            fs.unlinkSync(link);
         } finally {
             fs.rmSync(dir, {recursive: true, force: true});
         }

@@ -13,15 +13,18 @@
       },
       "mcp": {
         "stdio": {},
-        "http": {}
+        "http": {},
+        "acp": {}
       },
       "delete": {},
       "additionalDirectories": {},
       "systemPrompt": {},
       "fork": {},
+      "options": {},
       "title": {}
     },
     "auth": {
+      "status": {},
       "_meta": {
         "authStatus": {}
       }
@@ -86,8 +89,6 @@
           "sessionFailure",
           "agentFileChangeReport",
           "customInstructions",
-          "nativeSubagentSessions",
-          "asyncTasks",
           "recommendedValue"
         ]
       }

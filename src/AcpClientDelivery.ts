@@ -1,5 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk/unstable";
 import type {AcpClientConnection, UpdateSessionEvent} from "./ACPSessionConnection";
+import {LastReportedEntity} from "./SessionCursors";
 import {ToolCallReports} from "./ToolCallReports";
 
 type SessionUpdateParams = {sessionId: string; update: UpdateSessionEvent};
@@ -11,7 +12,9 @@ type SessionUpdateParams = {sessionId: string; update: UpdateSessionEvent};
  * whether the work belongs to a prompt, background activity or session startup.
  */
 export class AcpClientDelivery {
-    readonly reports = new ToolCallReports();
+    readonly reports: ToolCallReports;
+    /** What a v1 live cursor anchors to: the last entity that the client holds. */
+    readonly entities = new LastReportedEntity();
     private readonly sessionRequests = new Map<string, Set<AbortController>>();
     private readonly closedSessions = new Set<string>();
     private readonly urlElicitations = new Map<string, {sessionId: string | null}>();
@@ -21,7 +24,9 @@ export class AcpClientDelivery {
     constructor(
         private readonly client: AcpClientConnection,
         private readonly sessionIsClosing: (sessionId: string) => boolean = () => false,
+        private readonly protocolVersion: 1 | 2 = 1,
     ) {
+        this.reports = new ToolCallReports(protocolVersion === 2);
         this.sendElicitationCompletion = params => client.notify(acp.methods.client.elicitation.complete, params as acp.CompleteElicitationNotification);
     }
 
@@ -89,6 +94,7 @@ export class AcpClientDelivery {
     /** Final teardown updates have been sent. Nothing else may publish for this session lifetime. */
     closeSession(sessionId: string): void {
         this.closedSessions.add(sessionId);
+        this.entities.forget(sessionId);
         this.finishSessionSetup(sessionId);
         for (const [id, scope] of this.urlElicitations) {
             if (scope.sessionId === sessionId) this.urlElicitations.delete(id);
@@ -121,11 +127,12 @@ export class AcpClientDelivery {
         await this.client.notify(method, params);
     }
 
-    async withSessionUpdate(params: SessionUpdateParams, send: (params: SessionUpdateParams) => Promise<void>): Promise<void> {
+    async withSessionUpdate(params: SessionUpdateParams, send: (params: SessionUpdateParams) => Promise<void>, replay = false): Promise<void> {
         if (!this.canPublishSession(params.sessionId)) return;
-        const update = this.reports.prepare(params.sessionId, params.update);
+        const update = this.reports.prepare(params.sessionId, params.update, replay);
         if (update === null) return;
         await send({...params, update});
+        this.entities.sending(params.sessionId, update);
         // A fresh announcement reopens a child view after its parent is resumed.
         if (update.sessionUpdate === "subagent_update") this.openSession(update.sessionId);
         if (update.sessionUpdate === "subagent_spawned") this.openSession(update.subagentSessionId);
@@ -142,10 +149,13 @@ export class AcpClientDelivery {
         // The client merges the request tool call into the stored tool call, like an update.
         // A cancelled or failed request may leave the client without these fields,
         // so the adapter then forgets the open record and sends every field again.
-        this.reports.prepare(params.sessionId, {sessionUpdate: "tool_call_update", ...params.toolCall});
+        const {sessionUpdate: _update, ...toolCall} = this.reports.withLiveStatus(
+            params.sessionId, {sessionUpdate: "tool_call_update", ...params.toolCall},
+        );
+        this.reports.prepare(params.sessionId, {sessionUpdate: "tool_call_update", ...toolCall});
         let response: unknown;
         try {
-            response = await this.sendRequest(method, params, options);
+            response = await this.sendRequest(method, {...params, toolCall}, options);
         } catch (error) {
             this.reports.forgetOpen(params.sessionId, params.toolCall.toolCallId);
             throw error;
@@ -165,8 +175,14 @@ export class AcpClientDelivery {
     private sendRequest(method: string, params: unknown, options?: acp.SendRequestOptions): Promise<unknown> {
         const sessionId = clientRequestSessionId(method, params);
         return sessionId === null
-            ? this.withElicitationRequest(method, params, () => this.client.request(method, params, options))
+            ? this.requestOnWire(method, params, options)
             : this.sendSessionRequest(sessionId, method, params, options);
+    }
+
+    private requestOnWire(method: string, params: unknown, options?: acp.SendRequestOptions): Promise<unknown> {
+        const send = () => this.client.request(method, params, options);
+        // The v2 view registers the ID when the rendered request reaches its transport.
+        return this.protocolVersion === 2 ? send() : this.withElicitationRequest(method, params, send);
     }
 
     /** Direct v2 requests and the shared v1-shaped path keep the same URL scope. */
@@ -177,6 +193,7 @@ export class AcpClientDelivery {
     }
 
     private async trackUrlRequest(id: string, sessionId: string | null, send: () => Promise<unknown>): Promise<unknown> {
+        if (this.urlElicitations.has(id)) throw acp.RequestError.invalidParams(undefined, "URL elicitation ID already in use");
         const scope = {sessionId};
         this.urlElicitations.set(id, scope);
         try {
@@ -205,9 +222,8 @@ export class AcpClientDelivery {
             const setup = this.waitForSessionSetup(sessionId, cancellationSignal);
             if (setup) await setup;
             // Permission cancellation is a denial. Async elicitations still inspect late answers.
-            return await this.withElicitationRequest(method, params,
-                () => this.client.request(method, params, {...options, cancellationSignal,
-                    stopWaitingOnCancel: method === acp.methods.client.session.requestPermission || options?.stopWaitingOnCancel === true}));
+            return await this.requestOnWire(method, params, {...options, cancellationSignal,
+                stopWaitingOnCancel: method === acp.methods.client.session.requestPermission || options?.stopWaitingOnCancel === true});
         } finally {
             requests.delete(controller);
             if (requests.size === 0) this.sessionRequests.delete(sessionId);

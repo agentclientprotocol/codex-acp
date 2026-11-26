@@ -351,7 +351,7 @@ describe("session compaction", () => {
         const appServer = fixture.getCodexAppServerClient();
         const model = createTestModel();
         vi.spyOn(client, "readAuthRequirement").mockResolvedValue({required: false, account: null});
-        vi.spyOn(client, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(client, "getAccount").mockResolvedValue({account: null, userId: null, requiresOpenaiAuth: false});
         vi.spyOn(client, "listSkills").mockResolvedValue({data: []});
         vi.spyOn(appServer, "listModels").mockResolvedValue({data: [model], nextCursor: null});
         const thread = createThread([
@@ -594,7 +594,7 @@ function createTurn(status: Turn["status"]): Turn {
 }
 
 function agentMessage(id: string, text: string): ThreadItem {
-    return {type: "agentMessage", id, text, phase: null, memoryCitation: null, delivery: null, questions: null};
+    return {type: "agentMessage", id, text, phase: null, moderation: null, memoryCitation: null, delivery: null, questions: null};
 }
 
 function createThread(items: ThreadItem[]): Thread {

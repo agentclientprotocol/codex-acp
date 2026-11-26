@@ -3,7 +3,7 @@ import type {ServerNotification} from "../../app-server";
 import type {ThreadItem} from "../../app-server/v2";
 import {
     agentMessageDelta, commandExecutionItem, connectSession, codexResponse, createThread, createTurn, cwd,
-    itemStarted, sessionId, turnStarted, turnCompleted, userMessageItem, type PromptSession,
+    itemCompleted, itemStarted, sessionId, turnStarted, turnCompleted, userMessageItem, type PromptSession,
 } from "./v2-prompt-harness";
 import {expectConformingV2SessionUpdates} from "./v2-session-update-guard";
 import {subagentProtocol} from "../../subagents/AcpSubagents";
@@ -17,6 +17,12 @@ const childId = `${sessionId}:subagent:${worker}`;
 const activityItem = (id = worker, path = "/root/worker"): Extract<ThreadItem, {type: "subAgentActivity"}> =>
     ({type: "subAgentActivity", model: null, reasoningEffort: null, id: `activity-${id}`,
         agentThreadId: id, agentPath: path, kind: "started"});
+const collab = (tool: Extract<ThreadItem, {type: "collabAgentToolCall"}>["tool"], id: string, prompt: string | null,
+    status: "inProgress" | "completed" | "failed" = "completed"): ThreadItem =>
+    ({type: "collabAgentToolCall", id, tool, status, senderThreadId: sessionId,
+        receiverThreadIds: tool === "spawnAgent" && status === "inProgress" ? [] : [worker],
+        prompt, model: null, reasoningEffort: null, agentsStates: {}});
+const task = (id: string, text: string): ThreadItem => ({...userMessageItem(null, text), id});
 const onWorker = (event: ServerNotification, id = worker): ServerNotification =>
     ({...event, params: {...event.params, threadId: id}} as ServerNotification);
 
@@ -46,7 +52,7 @@ function history(h: PromptSession, items: ThreadItem[] = [], parent: string | nu
 it("selects standard and AIR contracts independently", () => {
     const air = {_meta: withAirMeta(undefined, "capabilities", [AIR_NATIVE_SUBAGENT_SESSIONS_KEY])};
     expect([subagentProtocol(null, 1), subagentProtocol({subagents: {}}, 1), subagentProtocol(null, 2),
-        subagentProtocol(air, 1), subagentProtocol(air, 2)]).toEqual(["hidden", "standard", "standard", "air", "air"]);
+        subagentProtocol(air, 1), subagentProtocol(air, 2)]).toEqual(["hidden", "standard", "standard", "air", "standard"]);
 });
 
 describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
@@ -63,6 +69,12 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
     });
     const childUpdates = () => h.scopedUpdates.filter(entry =>
         entry.sessionId.includes(":subagent:") || entry.update.sessionUpdate === "subagent_update");
+    async function waitForChildDirectory() {
+        await vi.waitFor(() => expect(childUpdates()).toContainEqual({
+            sessionId, update: {sessionUpdate: "subagent_update", sessionId: childId, cwd},
+        }));
+        await flush(h);
+    }
     async function snapshot(name: string) {
         await flush(h);
         await expect(JSON.stringify(childUpdates(), null, 2) + "\n").toMatchFileSnapshot(`data/live-core-v${version}-${name}.json`);
@@ -86,6 +98,55 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         expect(childUpdates().filter(entry => entry.update.sessionUpdate === "subagent_update"
             && entry.update.capabilities != null && Object.keys(entry.update.capabilities).length === 0)).toHaveLength(1);
         expect(childUpdates().some(entry => entry.update.sessionUpdate === "user_message_chunk")).toBe(false);
+        // No sender was observed, so the incoming view names only its recipient.
+        expect(childUpdates().filter(entry => entry.update.sessionUpdate === "session_message").map(entry => entry.update))
+            .toEqual([{sessionUpdate: "session_message", messageId: "item-user", recipientSessionId: childId,
+                content: [{type: "text", text: "Agent delegation"}]}]);
+    });
+
+    it("reports delegated tasks as linked session messages and references the child from visible collaboration calls", async () => {
+        await connect();
+        h.emit({method: "thread/started", params: {thread: {...createThread(), id: worker, parentThreadId: sessionId, agentRole: "    explorer\n\nChecks **edge cases**."}}});
+        h.emit(itemStarted(collab("spawnAgent", "spawn", "Find the bug", "inProgress")));
+        h.emit(itemCompleted(collab("spawnAgent", "spawn", "Find the bug")));
+        h.emit(onWorker(turnStarted("child-turn")));
+        h.emit(onWorker(itemStarted(task("task-1", "Find the bug"), "child-turn")));
+        h.emit(onWorker(itemCompleted(task("task-1", "Find the bug"), "child-turn")));
+        h.emit(onWorker(agentMessageDelta("First answer", "child-turn", "first")));
+        h.emit(onWorker(turnCompleted("child-turn")));
+        // The child can observe a later instruction before the parent's call completes.
+        h.emit(itemStarted(collab("sendInput", "send", "Also check Windows", "inProgress")));
+        h.emit(onWorker(turnStarted("next-turn")));
+        h.emit(onWorker(itemStarted(task("task-2", "Also check Windows"), "next-turn")));
+        h.emit(itemCompleted(collab("sendInput", "send", "Also check Windows")));
+        h.emit(itemCompleted(collab("wait", "wait", null)));
+        h.emit(itemCompleted(collab("sendInput", "failed-send", "Never sent", "failed")));
+        await flush(h);
+        const kinds = ["session_message", "tool_call", "tool_call_update", "agent_message_chunk"];
+        const updates = h.scopedUpdates.filter(entry => kinds.includes(entry.update.sessionUpdate)
+            || (entry.update.sessionUpdate === "subagent_update" && "description" in entry.update));
+        await expect(JSON.stringify(updates, null, 2) + "\n").toMatchFileSnapshot(`data/live-core-v${version}-delegation.json`);
+        expect(h.scopedUpdates.some(entry => entry.update.sessionUpdate === "user_message_chunk"
+            || (entry.update as {sessionUpdate: string}).sessionUpdate === "user_message")).toBe(false);
+        expect(h.scopedUpdates.some(entry => "toolCallId" in entry.update && entry.update.toolCallId === "spawn")).toBe(false);
+        expect(JSON.stringify(h.scopedUpdates.filter(entry => entry.update.sessionUpdate === "session_message"))).not.toContain("Never sent");
+    });
+
+    it("leaves repeated identical messages unlinked rather than guessing their sender view", async () => {
+        await connect();
+        h.emit(itemCompleted(collab("spawnAgent", "spawn", null)));
+        h.emit(itemCompleted(collab("sendInput", "send-1", "Check the tests")));
+        h.emit(itemCompleted(collab("sendInput", "send-2", "Check the tests")));
+        h.emit(onWorker(turnStarted("child-turn")));
+        h.emit(onWorker(itemStarted(task("received", "Check the tests"), "child-turn")));
+        await flush(h);
+        const messages = h.scopedUpdates.filter(entry => entry.update.sessionUpdate === "session_message");
+        const incoming = messages.find(entry => entry.sessionId === childId)?.update;
+        expect(incoming).not.toHaveProperty("senderSessionId");
+        expect(incoming).not.toHaveProperty("senderMessageId");
+        expect(messages.every(entry => !("recipientMessageId" in entry.update))).toBe(true);
+        await expect(JSON.stringify(messages, null, 2) + "\n")
+            .toMatchFileSnapshot(`data/live-core-v${version}-ambiguous-delegation.json`);
     });
 
     it("waits for immediate parentage and announces ancestors before child traffic", async () => {
@@ -120,13 +181,13 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         if (version === 1) methods.push(["session/load", {cwd, mcpServers: []}], ["session/set_mode", {modeId: "agent"}],
             [LEGACY_SET_SESSION_MODEL_METHOD, {modelId: "gpt-5"}]);
         for (const id of [childId, worker]) for (const [method, params] of methods) {
-            await expect(h.request(method, {sessionId: id, ...params}), `${method}: ${id}`).rejects.toMatchObject({code: -32600});
+            await expect(h.request(method, {sessionId: id, ...params}), `${method}: ${id}`).rejects.toMatchObject({code: -32602});
         }
         await h.agent.cancel({sessionId: childId});
         expect(h.turnInterruptCalls()).toEqual([]);
     });
 
-    it("keeps permissions and accepted URL completions alive across parent replay", async () => {
+    it("keeps child permissions alive across parent replay without inventing URL completions", async () => {
         await connect({
             v1ClientCapabilities: {subagents: {}, elicitation: {url: {}}},
             clientCapabilities: {elicitation: {url: {}}},
@@ -146,7 +207,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         expect(await approval("after")).toEqual({decision: "accept"});
         h.emit({method: "serverRequest/resolved", params: {threadId: worker, requestId: "authorization-request"}});
         await flush(h);
-        expect(h.transcript).toContainEqual({elicitationComplete: {elicitationId: "authorization"}});
+        expect(h.transcript).not.toContainEqual({elicitationComplete: {elicitationId: "authorization"}});
         expect(h.transcript.filter(entry => "permissionRequest" in entry).map(entry =>
             "permissionRequest" in entry ? entry.permissionRequest.sessionId : null)).toEqual([childId, childId]);
     });
@@ -220,6 +281,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         await load();
         await flush(h);
         expect(resumes).toEqual(parent === sessionId ? [sessionId, worker] : [sessionId]);
+        if (parent === sessionId) await waitForChildDirectory();
         h.emit(onWorker(turnStarted("child-turn")));
         await flush(h);
         if (parent === sessionId) expect(await approval("restored")).toEqual({decision: "accept"});
@@ -235,7 +297,10 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         await flush(h);
         history(h);
         await load();
+        await waitForChildDirectory();
+        await flush(h);
         h.emit({method: "item/commandExecution/outputDelta", params: {threadId: worker, turnId: "child-turn", itemId: "terminal", delta: "Still streaming"}});
+        await flush(h);
         h.emit({method: "item/completed", params: {threadId: worker, turnId: "child-turn", completedAtMs: 0,
             item: {...commandExecutionItem("terminal", "completed"), exitCode: 0, aggregatedOutput: "Still streaming"}}});
         await snapshot("terminal");
@@ -282,22 +347,24 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         const blocked = client.enqueueSessionTransition(sessionId, () => held);
         try {
             h.emit(itemStarted(activityItem()));
-            await expect(h.request("session/close", {sessionId: worker})).rejects.toMatchObject({code: -32600});
+            await expect(h.request("session/close", {sessionId: worker})).rejects.toMatchObject({code: -32602});
             expect(childUpdates()).toEqual([]);
         } finally { release(); }
         await blocked;
         await flush(h);
     });
 
-    it("cascades parent cancellation without inventing a child ending", async () => {
+    it("applies parent cancellation to the protocol scope without inventing a child ending", async () => {
         await connect();
+        h.emit(turnStarted());
         h.emit(itemStarted(activityItem()));
         h.emit(onWorker(turnStarted("child-turn")));
         await flush(h);
         const before = childUpdates().length;
         await h.cancel();
-        await vi.waitFor(() => expect(h.turnInterruptCalls()).toContainEqual({threadId: worker, turnId: "child-turn"}));
         await flush(h);
+        const childInterrupt = {threadId: worker, turnId: "child-turn"};
+        await vi.waitFor(() => expect(h.turnInterruptCalls()).toContainEqual(childInterrupt));
         expect(childUpdates().slice(before)).toEqual([]);
         h.emit(onWorker(turnCompleted("child-turn")));
         await snapshot("cancel");
@@ -352,6 +419,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
     it("replays parent history and empty child associations without inventing a gap or current runtime", async () => {
         await connect();
         const item: ThreadItem = {type: "agentMessage", id: "parent-answer", text: "Parent history", phase: null,
+            moderation: null,
             memoryCitation: null, delivery: null, questions: null};
         history(h, [activityItem(), item], "foreign-root");
         await load();
@@ -360,7 +428,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
             && entry.update.messageId === "parent-answer")).toBe(true);
         expect(h.scopedUpdates.some(entry => entry.sessionId === sessionId && entry.update.sessionUpdate === "agent_thought_chunk"
             && entry.update.messageId === `${sessionId}:subagent-history-gap`)).toBe(false);
-        expect(childUpdates().filter(entry => entry.sessionId === childId)).toEqual([]);
+        expect(childUpdates().filter(entry => entry.sessionId === childId && entry.update.sessionUpdate !== "replay_complete")).toEqual([]);
     });
 
     it("finishes concurrent same-parent setups without deadlock", async () => {
@@ -400,8 +468,9 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         } finally { release(); }
     });
 
-    it.skipIf(version !== 2)("publishes snapshots after the setup response without waiting for unrelated requests", async () => {
+    it.skipIf(version !== 2)("publishes replay before the setup response and live controls after it without waiting for unrelated requests", async () => {
         await connect();
+        h.emit(turnStarted());
         h.emit(itemStarted(activityItem()));
         h.emit(onWorker(turnStarted("child-turn")));
         await flush(h);
@@ -426,8 +495,13 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         const response = frames.findIndex(frame => "result" in frame);
         const state = frames.findIndex(frame => "method" in frame && frame.method === "session/update"
             && (frame.params as {sessionId: string; update: {sessionUpdate: string}}).sessionId === childId
-            && (frame.params as {update: {sessionUpdate: string}}).update.sessionUpdate === "state_update");
+            && (frame.params as {update: {sessionUpdate: string}}).update.sessionUpdate === "replay_complete");
         expect(response).toBeGreaterThanOrEqual(0);
-        expect(state).toBeGreaterThan(response);
+        expect(state).toBeGreaterThanOrEqual(0);
+        expect(response).toBeGreaterThan(state);
+        const control = frames.findIndex((frame, index) => index > response && "method" in frame
+            && frame.method === "session/update"
+            && (frame.params as {update: {capabilities?: {cancel?: unknown}}}).update.capabilities?.cancel != null);
+        expect(control).toBeGreaterThan(response);
     });
 });

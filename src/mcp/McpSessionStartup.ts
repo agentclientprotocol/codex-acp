@@ -27,6 +27,8 @@ export interface McpSessionStartupOptions {
     awaitTimeoutMs?: number | undefined;
     /** The requested servers that the Codex config already defines. Nothing waits for them, and the report shows them. */
     skippedServers?: Array<string> | undefined;
+    /** Servers that failed before reaching Codex, such as an unavailable bridge listener. */
+    failures?: McpStartupResult["failed"] | undefined;
 }
 
 /**
@@ -72,7 +74,7 @@ export class McpSessionStartup {
         afterVersion: number,
         options: McpSessionStartupOptions,
     ): Promise<void> | null {
-        const pendingStartup = this.createPendingSession(sessionId, mcpServers, afterVersion, options.skippedServers ?? []);
+        const pendingStartup = this.createPendingSession(sessionId, mcpServers, afterVersion, options.skippedServers ?? [], options.failures ?? []);
         if (options.publish) {
             this.pendingSessions.set(sessionId, pendingStartup);
         }
@@ -127,15 +129,17 @@ export class McpSessionStartup {
         mcpServers: Array<AcpMcpServer>,
         afterVersion: number,
         skippedServers: Array<string>,
+        failures: McpStartupResult["failed"],
     ): PendingMcpStartupSession {
         const requestedServers = new Set(getRequestedMcpServerNames(mcpServers)
             .filter(server => !skippedServers.includes(server)));
+        const failedNames = new Set(failures.map(failure => failure.server));
         const abort = new AbortController();
         const startup = this.runWithProcessCheck(() => this.codexAcpClient().awaitMcpServerStartup(
-            Array.from(requestedServers),
+            [...requestedServers].filter(name => !failedNames.has(name)),
             afterVersion,
             {threadId: sessionId, signal: abort.signal},
-        ));
+        )).then(result => ({...result, failed: [...failures, ...result.failed]}));
         // An abort can reject the startup before a caller awaits it.
         void startup.catch(() => {});
         return {requestedServers, skippedServers, startup, abort};

@@ -45,7 +45,7 @@ describe.each([1, 2] as const)("ACP v%s auth request lifetime", version => {
         let h: PromptSession | null = null;
         try {
             await writing.promise;
-            agent.handleAccountUpdated({authMode: "apikey", planType: null});
+            agent.handleAccountUpdated({authMode: "apikey", planType: null, reason: null});
             await new Promise<void>(resolve => setImmediate(resolve));
             expect(notifications.filter(call => call[0] === "_auth/status_update")).toEqual([]);
             release.resolve();

@@ -34,6 +34,7 @@
       },
       {
         "sessionUpdate": {
+          "background": [],
           "state": "running",
           "sessionUpdate": "state_update"
         }
@@ -82,6 +83,7 @@
             "message": "You've hit your usage limit."
           },
           "stopReason": "error",
+          "background": [],
           "_meta": {
             "quota": {
               "token_count": null,
@@ -129,6 +131,7 @@
       },
       {
         "sessionUpdate": {
+          "background": [],
           "state": "running",
           "sessionUpdate": "state_update"
         }
@@ -147,6 +150,20 @@
             "type": "text"
           },
           "sessionUpdate": "user_message_chunk"
+        }
+      },
+      {
+        "sessionUpdate": {
+          "cursorId": "before:turn-2",
+          "capabilities": {
+            "fork": {}
+          },
+          "anchor": {
+            "messageId": "<messageId>",
+            "position": "before",
+            "type": "user_message"
+          },
+          "sessionUpdate": "cursor_update"
         }
       },
       {
@@ -177,6 +194,7 @@
             "message": "Authentication required"
           },
           "stopReason": "error",
+          "background": [],
           "_meta": {
             "quota": {
               "token_count": null,

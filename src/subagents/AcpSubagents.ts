@@ -47,13 +47,12 @@ export function subagentProtocol(
     capabilities?: ClientCapabilities | null,
     version: 1 | 2 = 1,
 ): "hidden" | "air" | "standard" {
-    const subagents = (
-        capabilities as (ClientCapabilities & { subagents?: unknown }) | null | undefined
-    )?.subagents;
+    if (version === 2) return "standard";
+    const subagents = capabilities?.subagents;
     const standard = typeof subagents === "object" && subagents !== null && !Array.isArray(subagents);
     const air = isAirClient(capabilities);
     if (clientSupportsAirCapability(capabilities, AIR_NATIVE_SUBAGENT_SESSIONS_KEY)
         || (version === 1 && air && standard)) return "air";
     if (air) return "hidden";
-    return version === 2 || standard ? "standard" : "hidden";
+    return standard ? "standard" : "hidden";
 }

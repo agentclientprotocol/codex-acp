@@ -24,7 +24,7 @@ export function toV2AvailableCommands(commands: acp.AvailableCommand[]): acpV2.A
  * call update, and never reach the client as `_meta`. An update that only carried terminal
  * output renders to no tool call update at all.
  */
-export function toV2SessionUpdates(update: AcpSessionUpdate): acpV2.SessionUpdate[] {
+export function toV2SessionUpdates(update: AcpSessionUpdate, terminalsEndingInCR?: Set<string>): acpV2.SessionUpdate[] {
     if (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") {
         return [toV2SessionUpdate(update)];
     }
@@ -36,6 +36,7 @@ export function toV2SessionUpdates(update: AcpSessionUpdate): acpV2.SessionUpdat
     const terminalUpdates = toV2TerminalUpdates(
         {info: terminal_info, output: terminal_output ?? terminal_output_delta, exit: terminal_exit},
         toolCall.rawInput,
+        terminalsEndingInCR,
     );
     const {sessionUpdate: _tag, toolCallId: _id, ...toolCallFields} = toolCall;
     if (Object.keys(toolCallFields).length === 0 && Object.keys(otherMeta).length === 0) {
@@ -63,6 +64,9 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
         case "notice":
         case "compaction_update":
         case "compaction_summary_chunk":
+        case "session_message":
+        case "session_message_chunk":
+        case "prompt_suggestions_update":
             return update;
         case "config_option_update":
             return {...update, configOptions: toV2ConfigOptions(update.configOptions)};
@@ -119,39 +123,15 @@ export function toV2SessionUpdate(update: AcpSessionUpdate): acpV2.SessionUpdate
         }
         case "subagent_update":
             return update;
-        // AIR's private contract is selected independently upstream.
-        case "subagent_spawned": {
-            const {subagentSessionId, name, task, _meta} = update;
-            return {
-                sessionUpdate: "_subagent_update",
-                subagentSessionId,
-                name,
-                task,
-                capabilities: {},
-                ...(_meta != null ? {_meta} : {}),
-            };
-        }
-        case "subagent_state_update": {
-            const {subagentSessionId, state, _meta} = update;
-            return {
-                sessionUpdate: "_subagent_update",
-                subagentSessionId,
-                state,
-                ...(_meta != null ? {_meta} : {}),
-            };
-        }
-        // No upstream v2 design exists for async tasks (AIR-private extension); same payload as v1
-        // under a `_`-prefixed tag. Gated on AIR `asyncTasks` upstream, same as above.
+        // Same shape. Only the type of an unknown anchor variant differs, and the adapter sends known ones.
+        case "cursor_update":
+            return update as acpV2.SessionUpdate;
+        case "subagent_spawned":
+        case "subagent_state_update":
         case "async_task_spawned":
-            return {...update, sessionUpdate: "_async_task_spawned"};
-        case "async_task_state_update":
-            return {...update, sessionUpdate: "_async_task_state_update"};
-        // Declared as a type but never emitted; no v2 rendering to give it yet.
         case "async_task_progress":
-            throw acp.RequestError.internalError(
-                undefined,
-                `'${update.sessionUpdate}' session update is not supported on an ACP v2 connection yet`,
-            );
+        case "async_task_state_update":
+            throw acp.RequestError.internalError(undefined, `'${update.sessionUpdate}' session update does not exist in ACP v2`);
     }
 }
 
@@ -162,6 +142,7 @@ export function toV2ToolCallContent(content: acp.ToolCallContent): acpV2.ToolCal
             return content;
         // Same shape on v2; the terminal itself is sent by `toV2SessionUpdates`.
         case "terminal":
+        case "session":
             return content;
         case "diff":
             return {type: "diff", ...toV2Diff(content)};
@@ -228,7 +209,7 @@ type TerminalMetaRecord = {
  * `terminal_exit` marks completion. Output sent together with the exit is the command's whole
  * output (it is only sent when none was streamed), so it becomes the final snapshot.
  */
-function toV2TerminalUpdates(meta: TerminalMeta, rawInput: unknown): acpV2.SessionUpdate[] {
+function toV2TerminalUpdates(meta: TerminalMeta, rawInput: unknown, terminalsEndingInCR?: Set<string>): acpV2.SessionUpdate[] {
     const info = meta.info == null ? null : terminalMetaRecord(meta.info, "terminal_info");
     const output = meta.output == null ? null : terminalMetaRecord(meta.output, "terminal_output");
     const exit = meta.exit == null ? null : terminalMetaRecord(meta.exit, "terminal_exit");
@@ -245,7 +226,8 @@ function toV2TerminalUpdates(meta: TerminalMeta, rawInput: unknown): acpV2.Sessi
             terminalUpdate.cwd = info.cwd;
         }
     }
-    const data = output ? base64(output.data, "terminal_output") : null;
+    // A final snapshot replaces the stream and starts at its own first byte.
+    const data = output ? terminalBytes(output, exit ? undefined : terminalsEndingInCR) : null;
     if (exit) {
         if (data !== null) {
             terminalUpdate.output = {data};
@@ -273,10 +255,14 @@ function terminalMetaRecord(value: unknown, key: string): TerminalMetaRecord {
     return value as TerminalMetaRecord;
 }
 
-/** v2 terminal bytes are base64; Codex reports output as already-decoded text. */
-function base64(data: unknown, key: string): string {
+/** A bare LF needs a carriage return to bring the terminal cursor back to column zero. */
+function terminalBytes({data, terminal_id}: TerminalMetaRecord, terminalsEndingInCR?: Set<string>): string {
     if (typeof data !== "string") {
-        throw acp.RequestError.internalError(undefined, `Malformed '${key}' tool call metadata`);
+        throw acp.RequestError.internalError(undefined, "Malformed 'terminal_output' tool call metadata");
     }
-    return Buffer.from(data, "utf8").toString("base64");
+    const followsCR = terminalsEndingInCR?.has(terminal_id);
+    const text = data.replace(/(?<!\r)\n/g, (lf, offset) => offset === 0 && followsCR ? lf : "\r\n");
+    if (data.endsWith("\r")) terminalsEndingInCR?.add(terminal_id);
+    else if (data.length > 0) terminalsEndingInCR?.delete(terminal_id);
+    return Buffer.from(text, "utf8").toString("base64");
 }

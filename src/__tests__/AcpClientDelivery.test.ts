@@ -90,6 +90,7 @@ describe("AcpClientDelivery", () => {
         const complete = (elicitationId: string) => delivery.notify(acp.methods.client.elicitation.complete, {elicitationId});
         await create("old", {sessionId: "s"});
         await create("login", {requestId: 1});
+        await expect(create("login", {sessionId: "s"})).rejects.toMatchObject({code: -32602});
         let accept!: (response: unknown) => void;
         request.mockReturnValueOnce(new Promise(resolve => { accept = resolve; }));
         const late = create("late", {sessionId: "s"});

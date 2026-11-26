@@ -31,6 +31,7 @@
   },
   {
     "sessionUpdate": {
+      "background": [],
       "state": "running",
       "sessionUpdate": "state_update"
     }
@@ -57,11 +58,59 @@
     }
   },
   {
+    "codexNotification": "item/started"
+  },
+  {
     "codexNotification": "turn/completed"
   },
   {
     "sessionUpdate": {
+      "terminalId": "unfinished",
+      "command": "sleep 12",
+      "cwd": "/workspace",
+      "sessionUpdate": "terminal_update"
+    }
+  },
+  {
+    "sessionUpdate": {
+      "toolCallId": "unfinished",
+      "title": "sleep 12",
+      "kind": "execute",
+      "status": "in_progress",
+      "content": [
+        {
+          "terminalId": "unfinished",
+          "type": "terminal"
+        }
+      ],
+      "rawInput": {
+        "command": "sleep 12",
+        "cwd": "/workspace"
+      },
+      "sessionUpdate": "tool_call_update"
+    }
+  },
+  {
+    "sessionUpdate": {
+      "terminalId": "unfinished",
+      "exitStatus": {
+        "exitCode": null,
+        "signal": null
+      },
+      "sessionUpdate": "terminal_update"
+    }
+  },
+  {
+    "sessionUpdate": {
+      "toolCallId": "unfinished",
+      "status": "failed",
+      "sessionUpdate": "tool_call_update"
+    }
+  },
+  {
+    "sessionUpdate": {
       "stopReason": "cancelled",
+      "background": [],
       "_meta": {
         "quota": {
           "token_count": null,

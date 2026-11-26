@@ -185,6 +185,24 @@ describe("CodexEventHandler - plan events", () => {
         await expect(mockFixture.getAcpConnectionDump([])).toMatchFileSnapshot(`data/${snapshot}`);
     });
 
+    it.each([
+        {capabilities: undefined, update: {sessionUpdate: "plan", entries: []}},
+        {
+            capabilities: {plan: {}, _meta: {jetbrains: {air: {version: 1}}}},
+            update: {sessionUpdate: "plan_update", plan: {type: "items", planId: "codex-structured-plan", entries: []}},
+        },
+    ])("reports a cleared v1 checklist as $update.sessionUpdate", async ({capabilities, update}) => {
+        const notify = vi.fn(async (_method: unknown, _params: unknown) => {});
+        const handler = createTestEventHandler({notify, request: vi.fn()} as unknown as AcpClientConnection, {
+            ...sessionState, clientCapabilities: ClientCapabilities.from(capabilities),
+        });
+        await handler.handleNotification({
+            method: "turn/plan/updated", params: {threadId: sessionId, turnId: "turn-1", explanation: null, plan: []},
+        });
+        const expected = [update, ...(capabilities?.plan ? [{sessionUpdate: "plan_removed", planId: "codex-structured-plan"}] : [])];
+        expect(notify.mock.calls).toEqual(expected.map(update => ["session/update", {sessionId, update}]));
+    });
+
     describe("plan update coalescing", () => {
         function createHandler(notify = vi.fn(async (_method: unknown, _params: unknown) => {})) {
             const connection = {

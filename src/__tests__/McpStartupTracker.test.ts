@@ -8,7 +8,7 @@ import {McpOauthCompletions} from "../mcp/McpOauthCompletions";
 import {McpStartupTracker} from "../mcp/McpStartupTracker";
 
 function startupStatus(name: string, threadId: string | null, status: "starting" | "ready" = "ready") {
-    return {threadId, name, status, error: null, failureReason: null};
+    return {threadId, name, status, environmentId: null, error: null, failureReason: null};
 }
 
 function waiterCount(tracker: McpStartupTracker): number {
@@ -45,7 +45,7 @@ describe("McpStartupTracker", () => {
         const client = new CodexAppServerClient(codex.connection);
 
         const startup = client.mcpStartup.await(["fs"], client.mcpStartup.version(), {threadId: "thread-id"});
-        const signIn = client.mcpOauthCompletions.await("fs", "thread-id");
+        const signIn = client.mcpOauthCompletions.await("fs", "thread-id", Promise.resolve("attempt"));
         codex.process.kill();
 
         await expect(startup).rejects.toThrow("Codex connection closed during the MCP server startup.");
@@ -93,28 +93,27 @@ describe("McpStartupTracker", () => {
 });
 
 describe("McpOauthCompletions", () => {
-    it("completes every sign-in that waits for the server", async () => {
+    it("matches an early completion to its login ID rather than another sign-in on the same server", async () => {
         const completions = new McpOauthCompletions();
-        const first = completions.await("linear", "thread-id");
-        const second = completions.await("linear", "thread-id");
-        const other = completions.await("github", "thread-id");
-
-        completions.complete({name: "linear", threadId: "thread-id", success: true});
-
-        await expect(first).resolves.toMatchObject({name: "linear", success: true});
-        await expect(second).resolves.toMatchObject({name: "linear", success: true});
+        let identify!: (id: string) => void;
+        const first = completions.await("linear", "thread-id", new Promise(resolve => { identify = resolve; }));
+        const second = completions.await("linear", "thread-id", Promise.resolve("b"));
+        completions.complete({name: "linear", threadId: null, success: true});
+        completions.complete({name: "linear", threadId: null, loginId: "a", success: true});
+        identify("a");
+        await expect(first).resolves.toMatchObject({loginId: "a"});
         expect(oauthWaiterCount(completions)).toBe(1);
-        completions.complete({name: "github", threadId: "thread-id", success: false});
-        await expect(other).resolves.toMatchObject({name: "github", success: false});
+        completions.complete({name: "linear", threadId: "thread-id", loginId: "b", success: false});
+        await expect(second).resolves.toMatchObject({loginId: "b", success: false});
         expect(oauthWaiterCount(completions)).toBe(0);
     });
 
     it("ignores the completion of another thread", async () => {
         const completions = new McpOauthCompletions();
         let completed = false;
-        void completions.await("linear", "thread-id").then(() => { completed = true; });
+        void completions.await("linear", "thread-id", Promise.resolve("a")).then(() => { completed = true; });
 
-        completions.complete({name: "linear", threadId: "other-thread", success: true});
+        completions.complete({name: "linear", threadId: "other-thread", loginId: "a", success: true});
         await Promise.resolve();
 
         expect(completed).toBe(false);
@@ -124,7 +123,7 @@ describe("McpOauthCompletions", () => {
     it("removes an aborted wait", async () => {
         const completions = new McpOauthCompletions();
         const abort = new AbortController();
-        const signIn = completions.await("linear", "thread-id", abort.signal);
+        const signIn = completions.await("linear", "thread-id", Promise.resolve("a"), abort.signal);
 
         abort.abort(new Error("cancelled"));
 

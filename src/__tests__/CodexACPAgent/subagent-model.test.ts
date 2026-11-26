@@ -1,12 +1,10 @@
-import {afterEach, describe, expect, it, vi} from 'vitest';
-import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
-import {ACPSessionConnection, type AcpClientConnection, AcpV2Connection} from '../../ACPSessionConnection';
+import {describe, expect, it, vi} from 'vitest';
+import {ACPSessionConnection, type AcpClientConnection} from '../../ACPSessionConnection';
 import {CodexSubagentEventRouter, type SubagentModels} from '../../subagents/CodexSubagentEventRouter';
 import {createModelConfigOption} from '../../ModelConfigOption';
 import type {ServerNotification} from '../../app-server';
 import type {ThreadItem} from '../../app-server/v2';
 import {createTestModel} from '../acp-test-utils';
-import {checkV2SessionUpdate, expectConformingV2SessionUpdates} from './v2-session-update-guard';
 
 type SentUpdate = {sessionId: string; update: Record<string, unknown>};
 
@@ -32,21 +30,6 @@ function v1Router(
     } as unknown as AcpClientConnection;
     const session = new ACPSessionConnection(connection, "root");
     return {router: new CodexSubagentEventRouter("root", supported, session, () => {}, () => models), sent};
-}
-
-function v2Router(): {router: CodexSubagentEventRouter; sent: SentUpdate[]} {
-    const sent: SentUpdate[] = [];
-    const v2Client = {
-        notify: vi.fn(async (_method: string, params: unknown) => {
-            const notification = params as {sessionId: string; update: acpV2.SessionUpdate};
-            checkV2SessionUpdate(notification.update);
-            sent.push(notification as unknown as SentUpdate);
-        }),
-        request: vi.fn(),
-    };
-    const view = new AcpV2Connection(v2Client as any).extensionOnlyV1View();
-    const session = new ACPSessionConnection(view, "root");
-    return {router: new CodexSubagentEventRouter("root", true, session, () => {}, () => MODELS), sent};
 }
 
 function spawn(
@@ -154,10 +137,6 @@ function modelReports(sent: SentUpdate[]): string[] {
 }
 
 describe('the model of a native subagent session', () => {
-    afterEach(() => {
-        expectConformingV2SessionUpdates();
-    });
-
     it('reports the resolved activity model on the child session right after the announcement', async () => {
         const {router, sent} = v1Router();
 
@@ -176,11 +155,12 @@ describe('the model of a native subagent session', () => {
         await feed(router, spawn(null), activity("gpt-5.2-codex"));
 
         const parentOption = createModelConfigOption([...MODELS.availableModels], MODELS.currentModel!);
-        const parentEntry = ((parentOption as {options: Array<{value: string}>}).options)
+        const parentEntry = ((parentOption as {options: Array<{value: string; name: string}>}).options)
             .find(option => option.value === "gpt-5.2-codex");
         const childOption = modelOptionOf(sent[1]!.update);
         expect(childOption["currentValue"]).toBe("gpt-5.2-codex");
-        expect(childOption["options"]).toEqual([parentEntry]);
+        const options = childOption["options"] as Array<{value: string; name: string}>;
+        expect(options.map(({value, name}) => ({value, name}))).toEqual([{value: parentEntry!.value, name: parentEntry!.name}]);
     });
 
     it.each([
@@ -449,13 +429,5 @@ describe('the model of a native subagent session', () => {
         }
 
         expect(sent).not.toContain("config_option_update");
-    });
-
-    it('renders the child configuration in the ACP v2 shape', async () => {
-        const {router, sent} = v2Router();
-
-        await feed(router, spawn(null), activity("gpt-5.2-codex"));
-
-        await expect(JSON.stringify(sent, null, 2)).toMatchFileSnapshot('data/subagent-model-v2.json');
     });
 });

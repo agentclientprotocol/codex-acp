@@ -1,0 +1,45 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "UserPromptSubmit hook blocked the prompt: blocked by policy\n\n"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "SessionStart hook stopped the turn: stopped by hook\nhook error\n\n"
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "PreToolUse hook blocked the tool call.\n\n"
+        }
+      }
+    }
+  ]
+}

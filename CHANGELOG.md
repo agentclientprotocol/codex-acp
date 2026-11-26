@@ -1,5 +1,85 @@
 # Changelog
 
+## [2.12.1](https://github.com/agentclientprotocol/codex-acp/compare/v2.12.0...v2.12.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* update codex to 0.172.0 ([#800](https://github.com/agentclientprotocol/codex-acp/issues/800)) ([61b214e](https://github.com/agentclientprotocol/codex-acp/commit/61b214e774faf251fa1e3fe08fed5451da52056a))
+
+## [2.12.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.11.0...v2.12.0) (2026-11-24)
+
+
+### Features
+
+* session cursors and in-place session rewind ([#801](https://github.com/agentclientprotocol/codex-acp/issues/801)) ([caedc6d](https://github.com/agentclientprotocol/codex-acp/commit/caedc6d6b471c2d802039026d8921f43abaff3e1))
+
+## [2.11.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.10.0...v2.11.0) (2026-11-23)
+
+
+### Features
+
+* experimental support for session options ([#797](https://github.com/agentclientprotocol/codex-acp/issues/797)) ([47f9a07](https://github.com/agentclientprotocol/codex-acp/commit/47f9a0788da6be5d7d3c4fd7b170d75f83e8bbd6))
+
+
+### Bug Fixes
+
+* Closing the gaps for the ACP v2 support ([#744](https://github.com/agentclientprotocol/codex-acp/issues/744)) ([394f2fa](https://github.com/agentclientprotocol/codex-acp/commit/394f2fadcdc7117aeb0c87bccd8897cb1c2a3870))
+* send ACP v2 terminal output with CRLF ([#795](https://github.com/agentclientprotocol/codex-acp/issues/795)) ([e1a0da5](https://github.com/agentclientprotocol/codex-acp/commit/e1a0da5add607d9e549788388eb0584269821b5d))
+
+## [2.10.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.9.0...v2.10.0) (2026-11-23)
+
+
+### Features
+
+* send per-model reasoning efforts in the model config option ([#789](https://github.com/agentclientprotocol/codex-acp/issues/789)) ([15c3808](https://github.com/agentclientprotocol/codex-acp/commit/15c3808576dd349226dfb559094029d8a326f258))
+
+## [2.9.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.8.0...v2.9.0) (2026-11-21)
+
+
+### Features
+
+* support auth/status on ACP v1 and v2 ([#782](https://github.com/agentclientprotocol/codex-acp/issues/782)) ([4f2bdd8](https://github.com/agentclientprotocol/codex-acp/commit/4f2bdd82d0810ac23cb2c03ff8e4789897ae70dd))
+
+
+### Bug Fixes
+
+* align the adapter with ACP SDK 2.9 and v2 Preview ([#787](https://github.com/agentclientprotocol/codex-acp/issues/787)) ([556045e](https://github.com/agentclientprotocol/codex-acp/commit/556045e3fc6e95daad2989fede1a22caaaceae78))
+* update codex to 0.171.0 ([#784](https://github.com/agentclientprotocol/codex-acp/issues/784)) ([e49d438](https://github.com/agentclientprotocol/codex-acp/commit/e49d438a57841436e2f71129dc231ed5359979f8))
+* validate MCP declarations and preserve Markdown with ACP SDK 2.9.1 ([#788](https://github.com/agentclientprotocol/codex-acp/issues/788)) ([e67bc09](https://github.com/agentclientprotocol/codex-acp/commit/e67bc0985eed2bb7f7d2d0298205202c16ca8609))
+
+## [2.8.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.7.0...v2.8.0) (2026-11-19)
+
+
+### Features
+
+* report ACP v2 background work and cancel individual terminals ([#777](https://github.com/agentclientprotocol/codex-acp/issues/777)) ([74dffa0](https://github.com/agentclientprotocol/codex-acp/commit/74dffa08b1f7d75ca584a353d038e56e983b69d8))
+* support MCP-over-ACP in the Codex adapter ([#771](https://github.com/agentclientprotocol/codex-acp/issues/771)) ([b9503ae](https://github.com/agentclientprotocol/codex-acp/commit/b9503aef790c5ca473348fb5580de9869bb5174a))
+
+
+### Bug Fixes
+
+* align adapter with ACP SDK 2.7 and current protocol rules ([#769](https://github.com/agentclientprotocol/codex-acp/issues/769)) ([887aab6](https://github.com/agentclientprotocol/codex-acp/commit/887aab698f29fa92f6736c1c4701fc79bd2a5391))
+* align adapter with ACP SDK 2.8 and current protocol rules ([#775](https://github.com/agentclientprotocol/codex-acp/issues/775)) ([0a17129](https://github.com/agentclientprotocol/codex-acp/commit/0a17129cecc0f3c6577e91db81178f0141de8b00))
+* avoid stack overflow when snapshotting deeply nested JSON ([#742](https://github.com/agentclientprotocol/codex-acp/issues/742)) ([06425cc](https://github.com/agentclientprotocol/codex-acp/commit/06425ccae69f83bc0324b0e44e250b039f7d0b86))
+* put model settings first in session config options ([#778](https://github.com/agentclientprotocol/codex-acp/issues/778)) ([3645fab](https://github.com/agentclientprotocol/codex-acp/commit/3645fabfc9c7a5bf465131ba3cd3e9496bc27e97))
+* update codex to 0.170.0 ([#780](https://github.com/agentclientprotocol/codex-acp/issues/780)) ([77b12a1](https://github.com/agentclientprotocol/codex-acp/commit/77b12a199a81307e10020de284edb0f5b46541d8))
+
+## [2.7.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.6.0...v2.7.0) (2026-11-16)
+
+
+### Features
+
+* report delegated tasks as session messages and reference children from tool calls ([#760](https://github.com/agentclientprotocol/codex-acp/issues/760)) ([6567651](https://github.com/agentclientprotocol/codex-acp/commit/656765115f82253c79f87918abb77189c114a799))
+* send structured plans as items plan_update when the client supports it ([#752](https://github.com/agentclientprotocol/codex-acp/issues/752)) ([ab7a968](https://github.com/agentclientprotocol/codex-acp/commit/ab7a968e982a95d8a765c1e6c6682a520d4f7638))
+* show the retry cause as details of the AIR retry warning ([#755](https://github.com/agentclientprotocol/codex-acp/issues/755)) ([e981b3c](https://github.com/agentclientprotocol/codex-acp/commit/e981b3c8c5236e715311964b1cb0044cc6fd54c3))
+
+
+### Bug Fixes
+
+* Map priority mode to fast ([#327](https://github.com/agentclientprotocol/codex-acp/issues/327)) ([52cc518](https://github.com/agentclientprotocol/codex-acp/commit/52cc518a371eb0a23d4d23ebe1dd1c657461b25c))
+* report hooks that block or stop Codex ([#767](https://github.com/agentclientprotocol/codex-acp/issues/767)) ([bcf0e92](https://github.com/agentclientprotocol/codex-acp/commit/bcf0e925ae2222daa899aeec06e32e3ffd4c84eb))
+
 ## [2.6.0](https://github.com/agentclientprotocol/codex-acp/compare/v2.5.0...v2.6.0) (2026-11-06)
 
 

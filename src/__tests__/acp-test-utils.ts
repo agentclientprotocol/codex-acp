@@ -16,9 +16,9 @@ import {DEFAULT_COLLABORATION_MODE} from "../CollaborationModeConfig";
 import {afterEach, beforeEach, expect, vi} from "vitest";
 import type {Model, ReasoningEffortOption} from "../app-server/v2";
 import {CodexSubagentEventRouter} from "../subagents/CodexSubagentEventRouter";
-import {CodexEventHandler} from "../CodexEventHandler";
+import {CodexEventHandler, SessionFailureIds} from "../CodexEventHandler";
 import type {AccountUpdatedNotification} from "../app-server/v2";
-import {CodexBackgroundTerminalTasks} from "../async-tasks/CodexBackgroundTerminalTasks";
+import {CodexBackgroundTasks} from "../async-tasks/CodexBackgroundTasks";
 import {CodexSessionCompactions} from "../CodexSessionCompactions";
 import {CodexSessionToolCalls} from "../CodexSessionToolCalls";
 import {AUTH_STATUS_UPDATE_METHOD} from "../AuthStatusMeta";
@@ -437,6 +437,9 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         totalTokenUsage: null,
         promptTokenUsage: null,
         threadHasHistory: true,
+        hasTurn: false,
+        rewindable: false,
+        rewinding: false,
         modelContextWindow: null,
         rateLimits: null,
         account: null,
@@ -468,7 +471,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
             () => {},
             () => ({currentModel: null, availableModels: []}),
         ),
-        asyncTasks: new CodexBackgroundTerminalTasks(
+        asyncTasks: new CodexBackgroundTasks(
             false,
             sessionId,
             {} as CodexAppServerClient,
@@ -606,7 +609,6 @@ export function createTestEventHandler(
     options: {
         typedSessionFailures?: boolean;
         sessionFailureEpoch?: string;
-        onAccountUpdated?: (notification: AccountUpdatedNotification) => void;
         collectTurnDiffs?: boolean;
     } = {},
 ): CodexEventHandler {
@@ -614,9 +616,8 @@ export function createTestEventHandler(
         connection,
         sessionState,
         options.typedSessionFailures ?? false,
-        options.sessionFailureEpoch ?? "test-epoch",
+        new SessionFailureIds(options.sessionFailureEpoch ?? "test-epoch"),
         sessionState.subagents,
-        options.onAccountUpdated,
         options.collectTurnDiffs ?? false,
         false,
         false,

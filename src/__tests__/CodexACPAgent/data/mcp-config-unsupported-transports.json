@@ -11,8 +11,8 @@
     "code": -32602,
     "message": "Invalid params: Codex doesn't support MCP SSE transport protocol"
   },
-  "v1 acp": {
+  "obsolete acp id": {
     "code": -32602,
-    "message": "Invalid params: Codex doesn't support MCP ACP transport protocol"
+    "message": "Invalid params: An ACP MCP server requires a string name and serverId"
   }
 }

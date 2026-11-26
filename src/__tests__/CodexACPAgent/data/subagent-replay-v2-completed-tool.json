@@ -67,8 +67,14 @@
   {
     "sessionId": "thread-1:subagent:worker",
     "update": {
-      "stopReason": "end_turn",
-      "state": "idle",
+      "sessionUpdate": "replay_complete"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
+      "background": [],
+      "state": "running",
       "sessionUpdate": "state_update"
     }
   },
@@ -87,6 +93,7 @@
     "sessionId": "thread-1:subagent:worker",
     "update": {
       "stopReason": "end_turn",
+      "background": [],
       "state": "idle",
       "sessionUpdate": "state_update"
     }

@@ -21,6 +21,20 @@
   {
     "sessionId": "thread-1:subagent:worker",
     "update": {
+      "messageId": "item-user",
+      "recipientSessionId": "thread-1:subagent:worker",
+      "content": [
+        {
+          "text": "Agent delegation",
+          "type": "text"
+        }
+      ],
+      "sessionUpdate": "session_message"
+    }
+  },
+  {
+    "sessionId": "thread-1:subagent:worker",
+    "update": {
       "content": {
         "text": "First answer",
         "type": "text"

@@ -1,45 +1,10 @@
 [
   {
-    "codexRequest": "turn/start",
-    "params": {
-      "threadId": "thread-1",
-      "input": [
-        {
-          "type": "text",
-          "text": "Hello",
-          "text_elements": []
-        }
-      ],
-      "approvalPolicy": "on-request",
-      "approvalsReviewer": "auto_review",
-      "sandboxPolicy": {
-        "type": "workspaceWrite",
-        "writableRoots": [],
-        "networkAccess": false,
-        "excludeTmpdirEnvVar": false,
-        "excludeSlashTmp": false
-      },
-      "summary": "auto",
-      "effort": "medium",
-      "model": "gpt-5",
-      "serviceTier": null,
-      "clientUserMessageId": "<messageId>"
-    }
-  },
-  {
-    "codexResponse": "turn/start"
-  },
-  {
     "sessionUpdate": {
+      "background": [],
       "state": "running",
       "sessionUpdate": "state_update"
     }
-  },
-  {
-    "codexNotification": "turn/started"
-  },
-  {
-    "codexNotification": "item/completed"
   },
   {
     "sessionUpdate": {
@@ -57,12 +22,6 @@
     }
   },
   {
-    "codexNotification": "item/completed"
-  },
-  {
-    "codexNotification": "turn/completed"
-  },
-  {
     "sessionUpdate": {
       "plan": {
         "planId": "plan-item",
@@ -74,6 +33,7 @@
   },
   {
     "sessionUpdate": {
+      "background": [],
       "state": "requires_action",
       "sessionUpdate": "state_update"
     }
@@ -118,6 +78,36 @@
   {
     "sessionUpdate": {
       "configOptions": [
+        {
+          "currentValue": "gpt-5",
+          "options": [
+            {
+              "value": "gpt-5",
+              "name": "5",
+              "description": "gpt-5 model"
+            }
+          ],
+          "type": "select",
+          "configId": "model",
+          "name": "Model",
+          "description": "Model Codex uses for the session",
+          "category": "model"
+        },
+        {
+          "currentValue": "medium",
+          "options": [
+            {
+              "value": "medium",
+              "name": "Medium",
+              "description": "Balanced"
+            }
+          ],
+          "type": "select",
+          "configId": "reasoning_effort",
+          "name": "Reasoning effort",
+          "description": "How much reasoning effort the model should use",
+          "category": "thought_level"
+        },
         {
           "currentValue": "agent",
           "options": [
@@ -166,94 +156,16 @@
           "name": "Collaboration mode",
           "description": "How Codex collaborates for subsequent turns",
           "category": "collaboration_mode"
-        },
-        {
-          "currentValue": "gpt-5",
-          "options": [
-            {
-              "value": "gpt-5",
-              "name": "5",
-              "description": "gpt-5 model"
-            }
-          ],
-          "type": "select",
-          "configId": "model",
-          "name": "Model",
-          "description": "Model Codex uses for the session",
-          "category": "model"
-        },
-        {
-          "currentValue": "medium",
-          "options": [
-            {
-              "value": "medium",
-              "name": "Medium",
-              "description": "Balanced"
-            }
-          ],
-          "type": "select",
-          "configId": "reasoning_effort",
-          "name": "Reasoning effort",
-          "description": "How much reasoning effort the model should use",
-          "category": "thought_level"
         }
       ],
       "sessionUpdate": "config_option_update"
     }
   },
   {
-    "codexRequest": "turn/start",
-    "params": {
-      "threadId": "thread-1",
-      "input": [
-        {
-          "type": "text",
-          "text": "Implement the approved plan.",
-          "text_elements": []
-        }
-      ],
-      "approvalPolicy": "on-request",
-      "approvalsReviewer": "auto_review",
-      "sandboxPolicy": {
-        "type": "workspaceWrite",
-        "writableRoots": [],
-        "networkAccess": false,
-        "excludeTmpdirEnvVar": false,
-        "excludeSlashTmp": false
-      },
-      "summary": "auto",
-      "effort": "medium",
-      "model": "gpt-5",
-      "serviceTier": null,
-      "clientUserMessageId": "<implementationId>"
-    }
-  },
-  {
-    "codexResponse": "turn/start"
-  },
-  {
-    "codexNotification": "turn/started"
-  },
-  {
-    "codexNotification": "item/completed"
-  },
-  {
-    "codexNotification": "turn/completed"
-  },
-  {
     "sessionUpdate": {
+      "background": [],
       "state": "running",
       "sessionUpdate": "state_update"
-    }
-  },
-  {
-    "sessionUpdate": {
-      "messageId": "<implementationId>",
-      "content": {
-        "text": "Implement the approved plan.",
-        "type": "text"
-      },
-      "sessionUpdate": "user_message_chunk"
     }
   },
   {
@@ -265,6 +177,7 @@
   {
     "sessionUpdate": {
       "stopReason": "end_turn",
+      "background": [],
       "_meta": {
         "quota": {
           "token_count": null,

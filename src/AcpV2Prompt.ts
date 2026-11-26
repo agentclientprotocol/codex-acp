@@ -4,6 +4,66 @@ import type {ServerNotification} from "./app-server";
 import {CODEX_PROCESS_EXITED_ERROR_CODE} from "./app-server-recovery/AppServerExit";
 import {readableServiceErrorMessage} from "./ServiceErrorMessage";
 import {ResponseError} from "vscode-jsonrpc";
+import {createHash} from "node:crypto";
+
+// Keep the derivation stable: changing it would make stored receipts look unused.
+const KEYED_PROMPT_ID_PREFIX = "acp-prompt-v1:";
+
+/** Codex stores this ID alongside the user message. Neither replay nor logs need the raw key. */
+export function keyedPromptId(sessionId: string, key: acpV2.IdempotencyKey): string {
+    return KEYED_PROMPT_ID_PREFIX + createHash("sha256").update(JSON.stringify([sessionId, key])).digest("hex");
+}
+
+export function isKeyedPromptId(id: string): boolean {
+    return id.startsWith(KEYED_PROMPT_ID_PREFIX);
+}
+
+/** Lives for one active session, including re-resumes on the same connection. */
+export class AcpV2PromptKeys {
+    private readonly inserted = new Set<string>();
+    private readonly pending = new Map<string, {
+        controller: AbortController;
+        response: Promise<acpV2.PromptResponse>;
+    }>();
+    private historyRead: Promise<void> | null = null;
+
+    async hasRetainedMessage(messageId: string, read: () => Promise<Set<string>>): Promise<boolean> {
+        this.historyRead ??= read().then(ids => {
+            for (const id of ids) this.inserted.add(id);
+        }, error => {
+            // A failed read isn't evidence that the prompt was never inserted.
+            this.historyRead = null;
+            throw error;
+        });
+        await this.historyRead;
+        return this.inserted.has(messageId);
+    }
+
+    submit(
+        messageId: string,
+        signal: AbortSignal | undefined,
+        insert: (signal: AbortSignal) => Promise<acpV2.PromptResponse>,
+    ): Promise<acpV2.PromptResponse> {
+        if (this.inserted.has(messageId)) return Promise.resolve({messageId});
+        let entry = this.pending.get(messageId);
+        if (!entry) {
+            const controller = new AbortController();
+            if (signal?.aborted) controller.abort();
+            const response = insert(controller.signal).then(result => {
+                this.inserted.add(messageId);
+                return result;
+            }).finally(() => this.pending.delete(messageId));
+            entry = {controller, response};
+            this.pending.set(messageId, entry);
+        }
+        if (!signal) return entry.response;
+        const {controller, response} = entry;
+        if (signal.aborted) controller.abort();
+        const withdraw = () => controller.abort();
+        signal.addEventListener("abort", withdraw, {once: true});
+        return response.finally(() => signal.removeEventListener("abort", withdraw));
+    }
+}
 
 /**
  * Lets a prompt report when Codex records its user message. On v2 that moment, not the turn
@@ -14,24 +74,11 @@ export type UserMessageInsertion = {
     clientUserMessageId: string;
     onInserted: () => Promise<void>;
     /**
-     * Shows a synthetic prompt codex-acp starts itself (the plan-implementation follow-up turn,
-     * a `/goal` continuation) as a live `user_message`, once its own minted `clientUserMessageId`
-     * is echoed back. These turns run inside the original prompt's running…idle pair, so this
-     * only emits the chunks: no response is resolved and no `state_update` is sent.
+     * An adopted turn was already running when Codex steered this input into it.
+     * Withdrawing this prompt must not interrupt that turn.
+     * `cursor` is whether the turn starts with this prompt after an earlier turn, so the prompt has a cursor.
      */
-    onSyntheticInserted: (clientUserMessageId: string, prompt: acp.ContentBlock[]) => Promise<void>;
-    /**
-     * Fired synchronously once, from the turn-start response, when Codex steers this prompt into
-     * a turn that was already running and unowned (its `running` went out before this prompt
-     * existed). Lets the caller skip sending a duplicate `running` and still close the turn with
-     * one `idle` if the steered input never lands.
-     */
-    onTurnAdopted?: () => void;
-    /**
-     * Fired synchronously each time a turn starts (or restarts) for this prompt, with the turn's
-     * ids. Lets a pending `$/cancel_request` interrupt the right turn before insertion.
-     */
-    onTurnStarted?: (turn: {threadId: string, turnId: string}) => void;
+    onTurnStarted?: (turn: {threadId: string, turnId: string, adopted: boolean, cursor: boolean}) => void;
     /** Reports terminal work failure without changing the v1 prompt response or depending on AIR. */
     onFailure?: (error: acpV2.Error) => void;
 };
@@ -53,6 +100,12 @@ export function isInsertedUserMessage(
         && event.params.item.clientId === clientUserMessageId;
 }
 
+/** The identity and cancellation of a native v2 prompt offered to a running turn. */
+export interface V2SteeringPrompt {
+    messageId: string;
+    signal: AbortSignal;
+}
+
 const SUPPORTED_PROMPT_CONTENT_TYPES = new Set(["text", "image", "resource_link", "resource"]);
 
 export function assertPromptContentSupported(params: {prompt: Array<{type: string}>}): void {
@@ -69,7 +122,8 @@ export function assertPromptContentSupported(params: {prompt: Array<{type: strin
  */
 export function toV1PromptRequest(params: acpV2.PromptRequest): acp.PromptRequest {
     assertPromptContentSupported(params);
-    return params as acp.PromptRequest;
+    const {idempotencyKey: _key, ...request} = params;
+    return request as acp.PromptRequest;
 }
 
 /**

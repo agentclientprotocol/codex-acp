@@ -1,0 +1,78 @@
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "sessionFailure": {
+                "id": "id",
+                "revision": 1,
+                "category": "unknown",
+                "severity": "warning",
+                "title": "UserPromptSubmit hook blocked the prompt — blocked by policy",
+                "actions": []
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "sessionFailure": {
+                "id": "id",
+                "revision": 1,
+                "category": "unknown",
+                "severity": "warning",
+                "title": "SessionStart hook stopped the turn — stopped by hook\nhook error",
+                "actions": []
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+{
+  "method": "sessionUpdate",
+  "args": [
+    {
+      "sessionId": "notice-session",
+      "update": {
+        "sessionUpdate": "session_info_update",
+        "_meta": {
+          "jetbrains": {
+            "air": {
+              "version": 1,
+              "sessionFailure": {
+                "id": "id",
+                "revision": 1,
+                "category": "unknown",
+                "severity": "warning",
+                "title": "PreToolUse hook blocked the tool call",
+                "actions": []
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

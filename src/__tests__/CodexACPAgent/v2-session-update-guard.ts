@@ -25,8 +25,9 @@ const messageTags = new Set([
  * Why a `session/update` payload is not a valid ACP v2 update, or `null` if it is.
  *
  * Neither the SDK nor the TS types stop a v1-only tag (e.g. `tool_call`) or a custom unprefixed
- * tag from reaching a v2 client, so tests check the frames themselves: custom tags must start with
- * `_`, and standard ones must match their v2 schema. Terminal bytes must be base64, `cwd` and diff
+ * tag from reaching a v2 client, so tests check the frames themselves.
+ * Custom tags must start with `_`. Standard updates must match their v2 schema.
+ * Terminal bytes must be base64, `cwd` and diff
  * paths absolute, and v1's private terminal and diff `_meta` keys must not reach the client.
  */
 export function v2SessionUpdateViolation(update: acpV2.SessionUpdate): string | null {
@@ -52,6 +53,9 @@ export function v2SessionUpdateViolation(update: acpV2.SessionUpdate): string | 
         for (const content of (update as acpV2.ToolCallUpdate).content ?? []) {
             if (content.type !== "diff") continue;
             const diff = content as acpV2.Diff;
+            if (diff.changes.length === 0) {
+                return `'${tag}' diff has no changes`;
+            }
             if (diff._meta != null && DIFF_GIT_PATCH_META_KEY in diff._meta) {
                 return `'${tag}' diff carries the private '${DIFF_GIT_PATCH_META_KEY}' _meta key`;
             }

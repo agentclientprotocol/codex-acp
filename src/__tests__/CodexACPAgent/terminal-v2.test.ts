@@ -1,5 +1,5 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import type * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
+import * as acpV2 from '@agentclientprotocol/sdk/experimental/v2/unstable';
 import type {ServerNotification} from '../../app-server';
 import type {CommandAction, ThreadItem} from '../../app-server/v2';
 import {
@@ -124,7 +124,7 @@ describe('agent-owned terminals over ACP v2', () => {
         const item = commandItem("item-shell", {commandActions: []});
 
         client.emit(itemStarted(item));
-        client.emit(itemCompleted(completed(item, "hello\n", 0)));
+        client.emit(itemCompleted(completed(item, "hello\nworld\r\n", 0)));
         await finishTurn(client);
 
         const updates = toolAndTerminalUpdates(client);
@@ -134,6 +134,27 @@ describe('agent-owned terminals over ACP v2', () => {
         // The terminal shows the same text as the title; the raw input keeps the shell wrapper.
         expect(updates[0]).toMatchObject({sessionUpdate: "terminal_update", command: "npm test"});
         await expect(dumpDecoded(updates)).toMatchFileSnapshot('data/terminal-v2-snapshot.json');
+    });
+
+    it('preserves carriage returns across chunks of interleaved terminals', async () => {
+        const client = await connect();
+        const first = commandItem("first");
+        const second = commandItem("second");
+        client.emit(itemStarted(first));
+        client.emit(itemStarted(second));
+        client.emit(outputDelta(first.id, "10%\r20%\r"));
+        client.emit(outputDelta(first.id, ""));
+        client.emit(outputDelta(second.id, "\n"));
+        client.emit(outputDelta(first.id, "\ndone\n"));
+        client.emit(itemCompleted(completed(first, "10%\r20%\r\ndone\n", 0)));
+        client.emit(itemCompleted(completed(second, "\n", 0)));
+        await finishTurn(client);
+
+        const chunks = toolAndTerminalUpdates(client).filter(acpV2.SessionUpdate.isTerminalOutputChunk);
+        const output = (id: string) => chunks.filter(chunk => chunk.terminalId === id)
+            .map(chunk => Buffer.from(chunk.data, "base64").toString("utf8")).join("");
+        expect(output(first.id)).toBe("10%\r20%\r\ndone\r\n");
+        expect(output(second.id)).toBe("\r\n");
     });
 
     it('reports a failed command with its exit code', async () => {

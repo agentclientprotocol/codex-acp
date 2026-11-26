@@ -185,7 +185,7 @@ describe("ACP session close", () => {
             env: [],
         };
         vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
-        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, userId: null, requiresOpenaiAuth: false});
         vi.spyOn(codexAcpClient, "listSkills").mockResolvedValue({data: []});
         vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
             sessionId,
@@ -256,7 +256,7 @@ describe("ACP session close", () => {
         const codexAcpClient = fixture.getCodexAcpClient();
         await codexAcpAgent.initialize({protocolVersion: 1, clientCapabilities: {elicitation: {url: {}}}});
         vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
-        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+        vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, userId: null, requiresOpenaiAuth: false});
         vi.spyOn(codexAcpClient, "listSkills").mockResolvedValue({data: []});
         vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
             sessionId,
@@ -266,7 +266,7 @@ describe("ACP session close", () => {
             currentServiceTier: null,
             additionalDirectories: [],
         });
-        vi.spyOn(codexAcpClient, "mcpServerOauthLogin").mockResolvedValue({authorizationUrl: "https://example.com/oauth"});
+        vi.spyOn(codexAcpClient, "mcpServerOauthLogin").mockResolvedValue({authorizationUrl: "https://example.com/oauth", loginId: "login"});
         fixture.setElicitationResponse(new Promise(() => {}));
         await codexAcpAgent.newSession({cwd: "/test/cwd", mcpServers: [{name: "linear", command: "npx", args: [], env: []}]});
         fixture.clearAcpConnectionDump();
@@ -539,7 +539,7 @@ async function createSession(options: {
     const model = createTestModel();
 
     vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
-    vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: false});
+    vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, userId: null, requiresOpenaiAuth: false});
     vi.spyOn(codexAcpClient, "listSkills").mockResolvedValue({data: []});
     vi.spyOn(codexAcpClient, "newSession").mockResolvedValue({
         sessionId,

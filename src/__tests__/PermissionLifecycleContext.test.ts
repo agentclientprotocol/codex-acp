@@ -23,6 +23,7 @@ function mcpStarted(id: string, turnId: string, threadId = "thread"): ServerNoti
             startedAtMs: 0,
             item: {
                 type: "mcpToolCall",
+                environmentId: null,
                 id,
                 server: "server",
                 tool: "tool",
@@ -206,6 +207,7 @@ describe("PermissionLifecycleContext", () => {
             threadId: "thread",
             turnId: "turn-1",
             serverName: "server",
+            environmentId: null,
             mode: "form",
             _meta: null,
             message: "Collect a value",
@@ -237,6 +239,7 @@ describe("PermissionLifecycleContext", () => {
             threadId: "thread",
             turnId: "turn-1",
             serverName: "server",
+            environmentId: null,
             mode: "form" as const,
             _meta: {codex_approval_kind: "mcp_tool_call"},
             message: "Allow?",

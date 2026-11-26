@@ -40,6 +40,7 @@ describe('CodexACPAgent - initialize', () => {
             agentCapabilities: {
                 auth: {
                     logout: {},
+                    status: {},
                 },
                 providers: {},
                 loadSession: true,
@@ -48,6 +49,7 @@ describe('CodexACPAgent - initialize', () => {
                     image: true
                 },
                 sessionCapabilities: {
+                    options: {},
                     resume: {},
                     list: {},
                     close: {},
@@ -55,7 +57,6 @@ describe('CodexACPAgent - initialize', () => {
                     fork: {},
                     title: {},
                     additionalDirectories: {},
-                    subagents: {},
                     systemPrompt: {},
                 },
                 mcpCapabilities: {
@@ -74,6 +75,14 @@ describe('CodexACPAgent - initialize', () => {
                 },
             },
         });
+    });
+
+    it.each([1, 2] as const)("omits the options capability for JetBrains 2026.1 on v%s", async version => {
+        const info = {name: "JetBrains.WebStorm", version: "2026.1.1"};
+        const session = version === 1
+            ? (await agent.initialize({protocolVersion: 1, clientInfo: info})).agentCapabilities?.sessionCapabilities
+            : (await agent.initializeV2({protocolVersion: 2, info})).capabilities?.session;
+        expect(session).not.toHaveProperty("options");
     });
 
     it('should advertise the AIR extension only to AIR', async () => {
@@ -97,6 +106,14 @@ describe('CodexACPAgent - initialize', () => {
                 },
             },
         });
+    });
+
+    it.each([
+        ["a standard client", {subagents: {}}, undefined],
+        ["AIR", {subagents: {}, _meta: {jetbrains: {air: {version: 1, capabilities: []}}}}, {}],
+    ])('answers %s with the subagent session capability that only the AIR contract negotiates', async (_name, clientCapabilities, expected) => {
+        const result = await agent.initialize({protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities});
+        expect((result.agentCapabilities?.sessionCapabilities as {subagents?: unknown}).subagents).toEqual(expected);
     });
 
     it('should advertise gateway auth when the client opts into gateway auth metadata', async () => {

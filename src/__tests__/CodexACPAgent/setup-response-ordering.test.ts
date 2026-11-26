@@ -10,6 +10,58 @@ function deferred() {
     return {promise, resolve};
 }
 
+it("sends the initial non-idle v2 state after the session/new response", async () => {
+    const reading = deferred();
+    const release = deferred();
+    let agent!: CodexAcpServer;
+    const connecting = connectSession(2, {
+        onAgent: current => { agent = current; },
+        codexResponses: {"skills/list": async () => {
+            reading.resolve();
+            await release.promise;
+            return {data: []};
+        }},
+    });
+    try {
+        await reading.promise;
+        // Codex starts foreground work before the client knows the new session ID.
+        // @ts-expect-error - exercise the v2 state sender while the setup response is pending
+        await AcpV2Connection.of(agent.connection)!.startForegroundWork(sessionId);
+        release.resolve();
+        const h = await connecting;
+        const runningFrames = () => h.wireMessages.flatMap((frame, index) =>
+            "method" in frame && frame.method === "session/update"
+            && (frame.params as {update: {sessionUpdate: string; state?: string}}).update.sessionUpdate === "state_update"
+            && (frame.params as {update: {state?: string}}).update.state === "running" ? [index] : []);
+        await vi.waitFor(() => expect(runningFrames()).toHaveLength(2));
+        const response = h.wireMessages.findIndex(frame => "result" in frame
+            && typeof frame.result === "object" && frame.result !== null && "sessionId" in frame.result);
+        expect(runningFrames()[0]).toBeLessThan(response);
+        expect(runningFrames()[1]).toBeGreaterThan(response);
+    } finally {
+        release.resolve();
+        (await connecting).connection.close();
+    }
+});
+
+it("publishes non-idle state from the Codex thread/start result without a turn event", async () => {
+    const h = await connectSession(2, {
+        codexResponses: {"thread/start": async () => ({
+            ...codexResponse("thread/start") as object,
+            thread: {...createThread(), status: {type: "active", activeFlags: []}},
+        })},
+    });
+    try {
+        const response = h.wireMessages.findIndex(frame => "result" in frame
+            && typeof frame.result === "object" && frame.result !== null && "sessionId" in frame.result);
+        expect(response).toBeGreaterThanOrEqual(0);
+        await vi.waitFor(() => expect(h.wireMessages.slice(response + 1)).toContainEqual(expect.objectContaining({
+            method: "session/update",
+            params: {sessionId, update: {sessionUpdate: "state_update", state: "running", background: []}},
+        })));
+    } finally { h.connection.close(); }
+});
+
 describe.each([1, 2] as const)("ACP v%s setup response ordering", version => {
     it("announces startup children only after the parent setup response", async () => {
         const reading = deferred();
@@ -35,8 +87,10 @@ describe.each([1, 2] as const)("ACP v%s setup response ordering", version => {
             release.resolve();
             h = await connecting;
             await activity;
+            await h.request("session/list", {});
             const response = h.wireMessages.findIndex(frame => "result" in frame
                 && typeof frame.result === "object" && frame.result !== null && "sessionId" in frame.result);
+            expect(response).toBeGreaterThanOrEqual(0);
             const announcement = h.wireMessages.findIndex(frame => "method" in frame && frame.method === "session/update"
                 && (frame.params as {update: {sessionUpdate: string}}).update.sessionUpdate === "subagent_update");
             expect(announcement).toBeGreaterThan(response);
@@ -49,7 +103,7 @@ describe.each([1, 2] as const)("ACP v%s setup response ordering", version => {
     it.each([undefined, 30_000])("starts MCP sign-in after the response write with startup wait %s", async timeout => {
         const writing = deferred();
         const release = deferred();
-        const login = vi.fn(async () => ({authorizationUrl: "https://example.com/oauth"}));
+        const login = vi.fn(async () => ({authorizationUrl: "https://example.com/oauth", loginId: "login"}));
         const elicitation = vi.fn(async () => ({action: "cancel" as const}));
         const connecting = connectSession(version, {
             clientCapabilities: {elicitation: {url: {}}},

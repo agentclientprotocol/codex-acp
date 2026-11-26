@@ -64,6 +64,7 @@ function oauthReauthParams(overrides: Partial<McpServerElicitationRequestParams 
         threadId: sessionId,
         turnId,
         serverName: "auth-server",
+        environmentId: null,
         mode: "url",
         _meta: null,
         message: "Please authorize access",
@@ -109,11 +110,11 @@ describe('elicitation/create over ACP v2', () => {
         expect(stateUpdates(transcript)).toEqual([{state: "requires_action"}]);
         await expect(dump(transcript)).toMatchFileSnapshot('data/elicitation-v2-oauth-reauth-accepted.json');
 
-        // Codex reports the underlying MCP server request as resolved once the OAuth flow lands;
-        // a URL elicitation only completes then (see `CodexElicitationHandler`).
+        // A resolved Codex request is not confirmation that the external URL workflow finished.
         client.emit({method: "serverRequest/resolved", params: {threadId: sessionId, requestId: "request-1"}});
-        await settle();
-        expect(client.transcript.slice(start).at(-1)).toEqual({elicitationComplete: {elicitationId: "elicit-123"}});
+        await client.waitForNotifications();
+        await client.request("session/list", {});
+        expect(client.transcript.some(entry => "elicitationComplete" in entry)).toBe(false);
 
         await finishTurn();
     });
@@ -133,7 +134,7 @@ describe('elicitation/create over ACP v2', () => {
     });
 
     it('preserves arbitrary JSON values in accepted MCP form content', async () => {
-        const content = {value: {nested: [1, null, true]}, answer: "Valid"};
+        const content = {value: {nested: [1, null, true]}, answer: "Valid", colors: ["red"]};
         const client = await connectSession(2, {
             clientCapabilities: {elicitation: {form: {}}},
             onElicitation: async () => ({action: "accept", content}),
@@ -141,10 +142,35 @@ describe('elicitation/create over ACP v2', () => {
         closeClient = () => client.connection.close();
         const {finishTurn} = await startRunningPrompt(client);
         const response = await client.triggerApproval("mcpServer/elicitation/request", {
-            threadId: sessionId, turnId, serverName: "forms", mode: "form", _meta: null, message: "Choose",
-            requestedSchema: {type: "object", properties: {value: {type: "_custom"}, answer: {type: "string"}}},
+            threadId: sessionId, turnId, serverName: "forms", environmentId: null, mode: "form", _meta: null, message: "Choose",
+            requestedSchema: {type: "object", properties: {
+                value: {type: "_custom"}, answer: {type: "string", pattern: "^[A-Z]", minLength: 1},
+                colors: {type: "array", items: {type: "string", enum: ["red"], enumNames: ["Red"]}},
+            }},
         });
         expect(response).toEqual({action: "accept", content, _meta: null});
+        const frame = client.wireMessages.find(message => "method" in message && message.method === "elicitation/create");
+        expect(frame).toMatchObject({params: {requestedSchema: {properties: {
+            answer: {type: "string", minLength: 1}, value: {type: "_custom"},
+            colors: {type: "array", items: {anyOf: [{const: "red", title: "Red"}]}},
+        }}}});
+        expect(JSON.stringify(frame)).not.toContain("\"pattern\"");
+        await finishTurn();
+    });
+
+    it('does not forward malformed typed multi-select items as a titled choice', async () => {
+        const client = await connectSession(2, {
+            clientCapabilities: {elicitation: {form: {}}}, onElicitation: async () => ({action: "accept"}),
+        });
+        closeClient = () => client.connection.close();
+        const {finishTurn} = await startRunningPrompt(client);
+        const response = await client.triggerApproval("mcpServer/elicitation/request", {
+            threadId: sessionId, turnId, serverName: "forms", mode: "form", message: "Choose",
+            requestedSchema: {type: "object", properties: {colors: {type: "array",
+                items: {type: "string", anyOf: [{const: "red", title: "Red"}]}}}},
+        });
+        expect(response).toEqual({action: "cancel", content: null, _meta: null});
+        expect(client.wireMessages.some(frame => "method" in frame && frame.method === "elicitation/create")).toBe(false);
         await finishTurn();
     });
 
@@ -159,6 +185,7 @@ describe('elicitation/create over ACP v2', () => {
             type: "mcpToolCall",
             id: "mcp-write-1",
             server: "docs",
+            environmentId: null,
             tool: "write",
             status: "inProgress",
             arguments: {text: "Draft"},
@@ -171,7 +198,7 @@ describe('elicitation/create over ACP v2', () => {
             durationMs: null,
         }));
         const response = await client.triggerApproval('mcpServer/elicitation/request', {
-            threadId: sessionId, turnId, serverName: "docs", mode: "form",
+            threadId: sessionId, turnId, serverName: "docs", environmentId: null, mode: "form",
             _meta: {codex_approval_kind: "mcp_tool_call"},
             message: "Allow the docs server to run write?",
             requestedSchema: {type: "object", properties: {}},
@@ -201,7 +228,7 @@ describe('elicitation/create over ACP v2', () => {
     it.each([
         ["url", oauthReauthParams()],
         ["form", {
-            threadId: sessionId, turnId, serverName: "docs", mode: "form", _meta: null, message: "Continue?",
+            threadId: sessionId, turnId, serverName: "docs", environmentId: null, mode: "form", _meta: null, message: "Continue?",
             requestedSchema: {type: "object", properties: {}},
         }],
     ] satisfies Array<[string, McpServerElicitationRequestParams]>)('falls back to a permission request for a standalone %s elicitation', async (mode, params) => {
@@ -230,7 +257,7 @@ describe('elicitation/create over ACP v2', () => {
             mcpStartup: {ready: [], failed: [{server: "docs", error: "unauthorized", failureReason: "reauthenticationRequired"}], cancelled: []},
             onElicitation: async () => ({action: "accept", content: null, _meta: null}),
             codexResponses: {
-                "mcpServer/oauth/login": async () => ({authorizationUrl: "https://example.com/oauth/authorize"}),
+                "mcpServer/oauth/login": async () => ({authorizationUrl: "https://example.com/oauth/authorize", loginId: "startup"}),
             },
         });
         closeClient = () => client.connection.close();
@@ -306,9 +333,10 @@ describe('elicitation/create over ACP v2', () => {
         await client.cancel();
         await vi.waitFor(() => expect(capturedSignal!.aborted).toBe(true));
 
-        // A conforming client answers `cancel` once it has seen `session/cancel`.
-        elicitation.resolve({action: "cancel"});
+        // The agent cancels the wire request and stops waiting even before the client answers.
         expect(await elicitationPromise).toEqual({action: "cancel", content: null, _meta: null});
+        expect(client.wireMessages.some(frame => "method" in frame && frame.method === "$/cancel_request")).toBe(true);
+        elicitation.resolve({action: "accept"});
 
         client.emit(itemCompleted(userMessageItem(clientUserMessageId)));
         client.emit(turnFinished("interrupted"));

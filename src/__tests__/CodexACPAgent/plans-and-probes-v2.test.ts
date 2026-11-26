@@ -40,7 +40,7 @@ async function connectV2Client() {
     const appServer = new CodexAppServerClient(mocks.mockCodexConnection as any);
     const codexAcpClient = new CodexAcpClient(appServer);
     vi.spyOn(codexAcpClient, "getAgentConfiguredModelProvider").mockResolvedValue("openai");
-    vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, requiresOpenaiAuth: true});
+    vi.spyOn(codexAcpClient, "getAccount").mockResolvedValue({account: null, userId: null, requiresOpenaiAuth: true});
     vi.spyOn(appServer, "turnStart").mockResolvedValue({turn: createTurn("inProgress")});
     vi.spyOn(appServer, "awaitTurnCompleted").mockResolvedValue({threadId: sessionId, turn: createTurn("completed")});
     let agent: CodexAcpServer | null = null;
@@ -126,6 +126,26 @@ describe('Plans, compaction, notices and commands over ACP v2', () => {
         await expect(dump(updates)).toMatchFileSnapshot('data/plans-v2-structured.json');
     });
 
+    it("clears the checklist on an explicit empty replacement without removing Markdown plans", async () => {
+        const {connection, updates, startPrompt, send} = await connectV2Client();
+        closeClient = () => connection.close();
+        await startPrompt();
+        await send([
+            planUpdated([{step: "Done", status: "completed"}]),
+            {method: "item/completed", params: {threadId: sessionId, turnId, completedAtMs: 0,
+                item: {type: "plan", id: "markdown", text: "A different plan"}}},
+            planUpdated([]),
+        ]);
+        await vi.waitFor(() => expect(updates).toHaveLength(4));
+        expect(updates.map(({update}) => update)).toEqual([
+            {sessionUpdate: "plan_update", plan: {type: "items", planId: "codex-structured-plan",
+                entries: [{content: "Done", priority: "medium", status: "completed"}]}},
+            {sessionUpdate: "plan_update", plan: {type: "markdown", planId: "markdown", content: "A different plan"}},
+            {sessionUpdate: "plan_update", plan: {type: "items", planId: "codex-structured-plan", entries: []}},
+            {sessionUpdate: "plan_removed", planId: "codex-structured-plan"},
+        ]);
+    });
+
     it('sends the narrative plan as a markdown plan_update without a plan capability', async () => {
         const {connection, updates, startPrompt, send} = await connectV2Client();
         closeClient = () => connection.close();
@@ -142,7 +162,7 @@ describe('Plans, compaction, notices and commands over ACP v2', () => {
         await expect(dump(updates)).toMatchFileSnapshot('data/plans-v2-markdown.json');
     });
 
-    it('sends compaction and notice updates without client capabilities', async () => {
+    it('sends compaction, notice and hook updates without client capabilities', async () => {
         const {connection, updates, startPrompt, send} = await connectV2Client();
         closeClient = () => connection.close();
         await startPrompt();
@@ -152,9 +172,15 @@ describe('Plans, compaction, notices and commands over ACP v2', () => {
             {method: "item/started", params: {threadId: sessionId, turnId, startedAtMs: 0, item}},
             {method: "item/completed", params: {threadId: sessionId, turnId, completedAtMs: 1, item}},
             {method: "warning", params: {threadId: sessionId, message: "Optional integration unavailable"}},
+            {method: "hook/completed", params: {threadId: sessionId, turnId, run: {
+                id: "user-prompt-submit:0", eventName: "userPromptSubmit", handlerType: "command", executionMode: "sync",
+                scope: "turn", sourcePath: "/hooks/config.toml", source: "user", displayOrder: 0n, status: "blocked",
+                statusMessage: null, startedAt: 1n, completedAt: 1n, durationMs: 1n,
+                entries: [{kind: "feedback", text: "blocked by policy"}],
+            }}},
         ]);
 
-        await vi.waitFor(() => expect(updates).toHaveLength(3));
+        await vi.waitFor(() => expect(updates).toHaveLength(4));
         await expect(dump(updates)).toMatchFileSnapshot('data/plans-v2-compaction-and-notice.json');
     });
 
@@ -168,7 +194,7 @@ describe('Plans, compaction, notices and commands over ACP v2', () => {
         expect(updates[0]!.update.sessionUpdate).toBe("available_commands_update");
         const {availableCommands} = updates[0]!.update as acpV2.AvailableCommandsUpdate;
         // A v2 client's parser drops an untagged input, so the tag must arrive.
-        expect(availableCommands.map((command) => command.input)).toEqual([
+        expect(availableCommands.filter(acpV2.AvailableCommand.isCommand).map((command) => command.input)).toEqual([
             {type: "text", hint: "focus"},
             null,
             undefined,

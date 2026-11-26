@@ -61,6 +61,7 @@ function mockOauthLogin(fixture: CodexMockTestFixture, success = true) {
     });
     return vi.spyOn(codexAcpClient, "mcpServerOauthLogin").mockResolvedValue({
         authorizationUrl: "https://example.com/oauth/authorize",
+        loginId: "login",
     });
 }
 
@@ -343,6 +344,9 @@ describe("/mcp command", () => {
         ["the sign-in throws", (fixture: CodexMockTestFixture) => {
             vi.spyOn(fixture.getCodexAcpClient(), "mcpServerOauthLogin").mockRejectedValue(new Error("no OAuth"));
         }],
+        ["Codex cannot identify the sign-in", (fixture: CodexMockTestFixture) => {
+            vi.spyOn(fixture.getCodexAcpClient(), "mcpServerOauthLogin").mockResolvedValue({authorizationUrl: "https://example.com/oauth"});
+        }],
     ])("does not reload again when the client %s", async (_name, setUp) => {
         const {mockFixture} = setupPromptTestSession({sessionId});
         await enableUrlElicitation(mockFixture);
@@ -504,6 +508,7 @@ describe("/mcp command", () => {
         });
         vi.spyOn(mockFixture.getCodexAcpClient(), "mcpServerOauthLogin").mockResolvedValue({
             authorizationUrl: "https://example.com/oauth/authorize",
+            loginId: "cancelled-attempt",
         });
         const cancel = new AbortController();
 
@@ -514,7 +519,8 @@ describe("/mcp command", () => {
         cancel.abort();
 
         await expect(prompt).resolves.toMatchObject({stopReason: "cancelled"});
-        await vi.waitFor(() => expect(elicitationEvents(mockFixture, "completeElicitation")).toHaveLength(1));
+        expect(mockFixture.getAcpRequestOptions("elicitation/create").at(-1).cancellationSignal.aborted).toBe(true);
+        expect(elicitationEvents(mockFixture, "completeElicitation")).toHaveLength(0);
         expect(pendingOauthWaits(mockFixture)).toBe(0);
         mockFixture.sendServerNotification({
             method: "mcpServer/oauthLogin/completed",
@@ -539,29 +545,13 @@ describe("/mcp command", () => {
         });
         vi.spyOn(mockFixture.getCodexAcpClient(), "mcpServerOauthLogin").mockResolvedValue({
             authorizationUrl: "https://example.com/oauth/authorize",
+            loginId: "declined-attempt",
         });
 
         await runMcp(mockFixture, "/mcp reconnect");
 
         expect(messageText(mockFixture)).toContain("The sign-in to MCP server `linear` failed or was cancelled.");
         expect(elicitationEvents(mockFixture, "completeElicitation")).toHaveLength(0);
-        expect(pendingOauthWaits(mockFixture)).toBe(0);
-    });
-
-    it("completes two sign-ins to the same server with one notification", async () => {
-        const {mockFixture} = setupPromptTestSession({sessionId});
-        const codexAcpClient = mockFixture.getCodexAcpClient();
-        // For example, the startup report and `/mcp reconnect` sign in at the same time.
-        const first = codexAcpClient.awaitMcpServerOauthLoginCompleted("linear", sessionId);
-        const second = codexAcpClient.awaitMcpServerOauthLoginCompleted("linear", sessionId);
-
-        mockFixture.sendServerNotification({
-            method: "mcpServer/oauthLogin/completed",
-            params: {name: "linear", threadId: sessionId, success: true},
-        });
-
-        await expect(first).resolves.toMatchObject({name: "linear", success: true});
-        await expect(second).resolves.toMatchObject({name: "linear", success: true});
         expect(pendingOauthWaits(mockFixture)).toBe(0);
     });
 

@@ -6,7 +6,7 @@ import {
     asSdkSessionNotification,
 } from "./AcpSessionExtensions";
 import {toV2SessionUpdates} from "./AcpV2SessionUpdate";
-import {toV2ReplayUpdates} from "./AcpV2Replay";
+import {AcpV2Replay, type ReplayedEntities, toV2ReplayUpdates} from "./AcpV2Replay";
 import {toV1RequestPermissionResponse, toV2RequestPermissionRequest} from "./AcpV2Permissions";
 import {elicitationSessionId, toV1CreateElicitationResponse, toV2CreateElicitationRequest} from "./AcpV2Elicitation";
 import {AcpV2ForegroundState} from "./AcpV2ForegroundState";
@@ -24,12 +24,17 @@ export class AcpV2Connection {
     readonly client: AcpV2ClientConnection;
     private isTurnRunning: (sessionId: string) => boolean = () => true;
     private readonly foreground = new Map<string, AcpV2ForegroundState>();
+    private readonly background = new Map<string, Map<string, BackgroundItem>>();
+    private readonly synchronizing = new Set<string>();
     private readonly sessionInfo = new Map<string, AcpV2SessionInfo>();
+    private readonly terminalsEndingInCR = new Map<string, Set<string>>();
     private sessionDelivery: AcpClientDelivery | null = null;
     private sendElicitationCompletion: (params: unknown) => Promise<void>;
+    readonly replay: AcpV2Replay;
 
     constructor(private readonly transportClient: AcpV2ClientConnection) {
         const client = transportClient;
+        this.replay = new AcpV2Replay(params => client.notify(acpV2.methods.client.session.update, params));
         this.sendElicitationCompletion = params => client.notify(acpV2.methods.client.elicitation.complete, params as acpV2.CompleteElicitationNotification);
         this.client = {
             notify: (method: string, params?: unknown) => {
@@ -39,6 +44,7 @@ export class AcpV2Connection {
                 if (sessionId !== null) {
                     const {update, _meta} = params as acpV2.UpdateSessionNotification;
                     if (acpV2.SessionUpdate.isSessionInfoUpdate(update)) return this.sessionInfoFor(sessionId).update(update, _meta);
+                    return this.replay.notify(params as acpV2.UpdateSessionNotification);
                 }
                 return client.notify(method as `_${string}`, params);
             },
@@ -47,7 +53,8 @@ export class AcpV2Connection {
                 if (sessionId !== null && this.sessionDelivery && !this.sessionDelivery.canRequestSession(sessionId)) {
                     return Promise.reject(acp.RequestError.requestCancelled(undefined, `Session ${sessionId} is closing or closed`));
                 }
-                const send = () => {
+                const send = async () => {
+                    if (sessionId !== null) await this.replay.wait(sessionId, options?.cancellationSignal);
                     const request = () => client.request(method as `_${string}`, params, options);
                     return this.sessionDelivery?.withElicitationRequest(method, params, request) ?? request();
                 };
@@ -73,13 +80,17 @@ export class AcpV2Connection {
     private async withUserAction<T>(
         sessionId: string,
         itemId: string | undefined,
-        sendRequest: () => Promise<T>,
+        sendRequest: (signal?: AbortSignal) => Promise<T>,
         signal?: AbortSignal,
     ): Promise<T> {
-        if (!this.isTurnRunning(sessionId)) {
-            return sendRequest();
+        if (!this.isTurnRunning(sessionId) || (itemId !== undefined && this.hasBackgroundItem(sessionId, {type: "terminal", terminalId: itemId}))) {
+            return sendRequest(signal);
         }
         return this.foregroundFor(sessionId).withUserAction(itemId, sendRequest, signal);
+    }
+
+    cancelForegroundActions(sessionId: string): void {
+        this.foreground.get(sessionId)?.cancelActions();
     }
 
     /**
@@ -87,10 +98,22 @@ export class AcpV2Connection {
      * binding. One update can render to several v2 updates (or none), sent in order.
      */
     async updateSession(sessionId: string, update: AcpSessionUpdate, metadata?: acpV2.UpdateSessionNotification["_meta"]): Promise<void> {
-        for (const v2Update of toV2SessionUpdates(update)) {
-            await this.client.notify(acpV2.methods.client.session.update,
-                {sessionId, update: v2Update, ...(metadata !== undefined ? {_meta: metadata} : {})});
+        let trailingCR = this.terminalsEndingInCR.get(sessionId);
+        if (!trailingCR) {
+            trailingCR = new Set();
+            this.terminalsEndingInCR.set(sessionId, trailingCR);
         }
+        for (const v2Update of toV2SessionUpdates(update, trailingCR)) {
+            await this.sendLiveUpdate({sessionId, update: v2Update, ...(metadata !== undefined ? {_meta: metadata} : {})});
+        }
+    }
+
+    sendLiveUpdate(params: acpV2.UpdateSessionNotification): Promise<void> {
+        const {sessionId, update} = params;
+        if (acpV2.SessionUpdate.isTerminalUpdate(update) && update.exitStatus != null) {
+            this.terminalsEndingInCR.get(sessionId)?.delete(update.terminalId);
+        }
+        return this.client.notify(acpV2.methods.client.session.update, params);
     }
 
     /** Sends a `state_update`, which only exists on v2 and so needs no rendering. */
@@ -102,8 +125,54 @@ export class AcpV2Connection {
         return this.foregroundFor(sessionId).start();
     }
 
-    snapshotForegroundState(sessionId: string): Promise<void> {
-        return this.foregroundFor(sessionId).snapshot();
+    snapshotForegroundState(sessionId: string, skipIdle = false): Promise<void> {
+        return this.foregroundFor(sessionId).snapshot(skipIdle);
+    }
+
+    createChildForeground(sessionId: string, notify: (state: acpV2.StateUpdate) => Promise<void>): AcpV2ForegroundState {
+        this.foreground.get(sessionId)?.dispose();
+        const foreground = new AcpV2ForegroundState(notify, "unknown", () => this.backgroundFor(sessionId));
+        this.foreground.set(sessionId, foreground);
+        return foreground;
+    }
+
+    private backgroundFor(sessionId: string): acpV2.BackgroundWork[] | null {
+        // A resume must reannounce current entities before its snapshot lists them.
+        return this.synchronizing.has(sessionId) ? null : [...this.background.get(sessionId)?.values() ?? []];
+    }
+
+    setBackgroundSync(sessionIds: Iterable<string>, syncing: boolean): void {
+        for (const id of sessionIds) {
+            if (syncing) this.synchronizing.add(id);
+            else this.synchronizing.delete(id);
+        }
+    }
+
+    hasBackgroundItem(sessionId: string, item: BackgroundItem): boolean {
+        return this.background.get(sessionId)?.has(backgroundKey(item)) === true;
+    }
+
+    hasBackgroundWork(sessionId: string): boolean {
+        return (this.background.get(sessionId)?.size ?? 0) > 0;
+    }
+
+    isForegroundIdle(sessionId: string): boolean {
+        return this.foreground.get(sessionId)?.isIdle === true;
+    }
+
+    async setBackgroundItem(sessionId: string, item: BackgroundItem, present: boolean): Promise<void> {
+        if (this.sessionDelivery && !this.sessionDelivery.canPublishSession(sessionId)) return;
+        const key = backgroundKey(item);
+        const items = this.background.get(sessionId);
+        if ((items?.has(key) ?? false) === present) return;
+        if (present) {
+            if (items) items.set(key, item);
+            else this.background.set(sessionId, new Map([[key, item]]));
+        } else {
+            items?.delete(key);
+            if (items?.size === 0) this.background.delete(sessionId);
+        }
+        if (!this.synchronizing.has(sessionId)) await this.foregroundFor(sessionId).snapshot();
     }
 
     resetSessionInfo(sessionId: string, metadata: Record<string, unknown> | null): void {
@@ -132,12 +201,15 @@ export class AcpV2Connection {
         return this.foregroundFor(sessionId).completeItem(itemId);
     }
 
-    restoreForegroundState(sessionId: string, running: boolean): void {
-        this.foregroundFor(sessionId, running);
+    restoreForegroundState(sessionId: string, running: boolean | "unknown"): void {
+        this.foregroundFor(sessionId, running).restore(running);
     }
 
     forgetSession(sessionId: string): void {
         this.forgetForegroundState(sessionId);
+        this.terminalsEndingInCR.delete(sessionId);
+        this.background.delete(sessionId);
+        this.synchronizing.delete(sessionId);
         this.sessionInfo.get(sessionId)?.dispose();
         this.sessionInfo.delete(sessionId);
     }
@@ -157,7 +229,7 @@ export class AcpV2Connection {
         if (!info) {
             info = new AcpV2SessionInfo((update, notificationMetadata) => {
                 if (this.sessionDelivery && !this.sessionDelivery.canPublishSession(sessionId)) return Promise.resolve();
-                return this.transportClient.notify(acpV2.methods.client.session.update,
+                return this.replay.notify(
                     {sessionId, update, ...(notificationMetadata !== undefined ? {_meta: notificationMetadata} : {})});
             }, metadata);
             this.sessionInfo.set(sessionId, info);
@@ -165,7 +237,7 @@ export class AcpV2Connection {
         return info;
     }
 
-    private foregroundFor(sessionId: string, running = false): AcpV2ForegroundState {
+    private foregroundFor(sessionId: string, running: boolean | "unknown" = false): AcpV2ForegroundState {
         if (this.sessionDelivery && !this.sessionDelivery.canPublishSession(sessionId)) {
             const closed = new AcpV2ForegroundState(async () => {});
             closed.dispose();
@@ -179,22 +251,23 @@ export class AcpV2Connection {
                     update: {sessionUpdate: "state_update", ...state},
                 }),
                 running,
+                () => this.backgroundFor(sessionId),
             );
             this.foreground.set(sessionId, foreground);
         }
         return foreground;
     }
 
-    async replaySessionUpdate(sessionId: string, update: AcpSessionUpdate, initialized: Set<string>): Promise<void> {
+    async replaySessionUpdate(sessionId: string, update: AcpSessionUpdate, entities: ReplayedEntities): Promise<void> {
         const send = async (params: {sessionId: string; update: AcpSessionUpdate}) => {
             for (const rendered of toV2SessionUpdates(params.update)) {
-                for (const replayed of toV2ReplayUpdates(rendered, initialized)) {
+                for (const replayed of toV2ReplayUpdates(rendered, entities)) {
                     await this.client.notify(acpV2.methods.client.session.update, {sessionId: params.sessionId, update: replayed});
                 }
             }
         };
         const params = {sessionId, update};
-        if (this.sessionDelivery) await this.sessionDelivery.withSessionUpdate(params, send);
+        if (this.sessionDelivery) await this.sessionDelivery.withSessionUpdate(params, send, true);
         else await send(params);
     }
 
@@ -203,11 +276,11 @@ export class AcpV2Connection {
         request: acp.RequestPermissionRequest,
         options?: acp.SendRequestOptions,
     ): Promise<acp.RequestPermissionResponse> {
-        return this.withUserAction(request.sessionId, request.toolCall.toolCallId, async () => {
+        return this.withUserAction(request.sessionId, request.toolCall.toolCallId, async signal => {
             const response = await this.client.request(
                 acpV2.methods.client.session.requestPermission,
                 toV2RequestPermissionRequest(request),
-                {...options, stopWaitingOnCancel: true},
+                {...options, ...(signal && {cancellationSignal: signal}), stopWaitingOnCancel: true},
             );
             return toV1RequestPermissionResponse(response);
         }, options?.cancellationSignal);
@@ -230,11 +303,11 @@ export class AcpV2Connection {
         interaction: {userAction?: boolean} = {},
     ): Promise<acp.CreateElicitationResponse> {
         const userAction = interaction.userAction ?? true;
-        const sendRequest = async () => {
+        const sendRequest = async (signal?: AbortSignal) => {
             const response = await this.client.request(
                 acpV2.methods.client.elicitation.create,
                 toV2CreateElicitationRequest(request),
-                options,
+                signal ? {...options, cancellationSignal: signal, stopWaitingOnCancel: true} : options,
             );
             return toV1CreateElicitationResponse(response);
         };
@@ -302,6 +375,17 @@ export class AcpV2Connection {
 
 const v2ConnectionsByView = new WeakMap<AcpClientConnection, AcpV2Connection>();
 
+type BackgroundItem =
+    | {type: "terminal"; terminalId: string}
+    | {type: "subagent"; sessionId: string};
+
+function backgroundKey(item: BackgroundItem): string {
+    switch (item.type) {
+        case "terminal": return `terminal:${item.terminalId}`;
+        case "subagent": return `subagent:${item.sessionId}`;
+    }
+}
+
 function rejectStandardMethod(method: string): Promise<never> {
     return Promise.reject(
         acp.RequestError.internalError(undefined, `'${method}' is not supported on an ACP v2 connection yet`),
@@ -335,13 +419,49 @@ export class ACPSessionConnection {
         await this.v2Connection.updateState(this.sessionId, state);
     }
 
-    async updateSubagentState(childSessionId: string, parentSessionId: string, state: acpV2.StateUpdate): Promise<void> {
+    createChildForeground(childId: string, notify: (state: acpV2.StateUpdate) => Promise<void>): AcpV2ForegroundState {
+        return this.v2Connection?.createChildForeground(childId, notify) ?? new AcpV2ForegroundState(notify, "unknown");
+    }
+
+    setBackgroundItem(item: BackgroundItem, present: boolean): Promise<void> {
+        if (!this.v2Connection) return Promise.resolve();
+        return this.v2Connection.setBackgroundItem(this.sessionId, item, present);
+    }
+
+    hasBackgroundItem(item: BackgroundItem): boolean {
+        return this.v2Connection?.hasBackgroundItem(this.sessionId, item) ?? false;
+    }
+
+    hasBackgroundWork(): boolean {
+        return this.v2Connection?.hasBackgroundWork(this.sessionId) ?? false;
+    }
+
+    isForegroundIdle(): boolean {
+        return this.v2Connection?.isForegroundIdle(this.sessionId) ?? false;
+    }
+
+    setBackgroundSync(syncing: boolean): void {
+        this.v2Connection?.setBackgroundSync([this.sessionId], syncing);
+    }
+
+    updateTerminal(terminal: acpV2.TerminalUpdate): Promise<void> {
+        if (!this.v2Connection) return Promise.resolve();
+        return this.v2Connection.sendLiveUpdate({
+            sessionId: this.sessionId, update: {sessionUpdate: "terminal_update", ...terminal},
+        });
+    }
+
+    async updateSubagentState(
+        childSessionId: string, parentSessionId: string, state: acpV2.StateUpdate,
+        capabilities?: acpV2.SubagentSessionCapabilities,
+    ): Promise<void> {
         if (this.v2Connection) {
             await this.v2Connection.client.notify(acpV2.methods.client.session.update, {
                 sessionId: childSessionId, update: {sessionUpdate: "state_update", ...state},
             });
         }
-        await this.update({sessionUpdate: "subagent_update", sessionId: childSessionId, state}, parentSessionId);
+        await this.update({sessionUpdate: "subagent_update", sessionId: childSessionId, state,
+            ...(capabilities === undefined ? {} : {capabilities})}, parentSessionId);
     }
 
     forSession(sessionId: string): ACPSessionConnection { return new ACPSessionConnection(this.connection, sessionId); }
@@ -352,9 +472,9 @@ export class ACPSessionConnection {
     }
 
     /** Replay shares live report filtering, with v2 entity initialization after conversion. */
-    replayUpdate(update: UpdateSessionEvent, initialized: Set<string>): Promise<void> {
+    replayUpdate(update: UpdateSessionEvent, entities: ReplayedEntities): Promise<void> {
         return this.v2Connection
-            ? this.v2Connection.replaySessionUpdate(this.sessionId, update, initialized)
+            ? this.v2Connection.replaySessionUpdate(this.sessionId, update, entities)
             : this.update(update);
     }
 

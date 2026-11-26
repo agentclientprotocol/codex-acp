@@ -95,13 +95,15 @@ npm run package:all
   OpenAI Responses API (`src/__tests__/integration/mock-responses-server.ts`) reached through the `gateway`
   auth method, so no API key or network is needed. Tests script model replies with `textResponse`,
   `execCommandResponse` and `applyPatchResponse`.
+  `REWIND_REAL_MODEL=1` makes `session-rewind.test.ts` use the real model (`gpt-6-luna`, low effort) with the real
+  `~/.codex` auth and config instead of the mock; it creates threads in `~/.codex/sessions`.
 - `npm run test:e2e`: real OpenAI model. Builds first and requires `RUN_E2E_TESTS=true` (set by the script)
   plus `OPENAI_API_KEY` or `CODEX_API_KEY` in the environment.
 
 ### Session notices
 
 The adapter implements [Session Notices](https://agentclientprotocol.com/rfds/session-notices)
-for Codex warnings, configuration warnings, deprecation notices, model rerouting, and the legacy
+for Codex warnings, configuration warnings, deprecation notices, model rerouting, hooks that block or stop Codex, and the legacy
 `thread/compacted` advisory when the client advertises `clientCapabilities.session.notices: {}`.
 These are live `session/update` notifications with
 `sessionUpdate: "notice"`, a severity, a plain-text title, and optional description.
@@ -111,6 +113,10 @@ Without that capability (including absent or null capability objects), the adapt
 the existing assistant/thought text or AIR `sessionFailure` advisory records. When notices are
 enabled, they take precedence over AIR advisory records. Clients control their presentation;
 the adapter does not rely on notices being displayed.
+
+A hook notice is a warning titled with the hook event and what it did (for example `UserPromptSubmit hook blocked
+the prompt` or `PreToolUse hook blocked the tool call`); its description holds the hook's `stop`, `feedback`, `error` and `warning` output. Hooks that complete
+or fail without blocking send nothing, because Codex carries on as usual.
 
 Command replies, review results, and terminal/retrying errors retain their existing response or
 failure channels. Clients advertising session compaction support continue to receive the dedicated
@@ -158,12 +164,18 @@ The adapter restarts the Codex app-server when it dies (for example, killed for 
 
 ### ACP v2 support
 
-The agent speaks both ACP v1 and the unstable ACP v2 (Draft) protocol from the same process; the
-version is negotiated on the first `initialize` request and fixed for the connection's lifetime.
+The adapter serves ACP v1 and [ACP v2 Preview](https://agentclientprotocol.com/protocol/v2/overview)
+from the same process. The TypeScript SDK router selects a version on the first `initialize`.
+A client that needs v1 after the router selected v2 must open a new connection.
+
+V2 [allows Markdown](https://agentclientprotocol.com/protocol/v2/content#text-content) in
+descriptions of auth methods, commands and skills, config options and their values, permission
+requests, and subagent roles. Plan-entry content can also contain Markdown. The adapter sends
+those strings as text for the client to render. Names and titles remain plain text.
 
 The v2 chain registers: `initialize`, `session/new|list|close|delete|resume` (v2 folds `session/load`
-into `session/resume` with `replayFrom`), `session/set_config_option`, `session/cancel`,
-`auth/login|logout`, `session/prompt` (plus `$/cancel_request`), `session/fork`, and
+into `session/resume` with `replayFrom`), `session/set_config_option`, `session/set_title`, `session/cancel`,
+`auth/login|logout|status`, `session/prompt` (plus `$/cancel_request`), `session/fork`, `terminal/cancel`, and
 `providers/list|set|disable`. Unstable extension methods on top of that: `_session/steering`,
 `_session/goal` (set/pause/resume/clear), `_session/async_task/stop`, and the AIR session index
 requests (`_session/rename`, `_session/archive|unarchive`, `_session/list/subscribe|unsubscribe`).
@@ -223,21 +235,23 @@ schema alone:
 - On a failed prompt, read `sessionFailure` (`_meta.jetbrains.air.sessionFailure`) and `quota`
   (`_meta.quota`) from the idle `state_update` that ends the turn, not from a separate error
   channel. The same `_meta` v1 attaches to `PromptResponse` is copied onto the v2 idle update.
-- Custom session updates are renamed on v2: `subagent_spawned`/`subagent_state_update` become a
-  single `_subagent_update` (gated on the AIR `nativeSubagentSessions` capability; this contract is
-  retained independently of standard subagent sessions), and
-  `async_task_spawned`/`async_task_state_update` become `_async_task_spawned`/`_async_task_state_update`
-  (gated on the AIR `asyncTasks` capability). Payload shapes are unchanged.
+- ACP v2 uses standard `subagent_update`, child sessions, terminals, and background snapshots.
+  The AIR `nativeSubagentSessions` and `asyncTasks` capabilities select legacy updates only on v1.
 - Foreground state is independent of prompt acceptance. `running` can precede the user-message
   echo, including while Codex runs hooks. A successful prompt response still waits for insertion.
+- A held prompt can be withdrawn before dispatch. Once dispatched, cancellation can race with
+  insertion: an inserted message still gets its `messageId`, not `-32800`. A keyed retry reuses
+  the receipt while the message is retained. Resume alone does not prove that a live-only command
+  or its key survived a disconnect, so clients should not blindly resubmit an unanswered command.
 - Every successful `session/resume` sends a current-state snapshot after any replay and before its
   response. An idle snapshot is not another completed turn and repeats no usage or failure metadata.
 - Permission and elicitation requests affect aggregate foreground state: another runnable item keeps
   the session running, and answering one wait does not resume work that remains blocked. Withdrawing
   a request on cancellation does not resume the workflow; late answers cannot revive an ended turn.
 - A steer (`_session/steering`) shows up as a `user_message` once it actually lands in the turn.
-- On cancel, any permission or elicitation request still waiting on a client response is withdrawn
-  with `$/cancel_request`, not just the underlying Codex turn.
+- On cancel, requests the stopped foreground work was waiting for are withdrawn with `$/cancel_request`.
+  Listed background work survives. Prompts received after cancellation wait for the old work's idle
+  before starting new work, including when Codex started the old turn itself.
 - Turns Codex starts on its own (goal auto-turns, e.g. after `session/resume` or `session/new`) are
   rendered the same as prompted turns (`running` then one `idle`) but with no corresponding
   `session/prompt` call — clients should not assume every `running`/`idle` pair has a matching
@@ -259,7 +273,10 @@ schema alone:
 
 Non-AIR v1 clients opt in with `clientCapabilities.subagents: {}`. Non-AIR v2 clients use
 standard `subagent_update` associations automatically. AIR keeps its existing opt-in, updates,
-and generation-based identities; clients do not receive both contracts.
+and generation-based identities; clients do not receive both contracts. Only AIR gets the
+Agent-side `sessionCapabilities.subagents` in the `initialize` response.
+See [docs/subagent-sessions.md](docs/subagent-sessions.md) for delegated task messages and session
+references on collaboration tool calls.
 
 A standard child keeps one opaque conversation ID across assignments and parent handler changes.
 Its ancestors are announced before its output, tool updates, or interactions. Permissions and
@@ -284,8 +301,8 @@ including complete JSON-RPC batches; historical or copied child records never gr
 Child `config_option_update` notifications contain complete reported snapshots. Observed model and
 reasoning effort use singleton selects, including changes between assignments. Unknown or unset values
 are omitted; no values are inferred from the parent or requested spawn arguments. These reports do not
-enable configuration changes, even to the current value. Replayed configuration is historical, not
-confirmed current. Reattachment drops cached confirmation and refreshes loaded children after the
+enable configuration changes, even to the current value. V1 load can report historical configuration.
+V2 replay omits it. Reattachment drops cached confirmation and refreshes loaded children after the
 response. Optional reads do not block child delivery; newer observations or attachment changes discard
 stale results.
 
@@ -294,8 +311,8 @@ including nested children, using legacy or paginated history. Announcements and 
 precede the response. Completed snapshots reconcile tool and rendering state before duplicate live
 payloads are suppressed; live bookkeeping still runs. In-progress commands retain classification without
 resetting streamed output. Incomplete text has no safe delta cursor; it and other records without a safe
-partial representation are omitted rather than replayed over newer content. Agent-owned input is not
-rendered as human input. Missing, omitted, or incomplete child history produces a parent advisory;
+partial representation are omitted rather than replayed over newer content. Agent-owned input is replayed as
+`session_message`, not as human input. Missing, omitted, or incomplete child history produces a parent advisory;
 an empty transcript alone does not invent a gap.
 
 Replay reports the latest recorded child turn's known success, cancellation, or failure as historical

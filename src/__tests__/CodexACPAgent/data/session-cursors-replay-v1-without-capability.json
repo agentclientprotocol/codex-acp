@@ -1,0 +1,90 @@
+[
+  {
+    "content": {
+      "text": "Text of u1",
+      "type": "text"
+    },
+    "messageId": "u1",
+    "sessionUpdate": "user_message_chunk"
+  },
+  {
+    "content": {
+      "text": "Text of a1",
+      "type": "text"
+    },
+    "messageId": "a1",
+    "sessionUpdate": "agent_message_chunk"
+  },
+  {
+    "content": {
+      "text": "Text of u2",
+      "type": "text"
+    },
+    "messageId": "u2",
+    "sessionUpdate": "user_message_chunk"
+  },
+  {
+    "content": {
+      "text": "Text of a2",
+      "type": "text"
+    },
+    "messageId": "a2",
+    "sessionUpdate": "agent_message_chunk"
+  },
+  {
+    "content": {
+      "text": "Text of u2-steer",
+      "type": "text"
+    },
+    "messageId": "u2-steer",
+    "sessionUpdate": "user_message_chunk"
+  },
+  {
+    "content": {
+      "text": "Text of a2-after-steer",
+      "type": "text"
+    },
+    "messageId": "a2-after-steer",
+    "sessionUpdate": "agent_message_chunk"
+  },
+  {
+    "content": {
+      "text": "Text of a3",
+      "type": "text"
+    },
+    "messageId": "a3",
+    "sessionUpdate": "agent_message_chunk"
+  },
+  {
+    "content": {
+      "text": "Text of a4",
+      "type": "text"
+    },
+    "messageId": "a4",
+    "sessionUpdate": "agent_message_chunk"
+  },
+  {
+    "content": {
+      "text": "Text of u4-late",
+      "type": "text"
+    },
+    "messageId": "u4-late",
+    "sessionUpdate": "user_message_chunk"
+  },
+  {
+    "content": {
+      "text": "Text of u5",
+      "type": "text"
+    },
+    "messageId": "u5",
+    "sessionUpdate": "user_message_chunk"
+  },
+  {
+    "content": {
+      "text": "Text of a5",
+      "type": "text"
+    },
+    "messageId": "a5",
+    "sessionUpdate": "agent_message_chunk"
+  }
+]

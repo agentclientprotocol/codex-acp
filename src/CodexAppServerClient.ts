@@ -1,6 +1,7 @@
 import {type MessageConnection, RequestType} from "vscode-jsonrpc/node";
 import {AppServerConnectionLostError, ConnectionLoss} from "./app-server-recovery/ConnectionLoss";
 import {explainCodexError} from "./CodexErrorExplanations";
+import {throwIfRequestCancelled, withRequestCancellation} from "./RequestCancellation";
 import {McpOauthCompletions} from "./mcp/McpOauthCompletions";
 import {McpStartupTracker} from "./mcp/McpStartupTracker";
 import type {
@@ -18,6 +19,7 @@ import type {
     ConfigReadResponse,
     ConfigBatchWriteParams,
     ConfigWriteResponse,
+    ExperimentalFeatureListResponse,
     GetAccountParams,
     GetAccountRateLimitsResponse,
     GetAccountResponse,
@@ -70,6 +72,8 @@ import type {
     ThreadListResponse,
     ThreadReadParams,
     ThreadReadResponse,
+    ThreadRevertParams,
+    ThreadRevertResponse,
     ThreadTurnsListParams,
     ThreadTurnsListResponse,
     ThreadItem,
@@ -712,6 +716,11 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "thread/read", params: params });
     }
 
+    /** Drops the turn `beforeTurnId` and every later one. Reloads the thread, which interrupts its running turn. */
+    async threadRevert(params: ThreadRevertParams): Promise<ThreadRevertResponse> {
+        return await this.sendRequest({method: "thread/revert", params});
+    }
+
     async threadTurnsList(params: ThreadTurnsListParams): Promise<ThreadTurnsListResponse> {
         return await this.sendRequest({method: "thread/turns/list", params});
     }
@@ -877,6 +886,19 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "mcpServerStatus/list", params });
     }
 
+    /** Whether this binary implements a feature, regardless of its default enablement. */
+    async hasExperimentalFeature(name: string): Promise<boolean> {
+        let cursor: string | null = null;
+        do {
+            const page: ExperimentalFeatureListResponse = await this.sendRequest({
+                method: "experimentalFeature/list", params: {cursor, limit: 256},
+            });
+            if (page.data.some(feature => feature.name === name && feature.stage !== "removed")) return true;
+            cursor = page.nextCursor ?? null;
+        } while (cursor !== null);
+        return false;
+    }
+
     async mcpServerReload(): Promise<McpServerRefreshResponse> {
         return await this.sendRequest({ method: "config/mcpServer/reload", params: undefined });
     }
@@ -934,6 +956,19 @@ export class CodexAppServerClient {
         });
     }
 
+    /** Waits for an observed turn without replacing its owner's completion listener. */
+    async waitForRunningTurn(threadId: string, turnId: string, signal?: AbortSignal): Promise<void> {
+        throwIfRequestCancelled(signal);
+        if (this.runningTurnId(threadId) !== turnId) return;
+        let release: () => void = () => {};
+        const completed = new Promise<void>(resolve => {
+            release = this.captureTurnCompletions(threadId, event => {
+                if (event.turn.id === turnId && event.turn.status !== "inProgress") resolve();
+            });
+        });
+        await this.waitWhileConnected("the end of the active turn", completed, release, signal);
+    }
+
     async awaitCompactionCompleted(threadId: string): Promise<CompactionCompletedNotification> {
         let releaseCapture: () => void = () => {};
         const completed = new Promise<CompactionCompletedNotification>((resolve) => {
@@ -950,25 +985,23 @@ export class CodexAppServerClient {
      * A JSON-RPC response wait needs no such guard: vscode-jsonrpc rejects it on dispose. A notification wait does.
      * `release` removes the registration behind `wait`; it runs once the wait ends either way.
      */
-    waitWhileConnected<T>(what: string, wait: Promise<T>, release: () => void = () => {}): Promise<T> {
-        return new Promise<T>((resolve, reject) => {
-            let ended = false;
-            const end = () => {
-                if (ended) return false;
-                ended = true;
-                removeListener();
-                release();
-                return true;
-            };
-            let removeListener: () => void = () => {};
-            removeListener = this.connectionLoss.onLost(() => {
-                if (end()) reject(new AppServerConnectionLostError(what));
-            });
-            wait.then(
-                value => { if (end()) resolve(value); },
-                error => { if (end()) reject(error); },
-            );
+    async waitWhileConnected<T>(
+        what: string,
+        wait: Promise<T>,
+        release: () => void = () => {},
+        signal?: AbortSignal,
+    ): Promise<T> {
+        let removeListener: () => void = () => {};
+        const connected = new Promise<T>((resolve, reject) => {
+            removeListener = this.connectionLoss.onLost(() => reject(new AppServerConnectionLostError(what)));
+            void wait.then(resolve, reject);
         });
+        try {
+            return await withRequestCancellation(connected, signal);
+        } finally {
+            removeListener();
+            release();
+        }
     }
 
     resolveTurnInterrupted(threadId: string, turnId: string): void {

@@ -1,17 +1,35 @@
 import * as acp from "@agentclientprotocol/sdk/unstable";
-import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
+import * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
+import {AIR_CUSTOM_ANSWER_FIELDS_KEY, isAirCustomAnswer, withAirMeta} from "./AirExtension";
+import {isRecord} from "./permissions/json";
 
 /**
- * `elicitation/create`'s request/response, and `elicitation/complete`'s notification, are
- * share field and method names between v1 and v2 -- unlike
- * `session/request_permission`, there is no shape to render, only the type import differs per
- * version. v2 responses allow arbitrary JSON content values. Keep them intact through the
- * v1-typed view and validate with the v2 response guards in shared consumers.
+ * V2 form string properties follow MCP's string schema, which has no `pattern`.
+ * Keep the v1 form intact and omit that keyword only on the v2 wire.
  */
 export function toV2CreateElicitationRequest(request: acp.CreateElicitationRequest): acpV2.CreateElicitationRequest {
-    return request as unknown as acpV2.CreateElicitationRequest;
+    const v2 = request as unknown as acpV2.CreateElicitationRequest;
+    if (request.mode === "url" && acpV2.CreateElicitationRequest.isUrl(v2)) return v2;
+    if (request.mode !== "form" || !isRecord(request.requestedSchema) || !isRecord(request.requestedSchema["properties"])) {
+        throw acp.RequestError.invalidParams(undefined, "Invalid elicitation request");
+    }
+    const fields = Object.entries(request.requestedSchema["properties"])
+        .filter(([, property]) => isRecord(property) && isAirCustomAnswer(property["_meta"]))
+        .map(([id]) => id);
+    const properties = Object.fromEntries(Object.entries(request.requestedSchema["properties"]).map(([key, property]) => {
+        if (!isRecord(property) || property["type"] !== "string" || !("pattern" in property)) return [key, property];
+        const {pattern: _pattern, ...rest} = property;
+        return [key, rest];
+    }));
+    const converted = {...request, requestedSchema: {...request.requestedSchema, properties}};
+    const form = (fields.length === 0 ? converted : {
+        ...converted, _meta: withAirMeta(request._meta, AIR_CUSTOM_ANSWER_FIELDS_KEY, fields),
+    }) as unknown as acpV2.CreateElicitationRequest;
+    if (!acpV2.CreateElicitationRequest.isForm(form)) throw acp.RequestError.invalidParams(undefined, "Invalid elicitation form");
+    return form;
 }
 
+/** V2 responses keep arbitrary JSON values through the v1-typed view. */
 export function toV1CreateElicitationResponse(response: acpV2.CreateElicitationResponse): acp.CreateElicitationResponse {
     return response as unknown as acp.CreateElicitationResponse;
 }

@@ -1,6 +1,7 @@
 {
   "airWithoutSessionIndex": {
     "cursor": "cursor-1",
+    "sortKey": "recency_at",
     "modelProviders": [],
     "sourceKinds": [
       "cli",
@@ -12,6 +13,7 @@
   },
   "plain": {
     "cursor": "cursor-1",
+    "sortKey": "recency_at",
     "modelProviders": [],
     "sourceKinds": [
       "cli",

@@ -6,8 +6,7 @@
     "subject": {
       "toolCall": {
         "toolCallId": "mcp-write-1",
-        "kind": "execute",
-        "status": "pending"
+        "kind": "execute"
       },
       "type": "tool_call"
     },
