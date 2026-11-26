@@ -14,7 +14,7 @@ import os from "node:os";
 import {AgentMode} from "../AgentMode";
 import {DEFAULT_COLLABORATION_MODE} from "../CollaborationModeConfig";
 import {afterEach, beforeEach, expect, vi} from "vitest";
-import type {Model, ReasoningEffortOption} from "../app-server/v2";
+import type {Model, ReasoningEffortOption, Turn} from "../app-server/v2";
 import {CodexSubagentEventRouter} from "../subagents/CodexSubagentEventRouter";
 import {CodexEventHandler, SessionFailureIds} from "../CodexEventHandler";
 import type {AccountUpdatedNotification} from "../app-server/v2";
@@ -533,32 +533,22 @@ export function setupPromptTestSession(sessionOverrides?: Partial<SessionState>)
 
 export function mockPromptTurn(fixture: CodexMockTestFixture, sessionId: string) {
     const codexAppServerClient = fixture.getCodexAppServerClient();
-    const turnStartSpy = vi.spyOn(codexAppServerClient, "turnStart").mockResolvedValue({
-        turn: {
-            id: "turn-id",
-            items: [],
-            rootTurnId: null,
-            itemsView: "notLoaded",
-            status: "inProgress",
-            error: null,
-            startedAt: null,
-            completedAt: null,
-            durationMs: null,
+    const turn: Turn = {
+        id: "turn-id", items: [], rootTurnId: null, itemsView: "notLoaded", status: "inProgress",
+        error: null, startedAt: null, completedAt: null, durationMs: null,
+    };
+    const turnStartSpy = vi.spyOn(codexAppServerClient, "turnStart").mockResolvedValue({turn});
+    vi.spyOn(codexAppServerClient, "awaitTurnCompleted").mockImplementation(async (threadId, turnId) => {
+        const start = turnStartSpy.mock.lastCall?.[0];
+        if (threadId === sessionId && start?.threadId === threadId) {
+            fixture.sendServerNotification({
+                method: "item/completed",
+                params: {threadId, turnId, completedAtMs: 0, item: {
+                    type: "userMessage", id: "user-1", clientId: start.clientUserMessageId ?? null, content: start.input,
+                }},
+            });
         }
-    });
-    vi.spyOn(codexAppServerClient, "awaitTurnCompleted").mockResolvedValue({
-        threadId: sessionId,
-        turn: {
-            id: "turn-id",
-            items: [],
-            rootTurnId: null,
-            itemsView: "notLoaded",
-            status: "completed",
-            error: null,
-            startedAt: null,
-            completedAt: null,
-            durationMs: null,
-        }
+        return {threadId, turn: {...turn, id: turnId, status: "completed"}};
     });
 
     return turnStartSpy;

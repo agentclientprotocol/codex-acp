@@ -119,12 +119,6 @@
   },
   {
     "sessionUpdate": {
-      "title": "Implement the approved plan.",
-      "sessionUpdate": "session_info_update"
-    }
-  },
-  {
-    "sessionUpdate": {
       "stopReason": "end_turn",
       "background": [],
       "_meta": {

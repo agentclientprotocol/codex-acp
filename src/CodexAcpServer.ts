@@ -188,7 +188,7 @@ import {
     type SessionRewindRequest,
     type SessionRewindResponse,
 } from "./SessionRewind";
-import {asyncQuestionReplyHistory, AsyncQuestionClient, AsyncQuestionElicitations, renderAsyncQuestionReply} from "./CodexAsyncQuestions";
+import {asyncQuestionReplyHistory, AsyncQuestionClient, AsyncQuestionElicitations, isAsyncQuestionReplyPrompt, renderAsyncQuestionReply} from "./CodexAsyncQuestions";
 import {
     createAgentTextMessageChunk,
     createAgentTextThoughtChunk,
@@ -1367,6 +1367,7 @@ export class CodexAcpServer {
         clientSystemPromptText(request.systemPrompt);
         const existingSessionRequest = request as WithAcpMcpServers<acp.ResumeSessionRequest> | WithAcpMcpServers<acp.ForkSessionRequest>;
         const previousInstructions = "sessionId" in request ? this.sessions.get(request.sessionId)?.instructions : undefined;
+        const pendingTitle = operation === "resume" ? this.pendingTitleGenerator(existingSessionRequest.sessionId) : null;
         const requestedSessionGeneration = operation === "resume"
             ? await this.beginSessionOpen(existingSessionRequest.sessionId)
             : null;
@@ -1482,23 +1483,16 @@ export class CodexAcpServer {
             mcpServers: requestedMcpServers,
             sessionMcpServers: sessionMcpServers,
             goalRevision: 0,
-            sessionTitle: sessionMetadata.sessionTitle ?? null,
-            sessionTitleSource: operation === "resume" ? "unknown" : "unset",
+            sessionTitle: sessionMetadata.sessionTitle ?? sessionMetadata.sessionPreviewTitle ?? null,
+            sessionTitleSource: sessionMetadata.sessionTitle ? "explicit" : operation === "resume" ? "unknown" : "unset",
             subagents: this.createSubagentRouter(sessionId),
             asyncTasks: this.createAsyncTasks(sessionId),
             compactions: new CodexSessionCompactions(),
             toolCallReports: this.clientDelivery.reports,
             openToolCalls: new CodexSessionToolCalls(),
         };
-        sessionState.titleGen = new TitleGenerator(
-            this.codexAcpClient.appServerClient,
-            sessionId,
-            sessionState.cwd,
-            () => sessionState.sessionTitleSource,
-            this.sessionIndex.titleWriter(sessionId),
-        );
         sessionState.promptSuggestions = this.createPromptSuggestions(sessionState);
-        this.installSessionState(sessionState, sessionMetadata.threadStatus);
+        this.installSessionState(sessionState, sessionMetadata.threadStatus, pendingTitle);
         this.recovery?.markLoaded(sessionState, openGeneration);
         if (settleTrackerReady) {
             settleTrackerReady(sessionState);
@@ -1692,11 +1686,23 @@ export class CodexAcpServer {
         );
     }
 
-    private installSessionState(sessionState: SessionState, threadStatus?: SessionMetadata["threadStatus"]): void {
+    private installSessionState(
+        sessionState: SessionState, threadStatus: SessionMetadata["threadStatus"], pendingTitle: TitleGenerator | null,
+    ): void {
         const previous = this.sessions.get(sessionState.sessionId);
         if (previous?.asyncTasks !== sessionState.asyncTasks) previous?.asyncTasks.clear();
         // The new state holds no suggestion, so the old one must drop its result in flight and clear what it published.
         void previous?.promptSuggestions?.clear();
+        if (previous?.titleGen && (previous.titleGen.isGenerating || previous.titleGen === pendingTitle)) {
+            // The prompt preview can be stale even if generation finished while Codex was reopening the thread.
+            sessionState.titleGen = previous.titleGen;
+            if (sessionState.sessionTitleSource !== "explicit") {
+                sessionState.sessionTitle = previous.sessionTitle;
+                sessionState.sessionTitleSource = previous.sessionTitleSource;
+            }
+        } else {
+            sessionState.titleGen = this.createTitleGenerator(sessionState);
+        }
         this.sessions.set(sessionState.sessionId, sessionState);
         this.clientDelivery.openSession(sessionState.sessionId);
         const v2 = AcpV2Connection.of(this.connection);
@@ -1923,9 +1929,14 @@ export class CodexAcpServer {
         for (const [clientUserMessageId, entry] of this.pendingSteerLandings) {
             if (entry.sessionId === sessionState.sessionId
                 && isInsertedUserMessage(event, sessionState.sessionId, clientUserMessageId)) {
-                this.pendingSteerLandings.delete(clientUserMessageId);
-                await this.emitLiveSteerUserMessage(sessionState.sessionId, clientUserMessageId, entry.prompt);
-                entry.inserted();
+                if (!entry.hasLanded) {
+                    await this.emitLiveSteerUserMessage(sessionState.sessionId, clientUserMessageId, entry.prompt);
+                    entry.inserted();
+                }
+                if (event.method === "item/completed") {
+                    this.pendingSteerLandings.delete(clientUserMessageId);
+                    await this.publishTitleForUserMessage(sessionState, entry.prompt);
+                }
                 return;
             }
         }
@@ -1944,7 +1955,7 @@ export class CodexAcpServer {
      * Shows landed steering input on v2. An elicitation reply stays in its form summary.
      */
     private async emitLiveSteerUserMessage(sessionId: string, messageId: string, prompt: acp.ContentBlock[]): Promise<void> {
-        if (prompt.length === 1 && prompt[0]?.type === "text" && renderAsyncQuestionReply(prompt[0].text) !== null) return;
+        if (isAsyncQuestionReplyPrompt(prompt)) return;
         const session = new ACPSessionConnection(this.connection, sessionId);
         if (session.protocolVersion !== 2) {
             return;
@@ -3564,9 +3575,7 @@ export class CodexAcpServer {
             return true;
         } catch (error) {
             await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
-            if (this.pendingSteerLandings.get(clientUserMessageId) !== landing) {
-                if ((await landing.result).kind === "inserted") return true;
-            }
+            if (landing.hasLanded) return true;
             this.pendingSteerLandings.delete(clientUserMessageId);
             landing.ended(false);
             const turnStillActive = sessionState.currentTurnId !== null
@@ -3984,6 +3993,7 @@ export class CodexAcpServer {
         validateInitialConfigOptions(request.configOptions);
         clientSystemPromptText(request.systemPrompt);
         const previousInstructions = this.sessions.get(request.sessionId)?.instructions;
+        const pendingTitle = this.pendingTitleGenerator(request.sessionId);
         const requestedSessionGeneration = await this.beginSessionOpen(request.sessionId);
         const loadStartedAt = performance.now();
         const graceLeftMs = () => ACCOUNT_READ_LOAD_GRACE_MS - (performance.now() - loadStartedAt);
@@ -4060,6 +4070,7 @@ export class CodexAcpServer {
             await this.closeStaleSessionOpen(sessionId, requestedSessionGeneration);
         }
         const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, true);
+        const savedTitle = normalizeSessionTitle(thread.name);
         const sessionState: SessionState = {
             sessionId: sessionId,
             ...this.createSessionOptionState(sessionMetadata, this.sessions.get(sessionId)),
@@ -4084,23 +4095,16 @@ export class CodexAcpServer {
             mcpServers: requestedMcpServers,
             sessionMcpServers: sessionMcpServers,
             goalRevision: 0,
-            sessionTitle: null,
-            sessionTitleSource: "unset",
+            sessionTitle: savedTitle,
+            sessionTitleSource: savedTitle === null ? "unset" : "explicit",
             subagents: this.createSubagentRouter(sessionId, true),
             asyncTasks: this.createAsyncTasks(sessionId),
             compactions: new CodexSessionCompactions(),
             toolCallReports: this.clientDelivery.reports,
             openToolCalls: new CodexSessionToolCalls(),
         };
-        sessionState.titleGen = new TitleGenerator(
-            this.codexAcpClient.appServerClient,
-            sessionId,
-            sessionState.cwd,
-            () => sessionState.sessionTitleSource,
-            this.sessionIndex.titleWriter(sessionId),
-        );
         sessionState.promptSuggestions = this.createPromptSuggestions(sessionState);
-        this.installSessionState(sessionState, sessionMetadata.threadStatus ?? thread.status);
+        this.installSessionState(sessionState, sessionMetadata.threadStatus ?? thread.status, pendingTitle);
         this.recovery?.markLoaded(sessionState, openGeneration);
         if (knownAccount === "pending") {
             this.applyLateAccountRead(sessionState, authorization, authStatusVersionAtStart);
@@ -4459,6 +4463,7 @@ export class CodexAcpServer {
             return;
         }
 
+        if (sessionState.titleGen?.isGenerating) return;
         const historyTitle = this.findFirstUserMessageTitle(firstItems)
             ?? normalizeSessionTitle(thread.preview);
         await this.publishFallbackSessionTitle(sessionState, historyTitle);
@@ -4474,6 +4479,28 @@ export class CodexAcpServer {
             if (title) return title;
         }
         return null;
+    }
+
+    private pendingTitleGenerator(sessionId: string): TitleGenerator | null {
+        const generator = this.sessions.get(sessionId)?.titleGen;
+        return generator?.isGenerating ? generator : null;
+    }
+
+    private createTitleGenerator({sessionId, cwd}: SessionState): TitleGenerator {
+        const lifetime = this.getSessionGeneration(sessionId);
+        return new TitleGenerator(
+            this.codexAcpClient.appServerClient,
+            sessionId,
+            cwd,
+            () => this.sessions.get(sessionId)?.sessionTitleSource ?? "unknown",
+            async text => {
+                const current = this.sessions.get(sessionId);
+                if (current && this.getSessionGeneration(sessionId) === lifetime && !this.sessionIsClosing(sessionId)) {
+                    await this.publishFallbackSessionTitle(current, normalizeSessionTitle(text));
+                }
+            },
+            this.sessionIndex.titleWriter(sessionId),
+        );
     }
 
     private createPromptSuggestions(sessionState: SessionState): PromptSuggestionGenerator | undefined {
@@ -4536,11 +4563,18 @@ export class CodexAcpServer {
         }
     }
 
-    private createPromptFallbackTitle(prompt: acp.ContentBlock[]): string | null {
-        return normalizeSessionTitle(prompt
-            .filter((block): block is Extract<acp.ContentBlock, {type: "text"}> => block.type === "text")
+    private async publishTitleForUserMessage(sessionState: SessionState, prompt: acp.ContentBlock[]): Promise<void> {
+        if (isAsyncQuestionReplyPrompt(prompt)) return;
+        // Codex includes embedded resources in its userMessage text. Use the client's own text for the title.
+        const text = prompt
+            .filter(block => block.type === "text")
             .map(block => block.text)
-            .join(" "));
+            .join(" ").trim();
+        if (sessionState.titleGen) {
+            sessionState.titleGen.onUserMessage(text);
+        } else {
+            await this.publishFallbackSessionTitle(sessionState, normalizeSessionTitle(text));
+        }
     }
 
     /** Whether the client is AIR on v1 and declared `sessionRewind`: only it knows `_session/rewind`. */
@@ -5570,6 +5604,11 @@ export class CodexAcpServer {
                 pendingInsertion = undefined;
                 await onInserted();
             };
+            const publishRecordedPromptTitle = async (turnId: string): Promise<void> => {
+                // V1 has no client message id, and the item can arrive before the turn/start response.
+                if (insertion === undefined && (await pendingTurnStart?.promise) !== turnId) return;
+                await this.publishTitleForUserMessage(sessionState, params.prompt);
+            };
             await promptClient.subscribeToSessionEvents(params.sessionId,
                 async (event) => {
                     // Tracks turns this prompt doesn't own too (a `/goal` continuation after this
@@ -5578,9 +5617,12 @@ export class CodexAcpServer {
                     await this.trackCodexForegroundWork(sessionState, event);
                     await this.trackSteerLanding(sessionState, event);
                     this.handleSkillsChanged(sessionState, event);
-                    if (pendingInsertion !== undefined
-                        && isInsertedUserMessage(event, params.sessionId, pendingInsertion.clientUserMessageId)) {
+                    if (isInsertedUserMessage(event, params.sessionId, insertion?.clientUserMessageId ?? null)) {
                         await resolvePendingInsertion();
+                        if (event.method === "item/completed" && activePrompt.inputKind.kind === "prompt"
+                            && this.activePrompts.get(params.sessionId) === activePrompt) {
+                            void publishRecordedPromptTitle(event.params.turnId).catch(error => logger.error("Failed to publish session title", error));
+                        }
                     }
                     await observeInteraction(event);
                     if (!promptNotificationsActive) {
@@ -5954,28 +5996,8 @@ export class CodexAcpServer {
                 true,
             );
 
-            // Fire-and-forget: generate an AI title from the first turn.
-            // Never await — must not block the prompt response.
-            // Note: turn.items contains only agent output, not the user message —
-            // extract prompt text from params instead.
-            const promptText = params.prompt
-                .filter((b): b is Extract<acp.ContentBlock, { type: "text" }> => b.type === "text")
-                .map(b => b.text)
-                .join(" ")
-                .trim();
-            sessionState.titleGen?.onTurnCompleted(promptText);
-
-            // Same fire-and-forget rule: a predicted follow-up comes after the answer, never before it. No prediction in plan mode or after a turn that did not complete.
+            // A predicted follow-up comes after the answer and is skipped in plan mode.
             if (turnCompleted.turn.status === "completed" && sessionState.collaborationMode !== PLAN_COLLABORATION_MODE) sessionState.promptSuggestions?.onTurnCompleted(sessionState.sessionId, turnCompleted.turn.id);
-
-            // On v2, a prompt whose user message was never recorded (`pendingInsertion` still set)
-            // never happened from the client's view, so it must not leave a title behind either.
-            if (pendingInsertion === undefined) {
-                await this.publishFallbackSessionTitle(
-                    sessionState,
-                    this.createPromptFallbackTitle(params.prompt),
-                );
-            }
 
             return {
                 stopReason: "end_turn",

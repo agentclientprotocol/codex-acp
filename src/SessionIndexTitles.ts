@@ -89,7 +89,7 @@ export class SessionIndexTitles {
                         sessionState.sessionTitleSource = previousTitleSource;
                     }
                     if (!this.explicitTitles.has(sessionId)) {
-                        // An automatic title that was dropped for this rename comes after the next turn.
+                        // The next recorded prompt can retry a title that this rename suppressed.
                         sessionState?.titleGen?.retryAfterFailedRename();
                         this.host.session(sessionId)?.titleGen?.retryAfterFailedRename();
                     }

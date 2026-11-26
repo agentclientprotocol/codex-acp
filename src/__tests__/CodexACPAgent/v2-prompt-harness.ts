@@ -65,6 +65,16 @@ export function createTurn(status: TurnStatus, id = turnId): Turn {
     };
 }
 
+function titleGenerationResponse(method: string, params?: {ephemeral?: boolean; threadId?: string}) {
+    if (method === "thread/start" && params?.ephemeral) {
+        return {thread: {...createThread(), id: titleThreadId, ephemeral: true}};
+    }
+    if (method === "turn/start" && params?.threadId === titleThreadId) {
+        return {turn: createTurn("inProgress", "title-turn")};
+    }
+    return null;
+}
+
 /** Canned Codex app-server responses, keyed by method. */
 export function codexResponse(method: string): unknown {
     switch (method) {
@@ -181,13 +191,8 @@ export async function connectSession(protocolVersion: 1 | 2 = 2, options: {
         turn: createTurn("inProgress", `turn-${turnStartParams.length}`),
     });
     mocks.mockCodexConnection.sendRequest.mockImplementation(async (method: string, params?: any) => {
-        // The session title is generated on a separate ephemeral thread; keep it out of the way.
-        if (method === "thread/start" && params?.ephemeral) {
-            return {thread: {...createThread(), id: titleThreadId, ephemeral: true}};
-        }
-        if (method === "turn/start" && params?.threadId === titleThreadId) {
-            return {turn: createTurn("inProgress", "title-turn")};
-        }
+        const titleResponse = titleGenerationResponse(method, params);
+        if (titleResponse) return titleResponse;
         if (method !== "turn/start") {
             const override = codexResponseOverrides.get(method);
             return override ? await override(params) : codexResponse(method);
@@ -415,6 +420,8 @@ export function createReplacementCodexAcpClient(): {
         turn: createTurn("inProgress", `replacement-turn-${turnStartParams.length}`),
     });
     mocks.mockCodexConnection.sendRequest.mockImplementation(async (method: string, params?: any) => {
+        const titleResponse = titleGenerationResponse(method, params);
+        if (titleResponse) return titleResponse;
         if (method !== "turn/start") {
             return codexResponse(method);
         }

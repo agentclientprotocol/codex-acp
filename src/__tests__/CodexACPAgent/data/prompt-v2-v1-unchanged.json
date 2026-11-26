@@ -38,12 +38,6 @@
     "codexNotification": "turn/completed"
   },
   {
-    "sessionUpdate": {
-      "title": "Hello",
-      "sessionUpdate": "session_info_update"
-    }
-  },
-  {
     "promptResponse": {
       "stopReason": "end_turn",
       "usage": null,

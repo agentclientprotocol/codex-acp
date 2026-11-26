@@ -67,7 +67,7 @@ describeIntegration("integration: file edit approval", () => {
 
     /** Codex sent the patch result back to the model in its 2nd request. */
     function expectPatchResultSentToModel(): void {
-        expect(mock.requests).toHaveLength(2);
+        expect(mock.promptRequests).toHaveLength(2);
         expect(modelRequestInput(mock, 1).some((i) => i.type === "custom_tool_call_output" && i.call_id === CALL_ID)).toBe(true);
     }
 

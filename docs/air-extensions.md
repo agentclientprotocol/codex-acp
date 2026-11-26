@@ -67,6 +67,7 @@ Only these differences are allowed:
   The adapter advertises [`auth.status`](auth-status.md) and sends `auth/status_update` alongside the legacy `_auth/status_update`.
   Session `configOptions` list model, reasoning effort, fast mode, permissions mode, and collaboration mode
   in that order, omitting unavailable options.
+  The first recorded text prompt starts automatic naming during the turn. Its text supplies the fallback title if generation or saving fails.
 - The client gets no AIR-only key.
   That is no `_meta.jetbrains.air` key and none of the earlier keys in [Removed keys](#removed-keys).
 - The output of a command arrives once, in the chunks or in `content`, as [Zed conventions](#zed-conventions) describe.

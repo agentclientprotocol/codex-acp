@@ -1,5 +1,6 @@
 import type { CodexAppServerClient } from "./CodexAppServerClient";
 import type { Turn } from "./app-server/v2";
+import {settledWithin} from "./StdUtils";
 
 // Use cheap model to generate a title
 export const TITLE_MODEL = "gpt-5.6-luna";
@@ -46,6 +47,7 @@ export class TitleGenerator {
         private readonly mainThreadId: string,
         private readonly cwd: string,
         private readonly getSessionTitleSource: () => string,
+        private readonly publishFallback: (promptText: string) => Promise<void>,
         private readonly serializeTitleWrite: SerializeTitleWrite = runTitleWriteNow,
     ) {}
 
@@ -60,7 +62,7 @@ export class TitleGenerator {
 
     /**
      * Call when an explicit rename failed. A title that this generator dropped for that rename is generated
-     * again after the next turn, as if the rename had never come.
+     * again on the next recorded prompt.
      */
     retryAfterFailedRename(): void {
         if (!this.droppedForExplicitTitle) return;
@@ -79,21 +81,22 @@ export class TitleGenerator {
         this.renameEchoResolve = null;
     }
 
-    /**
-     * Fire-and-forget hook — call after each turn completes.
-     * Only acts on the first call for new sessions without an existing title.
-     *
-     * @param userPromptText  The text of the user's first message (from params.prompt,
-     *                        not turn.items — turn.items contains only agent output).
-     */
-    onTurnCompleted(userPromptText: string): void {
-        if (this.generated) return;
+    get isGenerating(): boolean {
+        return this.inFlight !== null;
+    }
+
+    /** Start generating in the background when Codex records the first prompt with text. */
+    onUserMessage(userPromptText: string): void {
+        if (this.generated || !userPromptText.trim()) return;
         const src = this.getSessionTitleSource();
         // "explicit": user renamed or session loaded with a name — skip
         // "unknown": resumed session with indeterminate history — skip
         if (src === "explicit" || src === "unknown") return;
         this.generated = true;
         const run = this.generateAndPersist(userPromptText)
+            .catch(async () => {
+                if (!this.deferToExplicitTitle()) await this.publishFallback(userPromptText);
+            })
             .catch(() => {
                 // title generation is best-effort; never surface errors to the user
             })
@@ -105,7 +108,7 @@ export class TitleGenerator {
 
     /**
      * Resolves once the fire-and-forget generation started by
-     * {@link onTurnCompleted} has finished, or after `timeoutMs`.
+     * {@link onUserMessage} has finished, or after `timeoutMs`.
      *
      * Generation renames the thread, which Codex echoes back as a
      * `session_info_update`. `session/load` has to finish replaying a session
@@ -113,24 +116,10 @@ export class TitleGenerator {
      * from an earlier turn surface after the load response.
      */
     async waitForIdle(timeoutMs: number): Promise<void> {
-        const pending = this.inFlight;
-        if (pending === null) return;
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        try {
-            await Promise.race([
-                pending,
-                new Promise<void>(resolve => {
-                    timer = setTimeout(resolve, timeoutMs);
-                }),
-            ]);
-        } finally {
-            if (timer !== undefined) clearTimeout(timer);
-        }
+        if (this.inFlight) await settledWithin(this.inFlight, timeoutMs);
     }
 
     private async generateAndPersist(userPromptText: string): Promise<void> {
-        if (!userPromptText.trim()) return;
-
         // Ephemeral thread: not persisted to disk, not visible in thread list,
         // but goes through the same auth layer as the main session.
         const { thread: epThread } = await this.client.threadStart({
@@ -149,38 +138,31 @@ export class TitleGenerator {
             model: TITLE_MODEL,
         });
 
-        const title = extractTitle(turnResult.turn);
-        if (!title) return;
+        const title = turnResult.turn.status === "completed" ? extractTitle(turnResult.turn) : null;
+        if (title === null) throw new Error("Codex returned no usable session title");
 
-        // Guard: user may have renamed the session while generation was running.
-        // CodexEventHandler sets sessionTitleSource = "explicit" on thread/name/updated.
-        if (this.getSessionTitleSource() === "explicit") {
-            this.droppedForExplicitTitle = true;
-            return;
-        }
+        if (this.deferToExplicitTitle()) return;
 
-        const written = await this.serializeTitleWrite(title, async () => {
-            // An explicit rename that came while this write waited for its turn wins.
-            if (this.getSessionTitleSource() === "explicit") return false;
-            await this.client.threadSetName({
-                threadId: this.mainThreadId,
-                name: title,
+        let echo: Promise<void> | null = null;
+        try {
+            const written = await this.serializeTitleWrite(title, async () => {
+                if (this.getSessionTitleSource() === "explicit") return false;
+                // Codex can echo the rename before acknowledging the write.
+                echo = new Promise<void>(resolve => { this.renameEchoResolve = resolve; });
+                await this.client.threadSetName({threadId: this.mainThreadId, name: title});
+                return true;
             });
-            return true;
-        });
-        if (!written) {
-            this.droppedForExplicitTitle = true;
-            return;
+            if (!written) this.droppedForExplicitTitle = true;
+            if (echo !== null) await settledWithin(echo, RENAME_ECHO_TIMEOUT_MS);
+        } finally {
+            this.renameEchoResolve = null;
         }
-        await this.waitForRenameEcho(RENAME_ECHO_TIMEOUT_MS);
     }
 
-    private async waitForRenameEcho(timeoutMs: number): Promise<void> {
-        await new Promise<void>(resolve => {
-            this.renameEchoResolve = resolve;
-            setTimeout(resolve, timeoutMs);
-        });
-        this.renameEchoResolve = null;
+    private deferToExplicitTitle(): boolean {
+        if (this.getSessionTitleSource() !== "explicit") return false;
+        this.droppedForExplicitTitle = true;
+        return true;
     }
 
     /** The app-server restarted: later writes go to `client`. A generation in flight ends with the old one. */
@@ -193,9 +175,9 @@ function extractTitle(turn: Turn): string | null {
     for (const item of turn.items) {
         if (item.type !== "agentMessage") continue;
         try {
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-            const t = String((JSON.parse(item.text) as any)["title"]).trim();
-            if (t && t !== "undefined") return t;
+            const parsed = JSON.parse(item.text) as {title?: unknown} | null;
+            const title = typeof parsed?.title === "string" ? parsed.title.trim() : "";
+            if (title && title !== "undefined") return title;
         } catch {
             // malformed JSON or missing title — skip
         }

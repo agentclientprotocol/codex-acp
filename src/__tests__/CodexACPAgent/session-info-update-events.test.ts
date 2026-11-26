@@ -1,10 +1,131 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ServerNotification } from "../../app-server";
-import { setupPromptTestSession } from "../acp-test-utils";
+import type { TurnCompletedNotification } from "../../app-server/v2";
+import { deferred, setupPromptTestSession } from "../acp-test-utils";
 import { MAX_SESSION_TITLE_LENGTH } from "../../SessionTitle";
+import {
+    connectSession, createThread, createTurn, itemCompleted, itemStarted, sessionId as wireSessionId, titleThreadId,
+    turnCompleted, turnStarted, userMessageItem, type PromptSession,
+} from "./v2-prompt-harness";
+
+function publishedTitles(client: PromptSession) {
+    return client.scopedUpdates.flatMap(({sessionId, update}) =>
+        sessionId === wireSessionId && update.sessionUpdate === "session_info_update" && update.title ? [update.title] : []);
+}
 
 describe("CodexEventHandler - session info updates", () => {
     const sessionId = "test-session-id";
+
+    it.each([
+        {version: 1, save: "succeeds"}, {version: 2, save: "succeeds"},
+        {version: 1, save: "fails"}, {version: 2, save: "fails"},
+    ] as const)("publishes one title on ACP v$version when saving it $save", async ({version, save}) => {
+        const client = await connectSession(version);
+        try {
+            const start = vi.spyOn(client.appServer, "turnStart");
+            const accepted = deferred<void>();
+            client.setTurnStart(async () => {
+                await accepted.promise;
+                return {turn: createTurn("inProgress")};
+            });
+            client.setCodexResponse("thread/name/set", async params => {
+                const {threadId, name} = params as {threadId: string; name: string};
+                if (save === "fails") throw new Error("Cannot save the generated title");
+                client.emit({method: "thread/name/updated", params: {threadId, threadName: name}});
+                return {};
+            });
+            const response = client.sendPrompt([
+                {type: "text", text: "Fix the flaky test in CI"},
+                {type: "resource", resource: {uri: "file:///build.log", text: "BUILD_LOG_CONTENT"}},
+            ]);
+            await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+            const main = start.mock.calls[0]![0];
+            const user = {type: "userMessage" as const, id: "user", clientId: main.clientUserMessageId ?? null, content: main.input};
+            client.emit(turnStarted("unrelated-turn"));
+            client.emit(itemCompleted(userMessageItem(null), "unrelated-turn"));
+            client.emit(turnCompleted("unrelated-turn"));
+            client.emit(turnStarted());
+            client.emit(itemStarted(user));
+            await client.waitForNotifications();
+            expect(start).toHaveBeenCalledTimes(1);
+            expect(publishedTitles(client)).toEqual([]);
+
+            client.emit(itemCompleted(user));
+            client.emit(itemCompleted(user));
+            await client.waitForNotifications();
+            accepted.resolve();
+            await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(2));
+            const titleRequest = start.mock.calls[1]![0];
+            expect(titleRequest.threadId).toBe(titleThreadId);
+            expect(titleRequest.input[0]).toMatchObject({text: expect.stringContaining("Fix the flaky test in CI")});
+            expect(JSON.stringify(titleRequest.input)).not.toMatch(/build\.log|BUILD_LOG_CONTENT/);
+            expect(publishedTitles(client)).toEqual([]);
+            if (save === "fails") {
+                client.emit(turnCompleted());
+                await response;
+                await client.promptRunFinished();
+                expect(publishedTitles(client)).toEqual([]);
+            }
+            client.emit({method: "turn/completed", params: {threadId: titleThreadId, turn: {
+                ...createTurn("completed", "title-turn"), items: [{
+                    type: "agentMessage", id: "title", text: '{"title":"Stabilize CI tests"}',
+                    phase: null, memoryCitation: null, moderation: null, delivery: null, questions: null,
+                }],
+            }}});
+            await vi.waitFor(() => expect(publishedTitles(client)).toEqual([save === "succeeds" ? "Stabilize CI tests" : "Fix the flaky test in CI"]));
+            if (save === "succeeds") {
+                client.emit(turnCompleted());
+                await response;
+                await client.promptRunFinished();
+            }
+            expect(start).toHaveBeenCalledTimes(2);
+        } finally {
+            client.connection.close();
+        }
+    });
+
+    it.each([
+        {version: 1, fails: "during"}, {version: 2, fails: "during"},
+        {version: 1, fails: "after"}, {version: 2, fails: "after"},
+    ] as const)("uses the original prompt if naming fails $fails reopening an ACP v$version session", async ({version, fails}) => {
+        const client = await connectSession(version);
+        try {
+            const titleTurn = deferred<TurnCompletedNotification>();
+            const run = vi.spyOn(client.appServer, "runTurn").mockReturnValueOnce(titleTurn.promise);
+            const generator = client.agent.getSessionState(wireSessionId).titleGen!;
+            const replayFinished = vi.spyOn(generator, "waitForIdle");
+            generator.onUserMessage("Original ACP prompt");
+            await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
+
+            const thread = {...createThread(), preview: "Provider preview including attachments"};
+            const readingThread = deferred<void>();
+            const releaseRead = deferred<void>();
+            client.setCodexResponse("thread/resume", async () => {
+                readingThread.resolve();
+                await releaseRead.promise;
+                return {thread, model: "gpt-5", modelProvider: "openai", reasoningEffort: "medium", serviceTier: null, turnsBackwardsCursor: null};
+            });
+            client.setCodexResponse("thread/read", async () => ({thread}));
+            const reopen = client.request(version === 1 ? "session/load" : "session/resume", {
+                sessionId: wireSessionId, cwd: thread.cwd, mcpServers: [],
+            });
+            await readingThread.promise;
+            if (fails === "after") {
+                releaseRead.resolve();
+                if (version === 1) await vi.waitFor(() => expect(replayFinished).toHaveBeenCalledOnce());
+                else await reopen;
+            }
+            expect(publishedTitles(client)).toEqual([]);
+            titleTurn.reject(new Error("Title generation failed"));
+            await vi.waitFor(() => expect(publishedTitles(client)).toEqual(["Original ACP prompt"]));
+            releaseRead.resolve();
+            await reopen;
+            // A resume snapshot can repeat the fallback that arrived while the thread was being read.
+            expect([...new Set(publishedTitles(client))]).toEqual(["Original ACP prompt"]);
+        } finally {
+            client.connection.close();
+        }
+    });
 
     it("uses the first user prompt as a fallback session title", async () => {
         const { mockFixture } = setupPromptTestSession({

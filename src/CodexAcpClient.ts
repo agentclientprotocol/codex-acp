@@ -732,13 +732,15 @@ export class CodexAcpClient {
         onSubscribed?.();
         const codexModels = await this.fetchAvailableModels();
         const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
+        const sessionTitle = normalizeSessionTitle(response.thread.name);
         return {
             sessionId: request.sessionId,
             currentModelId: currentModelId,
             models: codexModels,
             ...this.resumedSessionOptions(response, defaultPermissionProfileId, live),
             threadStatus: response.thread.status,
-            sessionTitle: normalizeSessionTitle(listedSessionTitle(response.thread)),
+            sessionTitle,
+            sessionPreviewTitle: sessionTitle === null ? normalizeSessionTitle(listedSessionTitle(response.thread)) : null,
             rewindable: isRewindableThread(response.thread),
             modelProvider: response.modelProvider,
             additionalDirectories,

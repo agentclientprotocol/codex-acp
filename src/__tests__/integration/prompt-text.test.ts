@@ -58,12 +58,12 @@ describeIntegration("integration: text reply", () => {
 
     /** The model's request carries the prompt and is sent to the integration model. */
     function expectPromptSentToModel(text: string): void {
-        expect(mock.requests).toHaveLength(1);
-        expect(mock.requests[0]).toMatchObject({
+        expect(mock.promptRequests).toHaveLength(1);
+        expect(mock.promptRequests[0]).toMatchObject({
             model: INTEGRATION_MODEL_ID.model,
             reasoning: {effort: INTEGRATION_MODEL_ID.effort},
         });
-        expect(JSON.stringify(mock.requests[0])).toContain(text);
+        expect(JSON.stringify(mock.promptRequests[0])).toContain(text);
     }
 
     it("runs the first turn with the selected settings and previews the session after closing it", async () => {
@@ -115,6 +115,6 @@ describeIntegration("integration: text reply", () => {
         expect((await preview()).configOptions).toEqual(saved.configOptions);
         const resumed = await agent.connection.request("session/resume", {cwd, sessionId, mcpServers: []});
         expect(resumed.configOptions).toEqual(saved.configOptions);
-        expect(mock.requests).toHaveLength(1);
+        expect(mock.promptRequests).toHaveLength(1);
     });
 });
