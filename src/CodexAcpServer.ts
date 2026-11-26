@@ -188,7 +188,7 @@ import {
     type SessionRewindRequest,
     type SessionRewindResponse,
 } from "./SessionRewind";
-import {asyncQuestionReplyHistory, AsyncQuestionClient, AsyncQuestionElicitations, renderAsyncQuestionReply} from "./CodexAsyncQuestions";
+import {asyncQuestionReplyHistory, AsyncQuestionClient, AsyncQuestionElicitations, isAsyncQuestionReplyPrompt, renderAsyncQuestionReply} from "./CodexAsyncQuestions";
 import {
     createAgentTextMessageChunk,
     createAgentTextThoughtChunk,
@@ -1923,9 +1923,14 @@ export class CodexAcpServer {
         for (const [clientUserMessageId, entry] of this.pendingSteerLandings) {
             if (entry.sessionId === sessionState.sessionId
                 && isInsertedUserMessage(event, sessionState.sessionId, clientUserMessageId)) {
-                this.pendingSteerLandings.delete(clientUserMessageId);
-                await this.emitLiveSteerUserMessage(sessionState.sessionId, clientUserMessageId, entry.prompt);
-                entry.inserted();
+                if (!entry.hasLanded) {
+                    await this.emitLiveSteerUserMessage(sessionState.sessionId, clientUserMessageId, entry.prompt);
+                    entry.inserted();
+                }
+                if (event.method === "item/completed") {
+                    this.pendingSteerLandings.delete(clientUserMessageId);
+                    await this.publishTitleForUserMessage(sessionState, entry.prompt);
+                }
                 return;
             }
         }
@@ -1944,7 +1949,7 @@ export class CodexAcpServer {
      * Shows landed steering input on v2. An elicitation reply stays in its form summary.
      */
     private async emitLiveSteerUserMessage(sessionId: string, messageId: string, prompt: acp.ContentBlock[]): Promise<void> {
-        if (prompt.length === 1 && prompt[0]?.type === "text" && renderAsyncQuestionReply(prompt[0].text) !== null) return;
+        if (isAsyncQuestionReplyPrompt(prompt)) return;
         const session = new ACPSessionConnection(this.connection, sessionId);
         if (session.protocolVersion !== 2) {
             return;
@@ -3564,9 +3569,7 @@ export class CodexAcpServer {
             return true;
         } catch (error) {
             await this.codexAcpClient.waitForSessionNotifications(params.sessionId);
-            if (this.pendingSteerLandings.get(clientUserMessageId) !== landing) {
-                if ((await landing.result).kind === "inserted") return true;
-            }
+            if (landing.hasLanded) return true;
             this.pendingSteerLandings.delete(clientUserMessageId);
             landing.ended(false);
             const turnStillActive = sessionState.currentTurnId !== null
@@ -4536,11 +4539,15 @@ export class CodexAcpServer {
         }
     }
 
-    private createPromptFallbackTitle(prompt: acp.ContentBlock[]): string | null {
-        return normalizeSessionTitle(prompt
-            .filter((block): block is Extract<acp.ContentBlock, {type: "text"}> => block.type === "text")
+    private async publishTitleForUserMessage(sessionState: SessionState, prompt: acp.ContentBlock[]): Promise<void> {
+        if (isAsyncQuestionReplyPrompt(prompt)) return;
+        // Codex includes embedded resources in its userMessage text. Use the client's own text for the title.
+        const text = prompt
+            .filter(block => block.type === "text")
             .map(block => block.text)
-            .join(" "));
+            .join(" ").trim();
+        sessionState.titleGen?.onUserMessage(text);
+        await this.publishFallbackSessionTitle(sessionState, normalizeSessionTitle(text));
     }
 
     /** Whether the client is AIR on v1 and declared `sessionRewind`: only it knows `_session/rewind`. */
@@ -5570,6 +5577,11 @@ export class CodexAcpServer {
                 pendingInsertion = undefined;
                 await onInserted();
             };
+            const publishRecordedPromptTitle = async (turnId: string): Promise<void> => {
+                // V1 has no client message id, and the item can arrive before the turn/start response.
+                if (insertion === undefined && (await pendingTurnStart?.promise) !== turnId) return;
+                await this.publishTitleForUserMessage(sessionState, params.prompt);
+            };
             await promptClient.subscribeToSessionEvents(params.sessionId,
                 async (event) => {
                     // Tracks turns this prompt doesn't own too (a `/goal` continuation after this
@@ -5578,9 +5590,12 @@ export class CodexAcpServer {
                     await this.trackCodexForegroundWork(sessionState, event);
                     await this.trackSteerLanding(sessionState, event);
                     this.handleSkillsChanged(sessionState, event);
-                    if (pendingInsertion !== undefined
-                        && isInsertedUserMessage(event, params.sessionId, pendingInsertion.clientUserMessageId)) {
+                    if (isInsertedUserMessage(event, params.sessionId, insertion?.clientUserMessageId ?? null)) {
                         await resolvePendingInsertion();
+                        if (event.method === "item/completed" && activePrompt.inputKind.kind === "prompt"
+                            && this.activePrompts.get(params.sessionId) === activePrompt) {
+                            void publishRecordedPromptTitle(event.params.turnId).catch(error => logger.error("Failed to publish session title", error));
+                        }
                     }
                     await observeInteraction(event);
                     if (!promptNotificationsActive) {
@@ -5954,28 +5969,8 @@ export class CodexAcpServer {
                 true,
             );
 
-            // Fire-and-forget: generate an AI title from the first turn.
-            // Never await — must not block the prompt response.
-            // Note: turn.items contains only agent output, not the user message —
-            // extract prompt text from params instead.
-            const promptText = params.prompt
-                .filter((b): b is Extract<acp.ContentBlock, { type: "text" }> => b.type === "text")
-                .map(b => b.text)
-                .join(" ")
-                .trim();
-            sessionState.titleGen?.onTurnCompleted(promptText);
-
-            // Same fire-and-forget rule: a predicted follow-up comes after the answer, never before it. No prediction in plan mode or after a turn that did not complete.
+            // A predicted follow-up comes after the answer and is skipped in plan mode.
             if (turnCompleted.turn.status === "completed" && sessionState.collaborationMode !== PLAN_COLLABORATION_MODE) sessionState.promptSuggestions?.onTurnCompleted(sessionState.sessionId, turnCompleted.turn.id);
-
-            // On v2, a prompt whose user message was never recorded (`pendingInsertion` still set)
-            // never happened from the client's view, so it must not leave a title behind either.
-            if (pendingInsertion === undefined) {
-                await this.publishFallbackSessionTitle(
-                    sessionState,
-                    this.createPromptFallbackTitle(params.prompt),
-                );
-            }
 
             return {
                 stopReason: "end_turn",

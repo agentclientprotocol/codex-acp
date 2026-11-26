@@ -23,6 +23,12 @@
   },
   {
     "sessionUpdate": {
+      "title": "Implement the approved plan.",
+      "sessionUpdate": "session_info_update"
+    }
+  },
+  {
+    "sessionUpdate": {
       "plan": {
         "planId": "plan-item",
         "content": "1. Do the change.",
@@ -115,12 +121,6 @@
         }
       ],
       "sessionUpdate": "config_option_update"
-    }
-  },
-  {
-    "sessionUpdate": {
-      "title": "Implement the approved plan.",
-      "sessionUpdate": "session_info_update"
     }
   },
   {

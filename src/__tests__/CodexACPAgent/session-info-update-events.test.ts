@@ -1,10 +1,71 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ServerNotification } from "../../app-server";
-import { setupPromptTestSession } from "../acp-test-utils";
+import { deferred, setupPromptTestSession } from "../acp-test-utils";
 import { MAX_SESSION_TITLE_LENGTH } from "../../SessionTitle";
+import {
+    connectSession, createTurn, itemCompleted, itemStarted, sessionId as wireSessionId, titleThreadId,
+    turnCompleted, turnStarted, userMessageItem,
+} from "./v2-prompt-harness";
 
 describe("CodexEventHandler - session info updates", () => {
     const sessionId = "test-session-id";
+
+    it.each([1, 2] as const)("publishes both titles during the first turn on ACP v%i", async version => {
+        const client = await connectSession(version);
+        try {
+            const start = vi.spyOn(client.appServer, "turnStart");
+            const accepted = deferred<void>();
+            client.setTurnStart(async () => {
+                await accepted.promise;
+                return {turn: createTurn("inProgress")};
+            });
+            client.setCodexResponse("thread/name/set", async params => {
+                const {threadId, name} = params as {threadId: string; name: string};
+                client.emit({method: "thread/name/updated", params: {threadId, threadName: name}});
+                return {};
+            });
+            const response = client.sendPrompt([
+                {type: "text", text: "Fix the flaky test in CI"},
+                {type: "resource", resource: {uri: "file:///build.log", text: "BUILD_LOG_CONTENT"}},
+            ]);
+            await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
+            const main = start.mock.calls[0]![0];
+            const user = {type: "userMessage" as const, id: "user", clientId: main.clientUserMessageId ?? null, content: main.input};
+            const titles = () => client.scopedUpdates.flatMap(({sessionId, update}) =>
+                sessionId === wireSessionId && update.sessionUpdate === "session_info_update" && update.title ? [update.title] : []);
+            client.emit(turnStarted("unrelated-turn"));
+            client.emit(itemCompleted(userMessageItem(null), "unrelated-turn"));
+            client.emit(turnCompleted("unrelated-turn"));
+            client.emit(turnStarted());
+            client.emit(itemStarted(user));
+            await client.waitForNotifications();
+            expect(start).toHaveBeenCalledTimes(1);
+            expect(titles()).toEqual([]);
+
+            client.emit(itemCompleted(user));
+            client.emit(itemCompleted(user));
+            await client.waitForNotifications();
+            accepted.resolve();
+            await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(2));
+            const titleRequest = start.mock.calls[1]![0];
+            expect(titleRequest.threadId).toBe(titleThreadId);
+            expect(titleRequest.input[0]).toMatchObject({text: expect.stringContaining("Fix the flaky test in CI")});
+            expect(JSON.stringify(titleRequest.input)).not.toMatch(/build\.log|BUILD_LOG_CONTENT/);
+            client.emit({method: "turn/completed", params: {threadId: titleThreadId, turn: {
+                ...createTurn("completed", "title-turn"), items: [{
+                    type: "agentMessage", id: "title", text: '{"title":"Stabilize CI tests"}',
+                    phase: null, memoryCitation: null, moderation: null, delivery: null, questions: null,
+                }],
+            }}});
+            await vi.waitFor(() => expect(titles()).toEqual(["Fix the flaky test in CI", "Stabilize CI tests"]));
+            client.emit(turnCompleted());
+            await response;
+            await client.promptRunFinished();
+            expect(start).toHaveBeenCalledTimes(2);
+        } finally {
+            client.connection.close();
+        }
+    });
 
     it("uses the first user prompt as a fallback session title", async () => {
         const { mockFixture } = setupPromptTestSession({

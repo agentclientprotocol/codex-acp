@@ -78,10 +78,10 @@ describeIntegration("integration: ACP v2 prompt retries", () => {
                 return {sessionId, messageId};
             });
             await withAgent(async (agent, updates) => {
-                const calls = mock.requests.length;
+                const calls = mock.promptRequests.length;
                 await agent.request(methods.session.resume, {cwd, sessionId});
                 await expect(agent.request(methods.session.prompt, {sessionId, ...prompt})).resolves.toEqual({messageId});
-                expect(mock.requests).toHaveLength(calls);
+                expect(mock.promptRequests).toHaveLength(calls);
                 expect(updates.some(({update}) => acp.SessionUpdate.isUserMessageChunk(update))).toBe(false);
 
                 await agent.request(methods.session.resume, {cwd, sessionId, replayFrom: {type: "start"}});

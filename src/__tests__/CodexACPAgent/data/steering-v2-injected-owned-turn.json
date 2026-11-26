@@ -58,6 +58,12 @@
     }
   },
   {
+    "sessionUpdate": {
+      "title": "Hello",
+      "sessionUpdate": "session_info_update"
+    }
+  },
+  {
     "codexNotification": "item/started"
   },
   {
@@ -72,12 +78,6 @@
   },
   {
     "codexNotification": "turn/completed"
-  },
-  {
-    "sessionUpdate": {
-      "title": "Hello",
-      "sessionUpdate": "session_info_update"
-    }
   },
   {
     "sessionUpdate": {

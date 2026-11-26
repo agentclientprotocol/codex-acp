@@ -342,6 +342,8 @@ async function runNextPrompt(
     const prompt = agent.prompt({sessionId, prompt: [{type: "text", text: "hello"}]});
     await vi.waitFor(() => expect(sessionState.currentTurnId).toBe("next-turn"));
     send({method: "turn/started", params: {threadId: sessionId, turn: turn("next-turn", "inProgress")}});
+    send({method: "item/completed", params: {threadId: sessionId, turnId: "next-turn", completedAtMs: 0,
+        item: {type: "userMessage", id: "next-user", clientId: null, content: [{type: "text", text: "hello", text_elements: []}]}}});
     send({method: "item/agentMessage/delta", params: {threadId: sessionId, turnId: "next-turn", itemId: "next-message", delta: "Hi."}});
     if (ownError) {
         send({method: "error", params: {threadId: sessionId, turnId: "next-turn", willRetry: false, error: ownError}});

@@ -10,6 +10,7 @@ import {ACPSessionConnection} from "../../ACPSessionConnection";
 import {CodexSubagentEventRouter} from "../../subagents/CodexSubagentEventRouter";
 import type {ServerNotification} from "../../app-server";
 import {CodexCommands} from "../../CodexCommands";
+import {CodexEventHandler} from "../../CodexEventHandler";
 import {logger} from "../../Logger";
 import type {Turn, TurnCompletedNotification} from "../../app-server/v2";
 import {AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES} from "../../AgentFileChangeReport";
@@ -356,9 +357,7 @@ describe("agent file-change report lifecycle", () => {
     it("publishes cancelled when cancellation arrives after the provider turn completes", async () => {
         const {fixture, sessionState} = await setupMainPrompt();
         const cancellation = new AbortController();
-        sessionState.titleGen = {
-            onTurnCompleted: () => cancellation.abort(),
-        } as unknown as NonNullable<SessionState["titleGen"]>;
+        vi.spyOn(CodexEventHandler.prototype, "completeSuccessfulTurn").mockImplementationOnce(async () => cancellation.abort());
 
         await expect(fixture.getCodexAcpAgent().prompt(
             promptWithFileChangeReport(sessionState.sessionId, "request-late-cancel"),

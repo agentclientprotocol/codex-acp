@@ -23,7 +23,7 @@ describe("TitleGenerator.waitForIdle", () => {
             threadSetName,
         } as unknown as Partial<CodexAppServerClient>);
 
-        generator.onTurnCompleted("hello");
+        generator.onUserMessage("hello");
         let settled = false;
         const idle = generator.waitForIdle(5_000).then(() => {
             settled = true;
@@ -53,7 +53,7 @@ describe("TitleGenerator.waitForIdle", () => {
             threadSetName: vi.fn(),
         } as unknown as Partial<CodexAppServerClient>);
 
-        generator.onTurnCompleted("hello");
+        generator.onUserMessage("hello");
 
         await expect(generator.waitForIdle(20)).resolves.toBeUndefined();
     });
@@ -65,7 +65,7 @@ describe("TitleGenerator.waitForIdle", () => {
             threadSetName: vi.fn(),
         } as unknown as Partial<CodexAppServerClient>);
 
-        generator.onTurnCompleted("hello");
+        generator.onUserMessage("hello");
 
         await expect(generator.waitForIdle(5_000)).resolves.toBeUndefined();
     });
@@ -80,7 +80,8 @@ describe("TitleGenerator prompt", () => {
         } as unknown as Partial<CodexAppServerClient>);
 
         // The cut falls between the two halves of the emoji.
-        generator.onTurnCompleted(`${"a".repeat(3_999)}\u{1F600}${"b".repeat(200_000)}`);
+        generator.onUserMessage("  ");
+        generator.onUserMessage(`${"a".repeat(3_999)}\u{1F600}${"b".repeat(200_000)}`);
         await generator.waitForIdle(1_000);
 
         const text: string = runTurn.mock.calls[0]![0].input[0].text;

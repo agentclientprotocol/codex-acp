@@ -65,18 +65,18 @@
   },
   {
     "sessionUpdate": {
+      "title": "Hello",
+      "sessionUpdate": "session_info_update"
+    }
+  },
+  {
+    "sessionUpdate": {
       "messageId": "<agentMessageId>",
       "content": {
         "text": "The current provider can't read this thread's earlier reasoning, which another provider or account encrypted. This happens after the provider changes in a thread. Switch back to the previous provider or start a new thread.\n\n",
         "type": "text"
       },
       "sessionUpdate": "agent_message_chunk"
-    }
-  },
-  {
-    "sessionUpdate": {
-      "title": "Hello",
-      "sessionUpdate": "session_info_update"
     }
   },
   {

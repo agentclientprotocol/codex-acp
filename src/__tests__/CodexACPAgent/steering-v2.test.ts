@@ -102,7 +102,6 @@ describe('_session/steering over ACP v2', () => {
     it('shows a live user_message when a steer injected into an unowned turn lands', async () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
-        await runPromptToCompletion(client);
         const steerClientId = captureSteerClientId(client);
 
         const start = client.transcript.length;
@@ -115,7 +114,14 @@ describe('_session/steering over ACP v2', () => {
         });
         expect(steerResult).toEqual({outcome: "injected"});
 
-        client.emit(itemCompleted(userMessageItem(steerClientId.captured(), "steer the goal turn"), "turn-2"));
+        const user = userMessageItem(steerClientId.captured(), "steer the goal turn");
+        const titleUpdates = () => client.scopedUpdates.flatMap(({update}) =>
+            update.sessionUpdate === "session_info_update" && update.title ? [update.title] : []);
+        client.emit(itemStarted(user, "turn-2"));
+        await client.waitForNotifications();
+        expect(titleUpdates()).toEqual([]);
+        client.emit(itemCompleted(user, "turn-2"));
+        await vi.waitFor(() => expect(titleUpdates()).toEqual(["steer the goal turn"]));
         client.emit(turnCompleted("turn-2"));
         await settle();
 

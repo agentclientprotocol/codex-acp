@@ -84,7 +84,7 @@ export type UserMessageInsertion = {
 };
 
 /**
- * Whether the notification is Codex recording the user message sent with `clientUserMessageId`.
+ * Whether Codex is recording the user message sent with `clientUserMessageId`. V1 prompts have no client id.
  * Codex records the message only after pre-turn work (compaction, MCP startup, hooks), and a
  * blocking hook can skip it. Match on the id: steered or Codex-originated user messages share
  * the turn.
@@ -92,12 +92,12 @@ export type UserMessageInsertion = {
 export function isInsertedUserMessage(
     event: ServerNotification,
     threadId: string,
-    clientUserMessageId: string,
+    clientUserMessageId: string | null,
 ): boolean {
     return (event.method === "item/started" || event.method === "item/completed")
         && event.params.threadId === threadId
         && event.params.item.type === "userMessage"
-        && event.params.item.clientId === clientUserMessageId;
+        && (event.params.item.clientId ?? null) === clientUserMessageId;
 }
 
 /** The identity and cancellation of a native v2 prompt offered to a running turn. */

@@ -24,6 +24,7 @@ import type {ServerNotification} from '../../app-server';
 import type {CodexErrorInfo, ErrorNotification, ThreadGoal, TurnCompletedNotification} from '../../app-server/v2';
 import {expectConformingV2SessionUpdates} from './v2-session-update-guard';
 import {CodexAcpServer} from '../../CodexAcpServer';
+import {deferred} from '../acp-test-utils';
 
 const typedFailureCapabilities = {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure"]}}}};
 
@@ -105,6 +106,7 @@ describe('session/prompt over ACP v2', () => {
         client.emit(itemStarted(userMessageItem(clientUserMessageId)));
         client.emit(itemCompleted(userMessageItem(clientUserMessageId)));
         const {messageId} = await response;
+        await vi.waitFor(() => expect(sessionUpdates(client.transcript)).toContainEqual({sessionUpdate: "session_info_update", title: "Hello"}));
         client.emit(turnCompleted());
         await client.promptRunFinished();
         await settle();
@@ -226,8 +228,8 @@ describe('session/prompt over ACP v2', () => {
         // Reported once, as v1 reports it once on the prompt response.
         expect(sessionUpdates(transcript).map(update => update.sessionUpdate))
             .not.toEqual(expect.arrayContaining(["agent_message_chunk"]));
-        expect(sessionUpdates(transcript).map(update => update.sessionUpdate))
-            .not.toEqual(expect.arrayContaining(["session_info_update"]));
+        expect(sessionUpdates(transcript).filter(update => update.sessionUpdate === "session_info_update"))
+            .toEqual([{sessionUpdate: "session_info_update", title: "Hello"}]);
         const idle = sessionUpdates(transcript).at(-1) as {_meta?: Record<string, any>};
         expect(idle._meta?.["jetbrains"]?.air?.sessionFailure).toMatchObject({severity: "error"});
         expect(idle._meta?.["quota"]).toBeDefined();
@@ -249,16 +251,13 @@ describe('session/prompt over ACP v2', () => {
                 ...(typed ? {clientCapabilities: typedFailureCapabilities} : {}),
             });
             closeClient = () => client.connection.close();
-            let loseTransport: (error: Error) => void = () => {};
-            vi.spyOn(client.appServer, "awaitTurnCompleted").mockImplementation(() =>
-                new Promise<TurnCompletedNotification>((_, reject) => {
-                    loseTransport = reject;
-                }));
+            const transport = deferred<TurnCompletedNotification>();
+            vi.spyOn(client.appServer, "awaitTurnCompleted").mockReturnValue(transport.promise);
 
             const start = client.transcript.length;
             const messageId = await insertPrompt(client, 0);
             exitCode = 1;
-            loseTransport(new Error("connection closed"));
+            transport.reject(new Error("connection closed"));
             await client.promptRunFinished();
             await settle();
 
@@ -382,6 +381,7 @@ describe('session/prompt over ACP v2', () => {
         const client = await connectSession();
         closeClient = () => client.connection.close();
 
+        const start = vi.spyOn(client.appServer, "threadStart");
         const response = client.sendPrompt([{type: "text", text: "Hello"}]);
         await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(1));
         // E.g. a blocking UserPromptSubmit hook: the turn ends and Codex never records the prompt.
@@ -397,6 +397,7 @@ describe('session/prompt over ACP v2', () => {
         // Not inserted: the fallback title from the prompt text must not be published either.
         expect(sessionUpdates(client.transcript).map(update => update.sessionUpdate))
             .not.toEqual(expect.arrayContaining(["session_info_update"]));
+        expect(start).not.toHaveBeenCalled();
         const clientUserMessageId = client.turnStartParams[0]!["clientUserMessageId"] as string;
         await expect(dump(client.transcript, clientUserMessageId)).toMatchFileSnapshot('data/prompt-v2-not-inserted.json');
     });
@@ -773,7 +774,12 @@ describe('session/prompt over ACP v2', () => {
         client.emit(turnStarted());
         client.emit(itemCompleted(userMessageItem(clientUserMessageId ?? null, text)));
         const messageId = version === 2 ? (await response).messageId as string : "<messageId>";
+        await vi.waitFor(() => expect(sessionUpdates(client.transcript)).toContainEqual({sessionUpdate: "session_info_update", title: text}));
         client.emit(itemCompleted({type: "plan", id: "plan-item", text: "1. Do the change."}));
+        await vi.waitFor(() => expect(sessionUpdates(client.transcript)).toContainEqual(expect.objectContaining(
+            version === 2 ? {sessionUpdate: "plan_update", plan: expect.objectContaining({planId: "plan-item"})}
+                : {sessionUpdate: "agent_message_chunk", messageId: "plan-item"},
+        )));
         client.emit(turnCompleted());
 
         await vi.waitFor(() => expect(client.turnStartParams).toHaveLength(2));

@@ -37,3 +37,8 @@ A successful request suppresses the adapter's automatic title writes, including
 generation already in flight. It does not stop later user-initiated renames.
 The existing AIR `_session/rename` extension uses the same implementation and
 keeps its empty result and capability gate.
+
+For a new, unnamed session, the adapter sends the first recorded text prompt as
+a fallback `session_info_update`. It also starts generating a short title in a
+separate Codex thread. The generated title can reach the client while the first
+turn is still running. A prompt that Codex never records produces no title.

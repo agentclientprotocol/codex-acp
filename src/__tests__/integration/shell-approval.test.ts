@@ -79,7 +79,7 @@ describeIntegration("integration: shell approval", () => {
 
     /** Codex sent the command output back to the model in its 2nd request. */
     function expectOutputSentToModel(output: string): void {
-        expect(mock.requests).toHaveLength(2);
+        expect(mock.promptRequests).toHaveLength(2);
         const sent = modelRequestInput(mock, 1).find((i) => i.type === "function_call_output" && i.call_id === CALL_ID);
         expect(JSON.stringify(sent)).toContain(output);
     }

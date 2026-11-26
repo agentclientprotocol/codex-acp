@@ -198,6 +198,13 @@ async function runInWorkspace(
     await vi.waitFor(() => {
         if (turnCount === 0) throw new Error("The turn did not start");
     });
+    fixture.sendServerNotification({
+        method: "item/completed",
+        params: {threadId: SESSION_ID, turnId: TURN_ID, completedAtMs: 0, item: {
+            type: "userMessage", id: "user-1", clientId: null, content: [{type: "text", text: "Go", text_elements: []}],
+        }},
+    });
+    await client.waitForSessionNotifications(SESSION_ID);
 
     for (const step of scenario.steps ?? []) {
         if ("waitMs" in step) {

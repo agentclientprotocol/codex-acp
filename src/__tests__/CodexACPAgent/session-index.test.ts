@@ -976,7 +976,7 @@ describe("_session/rename", () => {
             applied.push(name);
             return {};
         });
-        agent.getSessionState(threadId).titleGen!.onTurnCompleted("Fix the build");
+        agent.getSessionState(threadId).titleGen!.onUserMessage("Fix the build");
         await vi.advanceTimersByTimeAsync(0);
         expect(started).toEqual(["Automatic"]);
 
@@ -999,7 +999,7 @@ describe("_session/rename", () => {
         vi.spyOn(appServer, "runTurn").mockReturnValue(turn.promise as never);
         const threadSetName = vi.spyOn(appServer, "threadSetName").mockResolvedValue({});
         const titleGen = agent.getSessionState(threadId).titleGen!;
-        titleGen.onTurnCompleted("Fix the build");
+        titleGen.onUserMessage("Fix the build");
 
         await agent.sessionIndex.setTitle({sessionId: threadId, title: "Explicit"});
         turn.resolve({turn: {items: [{type: "agentMessage", text: JSON.stringify({title: "Automatic"})}]}});
@@ -1017,7 +1017,7 @@ describe("_session/rename", () => {
         vi.spyOn(appServer, "runTurn").mockReturnValue(turn.promise as never);
         const threadSetName = vi.spyOn(appServer, "threadSetName").mockResolvedValue({});
         const titleGen = agent.getSessionState(threadId).titleGen!;
-        titleGen.onTurnCompleted("Fix the build");
+        titleGen.onUserMessage("Fix the build");
 
         await agent.closeSession({sessionId: threadId});
         await agent.sessionIndex.rename({sessionId: threadId, title: "Explicit"});
@@ -1040,7 +1040,7 @@ describe("_session/rename", () => {
 
         await expect(agent.sessionIndex.rename({sessionId: threadId, title: "Explicit"})).rejects.toThrow("app-server busy");
         const titleGen = agent.getSessionState(threadId).titleGen!;
-        titleGen.onTurnCompleted("Fix the build");
+        titleGen.onUserMessage("Fix the build");
         await vi.waitFor(() => expect(threadSetName.mock.calls.map(call => call[0].name)).toEqual(["Explicit", "Automatic"]));
     });
 
@@ -1056,7 +1056,7 @@ describe("_session/rename", () => {
             .mockReturnValueOnce(renameWrite.promise)
             .mockResolvedValue({});
         const titleGen = agent.getSessionState(threadId).titleGen!;
-        titleGen.onTurnCompleted("Fix the build");
+        titleGen.onUserMessage("Fix the build");
 
         const rename = agent.sessionIndex.rename({sessionId: threadId, title: "Explicit"});
         turn.resolve(titleTurn);
@@ -1064,7 +1064,7 @@ describe("_session/rename", () => {
         renameWrite.reject(new Error("app-server busy"));
         await expect(rename).rejects.toThrow("app-server busy");
 
-        titleGen.onTurnCompleted("Fix the build");
+        titleGen.onUserMessage("Fix the build");
         await vi.waitFor(() => expect(threadSetName.mock.calls.map(call => call[0].name)).toEqual(["Explicit", "Automatic"]));
     });
 

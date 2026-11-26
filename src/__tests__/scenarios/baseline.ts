@@ -242,8 +242,19 @@ export function withOutputOnce(messages: RecordedMessage[]): RecordedMessage[] {
 
 /** The baseline messages with the allowed differences applied, except the merge of the tool call reports. */
 export function expectedFromBaseline(scenario: string, baseline: RecordedMessage[]): RecordedMessage[] {
+    // The baseline sent the first prompt's title at turn end. The fixture records the prompt before its steps.
+    const ordered = [...baseline];
+    const titleIndex = ordered.findIndex(message => {
+        const update = sessionUpdate(message);
+        return update?.["sessionUpdate"] === "session_info_update" && update["title"] === "Go";
+    });
+    if (titleIndex !== -1) {
+        const title = ordered.splice(titleIndex, 1);
+        const commands = ordered.findIndex(message => sessionUpdate(message)?.["sessionUpdate"] === "available_commands_update");
+        ordered.splice(commands + 1, 0, ...title);
+    }
     // The scenario's account/read reports no account and requiresOpenaiAuth: false.
-    return withFeatureChanges(withBugFixes(scenario, withoutAirOnlyMessages(baseline))).flatMap(message =>
+    return withFeatureChanges(withBugFixes(scenario, withoutAirOnlyMessages(ordered))).flatMap(message =>
         message.method === "_auth/status_update"
             ? [message, {direction: "notify", method: "auth/status_update", params: {state: "not_required"}}]
             : [message]);

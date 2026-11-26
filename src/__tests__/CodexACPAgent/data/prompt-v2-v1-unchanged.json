@@ -35,13 +35,13 @@
     "codexNotification": "item/completed"
   },
   {
-    "codexNotification": "turn/completed"
-  },
-  {
     "sessionUpdate": {
       "title": "Hello",
       "sessionUpdate": "session_info_update"
     }
+  },
+  {
+    "codexNotification": "turn/completed"
   },
   {
     "promptResponse": {

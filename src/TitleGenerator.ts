@@ -60,7 +60,7 @@ export class TitleGenerator {
 
     /**
      * Call when an explicit rename failed. A title that this generator dropped for that rename is generated
-     * again after the next turn, as if the rename had never come.
+     * again on the next recorded prompt.
      */
     retryAfterFailedRename(): void {
         if (!this.droppedForExplicitTitle) return;
@@ -79,15 +79,9 @@ export class TitleGenerator {
         this.renameEchoResolve = null;
     }
 
-    /**
-     * Fire-and-forget hook — call after each turn completes.
-     * Only acts on the first call for new sessions without an existing title.
-     *
-     * @param userPromptText  The text of the user's first message (from params.prompt,
-     *                        not turn.items — turn.items contains only agent output).
-     */
-    onTurnCompleted(userPromptText: string): void {
-        if (this.generated) return;
+    /** Start generating in the background when Codex records the first prompt with text. */
+    onUserMessage(userPromptText: string): void {
+        if (this.generated || !userPromptText.trim()) return;
         const src = this.getSessionTitleSource();
         // "explicit": user renamed or session loaded with a name — skip
         // "unknown": resumed session with indeterminate history — skip
@@ -105,7 +99,7 @@ export class TitleGenerator {
 
     /**
      * Resolves once the fire-and-forget generation started by
-     * {@link onTurnCompleted} has finished, or after `timeoutMs`.
+     * {@link onUserMessage} has finished, or after `timeoutMs`.
      *
      * Generation renames the thread, which Codex echoes back as a
      * `session_info_update`. `session/load` has to finish replaying a session
@@ -129,8 +123,6 @@ export class TitleGenerator {
     }
 
     private async generateAndPersist(userPromptText: string): Promise<void> {
-        if (!userPromptText.trim()) return;
-
         // Ephemeral thread: not persisted to disk, not visible in thread list,
         // but goes through the same auth layer as the main session.
         const { thread: epThread } = await this.client.threadStart({

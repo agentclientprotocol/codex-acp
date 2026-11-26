@@ -78,6 +78,10 @@ export function renderAsyncQuestionReply(text: string): string | null {
     return replies === null ? null : displayReplies(replies);
 }
 
+export function isAsyncQuestionReplyPrompt(prompt: acp.ContentBlock[]): boolean {
+    return prompt.length === 1 && prompt[0]?.type === "text" && parseAsyncQuestionReply(prompt[0].text) !== null;
+}
+
 /** Restores an answer as a completed interaction. Other user input keeps its original representation. */
 export function asyncQuestionReplyHistory(item: ThreadItem & {type: "userMessage"}): ToolFacts | null {
     if (item.content.length !== 1) return null;
