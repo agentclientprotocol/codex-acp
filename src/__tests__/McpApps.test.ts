@@ -7,6 +7,7 @@ import {
     mcpResourcesReadParamsParser,
     mcpToolsCallParamsParser,
     refuseCheckedCall,
+    toAppTools,
     toCallToolResult,
 } from "../McpApps";
 import {AcpToolCallRenderer} from "../tool-calls/AcpToolCallRenderer";
@@ -97,5 +98,16 @@ describe("MCP Apps", () => {
 
     it("keeps a tool call response without its null fields", () => {
         expect(toCallToolResult({content: [], structuredContent: null, isError: true, _meta: null})).toEqual({content: [], isError: true});
+    });
+
+    it("lists a server's tools with their annotations and ui", () => {
+        expect(toAppTools({
+            a: {name: "get", annotations: {readOnlyHint: true}, _meta: {ui: {visibility: ["app"]}}},
+            b: {name: "set", description: "Sets it"},
+            c: undefined,
+        })).toEqual([
+            {name: "get", annotations: {readOnlyHint: true}, ui: {visibility: ["app"]}},
+            {name: "set", description: "Sets it"},
+        ]);
     });
 });

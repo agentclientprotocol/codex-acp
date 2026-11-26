@@ -22,6 +22,7 @@ export const MCP_APPS_KEY = "mcpApps";
 export const MCP_APP_TOOL_CALL_KEY = "mcpApp";
 export const MCP_RESOURCES_READ_METHOD = "_session/mcp/resources/read";
 export const MCP_TOOLS_CALL_METHOD = "_session/mcp/tools/call";
+export const MCP_TOOLS_LIST_METHOD = "_session/mcp/tools/list";
 /** A `toolResult` longer than this, as JSON, is left out of `_meta.mcpApp`. */
 export const MAX_TOOL_RESULT_CHARS = 1_000_000;
 
@@ -29,10 +30,16 @@ export type McpAppsCapability = {
     version: typeof MCP_APPS_VERSION;
     resourcesRead: typeof MCP_RESOURCES_READ_METHOD;
     toolsCall: typeof MCP_TOOLS_CALL_METHOD;
+    toolsList: typeof MCP_TOOLS_LIST_METHOD;
 };
 
 export function mcpAppsCapability(): McpAppsCapability {
-    return {version: MCP_APPS_VERSION, resourcesRead: MCP_RESOURCES_READ_METHOD, toolsCall: MCP_TOOLS_CALL_METHOD};
+    return {
+        version: MCP_APPS_VERSION,
+        resourcesRead: MCP_RESOURCES_READ_METHOD,
+        toolsCall: MCP_TOOLS_CALL_METHOD,
+        toolsList: MCP_TOOLS_LIST_METHOD,
+    };
 }
 
 /** Whether the client declared `clientCapabilities._meta.mcpApps` with a version of at least 1. */
@@ -117,6 +124,43 @@ export const mcpToolsCallParamsParser = z.object({
     checkPermissions: z.boolean().optional(),
 }).passthrough();
 
+export const mcpToolsListParamsParser = z.object({
+    sessionId: z.string().min(1),
+    server: z.string().min(1),
+}).passthrough();
+
+/** A tool of `_session/mcp/tools/list`: what a host needs to decide on an app's call to it. */
+export type McpAppTool = {
+    name: string;
+    title?: string;
+    description?: string;
+    /** The MCP tool annotations the server sent: `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`. */
+    annotations?: Record<string, unknown>;
+    /** The tool's MCP Apps `_meta.ui` (`resourceUri`, `visibility`). */
+    ui?: Record<string, unknown>;
+};
+
+/** The tools of a server for `_session/mcp/tools/list`, from Codex's tool catalog. */
+export function toAppTools(tools: Record<string, {name: string; title?: string; description?: string; annotations?: unknown; _meta?: unknown} | undefined>): McpAppTool[] {
+    return Object.values(tools).flatMap(tool => {
+        if (!tool) return [];
+        const annotations = isObject(tool.annotations) ? tool.annotations : undefined;
+        const ui = isObject(tool._meta) && isObject(tool._meta["ui"]) ? tool._meta["ui"] : undefined;
+        return [{
+            name: tool.name,
+            ...(tool.title ? {title: tool.title} : {}),
+            ...(tool.description ? {description: tool.description} : {}),
+            ...(annotations ? {annotations} : {}),
+            ...(ui ? {ui} : {}),
+        }];
+    });
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+export type McpToolsListRequest = z.infer<typeof mcpToolsListParamsParser>;
 export type McpResourcesReadRequest = z.infer<typeof mcpResourcesReadParamsParser>;
 export type McpToolsCallRequest = z.infer<typeof mcpToolsCallParamsParser>;
 export type McpResourcesReadResponse = {

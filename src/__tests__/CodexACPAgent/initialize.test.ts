@@ -70,6 +70,7 @@ describe('CodexACPAgent - initialize', () => {
                         version: 1,
                         resourcesRead: "_session/mcp/resources/read",
                         toolsCall: "_session/mcp/tools/call",
+                        toolsList: "_session/mcp/tools/list",
                     },
                 },
             },

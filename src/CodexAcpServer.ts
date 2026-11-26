@@ -152,7 +152,10 @@ import {
     MCP_APPS_KEY,
     mcpAppsCapability,
     refuseCheckedCall,
+    toAppTools,
     toCallToolResult,
+    type McpAppTool,
+    type McpToolsListRequest,
     type McpCallToolResult,
     type McpResourcesReadRequest,
     type McpResourcesReadResponse,
@@ -1094,6 +1097,18 @@ export class CodexAcpServer {
             arguments: (params.arguments ?? {}) as JsonValue,
         }));
         return toCallToolResult(response);
+    }
+
+    /** `_session/mcp/tools/list`: the tools of one server of the session's thread, with their annotations. */
+    async listMcpAppTools(params: McpToolsListRequest): Promise<{tools: McpAppTool[]}> {
+        const sessionState = await this.mcpAppsSession(params.sessionId);
+        const response = await this.runWithProcessCheck(() => this.codexAcpClient.appServerClient.listMcpServerStatus({
+            threadId: sessionState.sessionId,
+            serverName: params.server,
+        }));
+        const server = response.data.find(status => status.name === params.server);
+        if (!server) throw RequestError.invalidParams(undefined, `Unknown MCP server: ${params.server}`);
+        return {tools: toAppTools(server.tools)};
     }
 
     private async mcpAppsSession(sessionId: string): Promise<SessionState> {
