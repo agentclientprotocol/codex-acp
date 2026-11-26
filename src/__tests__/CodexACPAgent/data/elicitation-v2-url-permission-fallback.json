@@ -1,0 +1,46 @@
+[
+  {
+    "sessionId": "thread-1",
+    "title": "Open MCP server URL?",
+    "subject": {
+      "toolCall": {
+        "toolCallId": "elicitation-elicit-123",
+        "title": "MCP server requests to open a URL",
+        "kind": "fetch",
+        "status": "pending",
+        "content": [
+          {
+            "content": {
+              "text": "Please authorize access",
+              "type": "text"
+            },
+            "type": "content"
+          }
+        ],
+        "rawInput": {
+          "serverName": "auth-server",
+          "description": "Please authorize access",
+          "url": "https://example.com/authorize"
+        }
+      },
+      "type": "tool_call"
+    },
+    "options": [
+      {
+        "optionId": "accept",
+        "name": "Allow",
+        "kind": "allow_once"
+      },
+      {
+        "optionId": "decline",
+        "name": "Deny",
+        "kind": "reject_once"
+      },
+      {
+        "optionId": "cancel",
+        "name": "Cancel",
+        "kind": "reject_once"
+      }
+    ]
+  }
+]

@@ -523,14 +523,17 @@ The adapter keeps the exact Codex decision of each option and returns that value
 | `description` | request | no | The non-blank reason that Codex supplied. |
 | `description` | option | yes | What the option does. Only MCP elicitation options carry it. |
 
-The request titles are `Run command?`, `Allow network access?`, `Make edits?`, and `Grant permissions?`.
-The adapter does not copy action payloads into the metadata.
+The request titles are `Run command?`, `Allow network access?`, `Make edits?`, `Grant permissions?`,
+`Run MCP tool?`, `Respond to MCP server?`, and `Open MCP server URL?`.
+An approval that reuses a started MCP tool call carries the server message in the request-level `description`.
+Standalone MCP requests carry the server message in the tool call fields described below.
+Action payloads stay in the tool call.
 
 ### Tool call of the request
 
 The `toolCall` is an ACP `ToolCallUpdate`. The client merges it into the stored tool call.
 
-- The request always carries `toolCallId`, `title`, and `rawInput`.
+- Except for approvals of started MCP tool calls, the request carries `toolCallId`, `title`, and `rawInput`.
 - `rawInput` holds the structured command, working directory, URL, or permission profile.
 - `locations` holds the affected paths when Codex supplies them.
 - `content` holds details that do not fit a location, such as a network host, a filesystem glob, or a special Codex scope.

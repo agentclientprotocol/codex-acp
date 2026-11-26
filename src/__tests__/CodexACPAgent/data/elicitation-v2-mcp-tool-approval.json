@@ -1,0 +1,30 @@
+[
+  {
+    "sessionId": "thread-1",
+    "title": "Run MCP tool?",
+    "description": "Allow the docs server to run write?",
+    "subject": {
+      "toolCall": {
+        "toolCallId": "mcp-write-1",
+        "kind": "execute",
+        "status": "pending"
+      },
+      "type": "tool_call"
+    },
+    "options": [
+      {
+        "optionId": "allow_once",
+        "name": "Allow",
+        "kind": "allow_once"
+      },
+      {
+        "optionId": "cancel",
+        "name": "Cancel",
+        "kind": "reject_once"
+      }
+    ],
+    "_meta": {
+      "is_mcp_tool_approval": true
+    }
+  }
+]
