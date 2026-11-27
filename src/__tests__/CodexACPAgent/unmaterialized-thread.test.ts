@@ -160,14 +160,14 @@ describe("sessions Codex has not materialized on disk", () => {
     it("does not swallow an unrelated thread/resume failure", async () => {
         const {fixture, appServer} = createFixture();
         appServer.threadResume = vi.fn().mockRejectedValue(new Error("codex app-server transport closed"));
-        appServer.threadRead = vi.fn();
+        appServer.threadRead = vi.fn().mockRejectedValue(NO_ROLLOUT(threadId));
 
         await expect(fixture.getCodexAcpAgent().resumeSession({
             sessionId: threadId,
             cwd: "/test/cwd",
             mcpServers: [],
         })).rejects.toThrow("transport closed");
-        expect(appServer.threadRead).not.toHaveBeenCalled();
+        expect(vi.mocked(appServer.threadRead).mock.calls).toEqual([[{threadId, includeTurns: false}]]);
     });
 
     it("deletes a session that has no persisted rollout", async () => {

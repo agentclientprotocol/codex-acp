@@ -725,7 +725,6 @@ export class CodexAcpClient {
             excludeTurns: true,
             config,
             cwd: request.cwd,
-            modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
             ...(instructions?.text !== undefined ? {developerInstructions: instructions.developerInstructions} : {}),
         }, request, previousInstructions);
@@ -764,7 +763,7 @@ export class CodexAcpClient {
             refreshSkills: (cwd, directories) => this.refreshSkills(cwd, directories),
             createSessionConfig: (cwd, directories, mcpServers) =>
                 this.createSessionConfig(cwd, directories, mcpServers),
-            getResumeModelProvider: () => this.getResumeModelProvider(),
+            getResumeModelProvider: async () => (await this.getCurrentModelProvider()) ?? "openai",
             fetchAvailableModels: () => this.fetchAvailableModels(),
             createCurrentModelId: (models, model, reasoningEffort) =>
                 this.createModelId(models, model, reasoningEffort).toString(),
@@ -793,7 +792,6 @@ export class CodexAcpClient {
             excludeTurns: true,
             config,
             cwd: request.cwd,
-            modelProvider: await this.getResumeModelProvider(),
             threadId: request.sessionId,
             ...(instructions?.text !== undefined ? {developerInstructions: instructions.developerInstructions} : {}),
         }, request, previousInstructions);
@@ -1053,9 +1051,11 @@ export class CodexAcpClient {
         request: {sessionId: string; systemPrompt?: unknown; _meta?: unknown},
         previous?: SessionInstructions,
     ): Promise<ResumedThread> {
-        if (!changesSystemPrompt(request, previous)) return this.resumeThread(params);
-        const {thread} = await this.codexClient.threadRead({threadId: request.sessionId});
-        if (thread.status.type === "notLoaded") return this.resumeThread(params);
+        const thread = changesSystemPrompt(request, previous)
+            ? (await this.codexClient.threadRead({threadId: request.sessionId})).thread
+            : undefined;
+        params = {...params, ...await this.resumeProviderOverride(request.sessionId, thread)};
+        if (!thread || thread.status.type === "notLoaded") return this.resumeThread(params);
         if (thread.status.type !== "idle" || thread.path === null) {
             throw acp.RequestError.invalidParams(
                 undefined,
@@ -1391,10 +1391,19 @@ export class CodexAcpClient {
         return providerStartupConfig(this.modelProvider, this.config, this.gatewayConfig);
     }
 
-    private async getResumeModelProvider(): Promise<string> {
-        // Prefer an explicit/gateway provider, then the provider persisted in Codex config.
-        // Keep OpenAI as the final fallback for ChatGPT-authenticated sessions without a configured provider.
-        return (await this.getCurrentModelProvider()) ?? "openai";
+    private async resumeProviderOverride(threadId: string, knownThread?: Thread): Promise<Pick<ThreadResumeParams, "modelProvider">> {
+        const configured = await this.getCurrentModelProvider();
+        if (configured !== null) return {modelProvider: configured};
+
+        // Supplying even the same provider makes Codex reselect the model and effort.
+        // Keep the implicit OpenAI route when a thread came from a different provider.
+        try {
+            const thread = knownThread ?? (await this.codexClient.threadRead({threadId, includeTurns: false})).thread;
+            if (thread.id === threadId && thread.modelProvider === "openai") return {};
+        } catch {
+            // A thread without readable metadata may still be resumable.
+        }
+        return {modelProvider: "openai"};
     }
 
     private async refreshSkills(
