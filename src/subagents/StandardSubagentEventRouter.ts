@@ -718,6 +718,11 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
             || this.receivedTurnEnds.get(child.threadId)?.has(turn) ? null : turn;
     }
 
+    isCurrentTurn(threadId: string, turnId: string): boolean {
+        const child = this.children.get(threadId);
+        return child !== undefined && this.currentTurn(child) === turnId;
+    }
+
     private async publishCancellation(child: Child, replayFlush = false): Promise<void> {
         if (this.deferLive || this.snapshotting && !replayFlush) return;
         const attachment = this.attachment;
