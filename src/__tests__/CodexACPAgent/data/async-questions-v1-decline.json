@@ -1,0 +1,18 @@
+{
+  "steers": [
+    {
+      "threadId": "thread-1",
+      "expectedTurnId": "turn-1",
+      "input": [
+        {
+          "type": "text",
+          "text": "<send_user_message_question_reply>\n[{\"answer\":\"The user declined to answer this question.\",\"question\":\"Which environment?\",\"questionItemId\":\"[\\\"request_user_input_async\\\",\\\"call-question\\\",0]\"},{\"answer\":\"The user declined to answer this question.\",\"question\":\"Anything else?\",\"questionItemId\":\"[\\\"request_user_input_async\\\",\\\"call-question\\\",1]\"}]\n</send_user_message_question_reply>",
+          "text_elements": []
+        }
+      ],
+      "clientUserMessageId": "<id>"
+    }
+  ],
+  "interrupts": [],
+  "notices": []
+}

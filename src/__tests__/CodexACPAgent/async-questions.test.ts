@@ -103,13 +103,29 @@ describe.each([1, 2] as const)('async Codex questions over ACP v%i', (protocolVe
         })).toMatchFileSnapshot(`data/async-questions-v${protocolVersion}-answered.json`);
     });
 
-    it('sends nothing to Codex when the user declines', async () => {
-        const {client, steers} = await connect(async () => ({action: "decline"}));
+    it.each([{action: "decline"}, {action: "cancel"}] as const)('sends the $action result to Codex before the turn completes', async response => {
+        const {action} = response;
+        const {client, steers} = await connect(async () => response);
+        await askDuringTurn(client);
+        await vi.waitFor(() => expect(steers).toHaveLength(1));
+        await finishTurn(client);
+
+        await expect(dump({steers, interrupts: client.turnInterruptCalls(), notices: notices(client)}))
+            .toMatchFileSnapshot(`data/async-questions-v${protocolVersion}-${action}.json`);
+    });
+
+    it.each([{action: "decline"}, {action: "cancel"}] as const)('does not start a turn for a late $action result', async response => {
+        let answer!: (response: acpV2.CreateElicitationResponse) => void;
+        const {client, steers} = await connect(() => new Promise(resolve => { answer = resolve; }));
         await askDuringTurn(client);
         await vi.waitFor(() => expect(elicitationRequests(client)).toHaveLength(1));
         await finishTurn(client);
+        answer(response);
+        await settle();
 
+        expect(client.turnStartParams).toHaveLength(1);
         expect(steers).toEqual([]);
+        expect(client.turnInterruptCalls()).toEqual([]);
         expect(notices(client)).toEqual([]);
     });
 
@@ -149,12 +165,16 @@ describe.each([1, 2] as const)('async Codex questions over ACP v%i', (protocolVe
             .toMatchFileSnapshot(`data/async-questions-v${protocolVersion}-continued.json`);
     });
 
-    it('cancels an open form when its session closes and drops a stale answer', async () => {
+    it.each([
+        {action: "accept", content: {question_1: "Too late"}},
+        {action: "decline"},
+        {action: "cancel"},
+    ] satisfies acpV2.CreateElicitationResponse[])('drops a stale $action result when its session closes', async response => {
         let cancelled = false;
         const {client, steers} = await connect((_, signal) => new Promise(resolve => {
             signal.addEventListener("abort", () => {
                 cancelled = true;
-                resolve({action: "accept", content: {question_1: "Too late"}});
+                resolve(response);
             });
         }));
         await askDuringTurn(client);
@@ -165,6 +185,7 @@ describe.each([1, 2] as const)('async Codex questions over ACP v%i', (protocolVe
         await settle();
         expect(steers).toEqual([]);
         expect(client.turnStartParams).toHaveLength(1);
+        expect(notices(client)).toEqual([]);
     });
 
     it('reports a rejected continuation and releases the next prompt', async () => {
