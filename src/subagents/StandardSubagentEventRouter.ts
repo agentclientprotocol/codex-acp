@@ -410,9 +410,8 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
     }
 
     /** The role Codex assigned describes the child. The task it was given is a message, not a description. */
-    async observeRole(threadId: string, role: string | null): Promise<void> {
-        const description = role?.trim();
-        if (!description || this.retired) return;
+    async observeRole(threadId: string, description: string | null): Promise<void> {
+        if (!description?.trim() || this.retired) return;
         const child = this.children.get(threadId);
         if (!child) { this.pendingFor(threadId).description = description; return; }
         if (child.description === description) return;
@@ -602,15 +601,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         try {
             for (const child of this.children.values()) if (child.live) void this.refreshConfiguration(child);
             while (this.snapshots.size > 0 || this.pendingConfigurations.size > 0) {
-                for (const {child} of [...this.snapshots.values()]) {
-                    await child.foreground.serializePublication(async () => {
-                        const snapshot = this.snapshots.get(child.threadId);
-                        this.snapshots.delete(child.threadId);
-                        if (!snapshot || this.retired) return;
-                        await this.ensureAnnounced(child);
-                        await this.session.updateSubagentState(child.sessionId, child.parentSessionId, snapshot.state);
-                    });
-                }
+                await this.publishStateSnapshots();
                 for (const id of [...this.pendingConfigurations]) {
                     const child = this.children.get(id);
                     if (child && !this.retired) await this.publishConfiguration(child);
@@ -619,6 +610,18 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
             }
             for (const child of this.children.values()) await this.publishCancellation(child, true);
         } finally { this.snapshotting = false; }
+    }
+
+    private async publishStateSnapshots(): Promise<void> {
+        for (const {child} of [...this.snapshots.values()]) {
+            await child.foreground.serializePublication(async () => {
+                const snapshot = this.snapshots.get(child.threadId);
+                this.snapshots.delete(child.threadId);
+                if (!snapshot || this.retired) return;
+                await this.ensureAnnounced(child);
+                await this.session.updateSubagentState(child.sessionId, child.parentSessionId, snapshot.state);
+            });
+        }
     }
 
     pauseForSetup(): void {
@@ -631,7 +634,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         this.configurationRequests.clear();
         for (const child of this.children.values()) {
             child.cancelAdvertised = false;
-            void child.foreground.snapshot().catch(error => logger.error("Failed to snapshot child work", error));
+            if (child.live) void child.foreground.snapshot().catch(error => logger.error("Failed to snapshot child work", error));
         }
     }
 
@@ -735,7 +738,7 @@ export class StandardSubagentEventRouter implements SubagentEventRouter {
         }
     }
 
-    /** Cancel only the addressed live conversation and its owned descendant work. */
+    /** Cancel the addressed foreground work. ACP v1 also cancels descendant work. */
     async cancelChild(sessionId: string, interrupt: (threadId: string, turnId: string) => Promise<void>): Promise<void> {
         const child = [...this.children.values()].find(child => child.sessionId === sessionId);
         if (!child || !this.cancellationReady || this.deferLive || !child.cancelAdvertised || this.currentTurn(child) === null) return;

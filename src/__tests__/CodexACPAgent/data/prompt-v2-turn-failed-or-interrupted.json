@@ -65,12 +65,6 @@
       },
       {
         "sessionUpdate": {
-          "title": "Hello",
-          "sessionUpdate": "session_info_update"
-        }
-      },
-      {
-        "sessionUpdate": {
           "error": {
             "code": -32603,
             "message": "Codex turn failed."
@@ -143,6 +137,20 @@
             "type": "text"
           },
           "sessionUpdate": "user_message_chunk"
+        }
+      },
+      {
+        "sessionUpdate": {
+          "cursorId": "before:turn-2",
+          "capabilities": {
+            "fork": {}
+          },
+          "anchor": {
+            "messageId": "<messageId>",
+            "position": "before",
+            "type": "user_message"
+          },
+          "sessionUpdate": "cursor_update"
         }
       },
       {

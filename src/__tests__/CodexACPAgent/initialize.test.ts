@@ -40,6 +40,7 @@ describe('CodexACPAgent - initialize', () => {
             agentCapabilities: {
                 auth: {
                     logout: {},
+                    status: {},
                 },
                 providers: {},
                 loadSession: true,
@@ -48,6 +49,7 @@ describe('CodexACPAgent - initialize', () => {
                     image: true
                 },
                 sessionCapabilities: {
+                    options: {},
                     resume: {},
                     list: {},
                     close: {},
@@ -73,6 +75,14 @@ describe('CodexACPAgent - initialize', () => {
                 },
             },
         });
+    });
+
+    it.each([1, 2] as const)("omits the options capability for JetBrains 2026.1 on v%s", async version => {
+        const info = {name: "JetBrains.WebStorm", version: "2026.1.1"};
+        const session = version === 1
+            ? (await agent.initialize({protocolVersion: 1, clientInfo: info})).agentCapabilities?.sessionCapabilities
+            : (await agent.initializeV2({protocolVersion: 2, info})).capabilities?.session;
+        expect(session).not.toHaveProperty("options");
     });
 
     it('should advertise the AIR extension only to AIR', async () => {

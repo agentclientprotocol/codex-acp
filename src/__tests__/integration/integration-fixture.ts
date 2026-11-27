@@ -93,7 +93,7 @@ export function toolCallUpdates(agent: SpawnedAgentFixture, sessionId: string): 
 
 /** Input items of the n-th model request (0-based). */
 export function modelRequestInput(mock: MockResponsesServer, n: number): any[] {
-    return (mock.requests[n] as {input: any[]}).input;
+    return (mock.promptRequests[n] as {input: any[]}).input;
 }
 
 /** Fails if Codex made a model request the test did not script a reply for. */

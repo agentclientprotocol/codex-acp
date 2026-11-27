@@ -5,14 +5,16 @@ type MockErrorResponse = {status: number; body: unknown};
 type ResponseHandler = (request: unknown) => string | undefined | Promise<string | undefined>;
 
 /**
- * Local stand-in for the OpenAI Responses API. By default, each `POST /v1/responses` gets the next queued reply;
- * a tool-call turn needs two: the call, then the answer after Codex sends the tool output.
+ * Local stand-in for the OpenAI Responses API. Conversation requests consume queued replies.
+ * Concurrent title requests get a separate response.
  */
 export interface MockResponsesServer {
     /** Gateway base URL to give Codex. */
     readonly baseUrl: string;
     /** Bodies of every request Codex sent, in order; shows what Codex passed back to the model. */
     readonly requests: unknown[];
+    /** Requests for the conversation, excluding background session title generation. */
+    readonly promptRequests: unknown[];
     /** Requests with no scripted reply (answered 400/404): Codex did something the test didn't script. */
     readonly unexpectedRequests: number;
     /** Queues replies built with `textResponse`, `execCommandResponse` or `applyPatchResponse`. */
@@ -33,10 +35,17 @@ function parseBody(body: string): unknown {
     }
 }
 
+function isTitleRequest(request: unknown): boolean {
+    const body = request as {text?: {format?: {schema?: {properties?: {title?: unknown}}}}} | null;
+    return body?.text?.format?.schema?.properties?.title !== undefined;
+}
+
 export async function startMockResponsesServer(): Promise<MockResponsesServer> {
     const queue: string[] = [];
     let errorResponse: MockErrorResponse | null = null;
-    let responseHandler: ResponseHandler | undefined;
+    let responseHandler: ResponseHandler = request => isTitleRequest(request)
+        ? textResponse('{"title":"Integration test"}')
+        : queue.shift();
     const requests: unknown[] = [];
     let unexpectedRequests = 0;
     let requestCount = 0;
@@ -51,7 +60,7 @@ export async function startMockResponsesServer(): Promise<MockResponsesServer> {
             const isResponsesCall = req.method === "POST" && (req.url ?? "").split("?")[0]!.endsWith("/responses");
             let next: string | MockErrorResponse | undefined;
             try {
-                next = isResponsesCall ? errorResponse ?? (responseHandler ? await responseHandler(parsed) : queue.shift()) : undefined;
+                next = isResponsesCall ? errorResponse ?? await responseHandler(parsed) : undefined;
             } catch (error) {
                 console.error("Mock Responses API handler failed", error);
                 if (res.destroyed) return;
@@ -84,6 +93,7 @@ export async function startMockResponsesServer(): Promise<MockResponsesServer> {
     return {
         baseUrl: `http://127.0.0.1:${port}/v1`,
         requests,
+        get promptRequests() { return requests.filter(request => !isTitleRequest(request)); },
         get unexpectedRequests() {
             return unexpectedRequests;
         },

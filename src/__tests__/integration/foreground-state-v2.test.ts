@@ -77,7 +77,7 @@ describeIntegration("integration: ACP v2 foreground state", () => {
             updates.splice(0);
 
             const {sessionId} = await connection.agent.request(acpV2.methods.agent.session.new, {cwd});
-            mock.enqueue(textResponse("v2-", "foreground-ok"), textResponse("V2 foreground test"));
+            mock.enqueue(textResponse("v2-", "foreground-ok"));
             const {messageId} = await connection.agent.request(acpV2.methods.agent.session.prompt, {
                 sessionId,
                 prompt: [{type: "text", text: "Reply with v2-foreground-ok"}],

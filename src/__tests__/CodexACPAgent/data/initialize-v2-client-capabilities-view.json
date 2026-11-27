@@ -2,7 +2,8 @@
   "plan": {},
   "session": {
     "compaction": {},
-    "notices": {}
+    "notices": {},
+    "cursors": {}
   },
   "elicitation": {
     "form": {},

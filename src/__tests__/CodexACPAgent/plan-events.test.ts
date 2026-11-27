@@ -199,7 +199,8 @@ describe("CodexEventHandler - plan events", () => {
         await handler.handleNotification({
             method: "turn/plan/updated", params: {threadId: sessionId, turnId: "turn-1", explanation: null, plan: []},
         });
-        expect(notify).toHaveBeenCalledExactlyOnceWith("session/update", {sessionId, update});
+        const expected = [update, ...(capabilities?.plan ? [{sessionUpdate: "plan_removed", planId: "codex-structured-plan"}] : [])];
+        expect(notify.mock.calls).toEqual(expected.map(update => ["session/update", {sessionId, update}]));
     });
 
     describe("plan update coalescing", () => {

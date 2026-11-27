@@ -7,7 +7,8 @@
   },
   "agentCapabilities": {
     "auth": {
-      "logout": {}
+      "logout": {},
+      "status": {}
     },
     "providers": {},
     "loadSession": true,
@@ -21,6 +22,7 @@
       "close": {},
       "delete": {},
       "fork": {},
+      "options": {},
       "title": {},
       "additionalDirectories": {},
       "systemPrompt": {}

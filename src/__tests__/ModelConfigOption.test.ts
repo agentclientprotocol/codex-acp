@@ -41,6 +41,56 @@ describe("createModelConfigOption", () => {
             ],
         });
     });
+
+    describe("with per-model reasoning efforts", () => {
+        const efforts = (...levels: string[]) => levels.map(reasoningEffort => ({reasoningEffort, description: reasoningEffort}));
+        const models = [
+            createTestModel({
+                id: "ordered",
+                supportedReasoningEfforts: efforts("xhigh", "low", "custom", "high"),
+                defaultReasoningEffort: "high",
+            }),
+            createTestModel({id: "unlisted-default", supportedReasoningEfforts: efforts("low"), defaultReasoningEffort: "medium"}),
+            createTestModel({id: "no-efforts", supportedReasoningEfforts: []}),
+        ];
+
+        it("lists the efforts of each model in the Codex order with the default as the recommendation", () => {
+            const option = createModelConfigOption(models, "uncataloged", undefined, true);
+            expect(option.type === "select" && option.options).toEqual([
+                {value: "uncataloged", name: "uncataloged", description: null},
+                {
+                    value: "ordered", name: "ordered", description: "ordered model",
+                    _meta: {jetbrains: {air: {version: 1, reasoningEfforts: {
+                        values: ["xhigh", "low", "custom", "high"],
+                        recommended: "high",
+                    }}}},
+                },
+                {
+                    value: "unlisted-default", name: "unlisted-default", description: "unlisted-default model",
+                    _meta: {jetbrains: {air: {version: 1, reasoningEfforts: {values: ["low"]}}}},
+                },
+                {value: "no-efforts", name: "no-efforts", description: "no-efforts model"},
+            ]);
+        });
+
+        it.each(["ordered", "unlisted-default"])("recommends the effort that the effort option of %s recommends", id => {
+            const model = models.find(candidate => candidate.id === id)!;
+            const modelOption = createModelConfigOption(models, id, undefined, true);
+            const effortOption = createReasoningEffortConfigOption(
+                model.supportedReasoningEfforts, model.defaultReasoningEffort, model.defaultReasoningEffort,
+            );
+            const entry = modelOption.type === "select"
+                ? modelOption.options.find(option => "value" in option && option.value === id)
+                : undefined;
+            const air = (meta: unknown) => (meta as {jetbrains: {air: Record<string, any>}} | undefined)?.jetbrains.air;
+            expect(air(entry?._meta)?.["reasoningEfforts"].recommended).toBe(air(effortOption._meta)?.["recommendedValue"]);
+        });
+
+        it("adds no entry metadata by default", () => {
+            const option = createModelConfigOption(models, "ordered");
+            expect(option.type === "select" && option.options.some(entry => "_meta" in entry)).toBe(false);
+        });
+    });
 });
 
 describe("createReasoningEffortConfigOption", () => {

@@ -7,12 +7,14 @@ import {CodexAcpClient} from '../../CodexAcpClient';
 import {CodexAppServerClient} from '../../CodexAppServerClient';
 import {AIR_NATIVE_SUBAGENT_SESSIONS_KEY, AIR_ASYNC_TASKS_KEY} from '../../AirExtension';
 import type {Thread} from '../../app-server/v2';
+import type {ServerNotification} from '../../app-server';
 import {createTestModel} from '../acp-test-utils';
 import {createMockConnections} from './test-utils';
 import {checkV2SessionUpdate, expectConformingV2SessionUpdates} from './v2-session-update-guard';
 
 const rootId = "root-1";
 const childId = "child-1";
+const childSessionId = `${rootId}:subagent:${childId}`;
 const cwd = "/workspace";
 
 function createThread(id: string, overrides?: Partial<Thread>): Thread {
@@ -116,12 +118,12 @@ const childTurns: Thread["turns"] = [
 type HistoryTurns = {root: Thread["turns"]; child: Thread["turns"]};
 
 /** Canned Codex app-server responses for a two-thread (root + subagent) fixture, keyed by method and threadId. */
-function codexResponse(method: string, params: unknown, turns: HistoryTurns): unknown {
+function codexResponse(method: string, params: unknown, turns: HistoryTurns, liveChild: boolean): unknown {
     const threadId = (params as {threadId?: string} | undefined)?.threadId;
     switch (method) {
         case "thread/resume":
             return {
-                thread: createThread(threadId ?? rootId),
+                thread: createThread(threadId ?? rootId, {parentThreadId: liveChild && threadId === childId ? rootId : null}),
                 model: "gpt-5",
                 modelProvider: "openai",
                 reasoningEffort: "medium",
@@ -129,7 +131,7 @@ function codexResponse(method: string, params: unknown, turns: HistoryTurns): un
                 turnsBackwardsCursor: null,
             };
         case "thread/read":
-            if (threadId === childId) return {thread: createThread(childId, {turns: turns.child})};
+            if (threadId === childId) return {thread: createThread(childId, {turns: turns.child, parentThreadId: liveChild ? rootId : null})};
             return {thread: createThread(rootId, {turns: turns.root})};
         case "thread/backgroundTerminals/list":
             if (threadId === childId) {
@@ -155,10 +157,11 @@ function codexResponse(method: string, params: unknown, turns: HistoryTurns): un
 async function connectV2Client(
     capabilities: acpV2.ClientCapabilities,
     turns: HistoryTurns = {root: rootTurns, child: childTurns},
+    liveChild = false,
 ) {
     const mocks = createMockConnections();
     mocks.mockCodexConnection.sendRequest.mockImplementation(async (method: string, params: unknown) => (
-        codexResponse(method, params, turns)
+        codexResponse(method, params, turns, liveChild)
     ));
     const codexAcpClient = new CodexAcpClient(new CodexAppServerClient(mocks.mockCodexConnection as any));
     vi.spyOn(codexAcpClient, "readAuthRequirement").mockResolvedValue({required: false, account: null});
@@ -182,7 +185,11 @@ async function connectV2Client(
         info: {name: "test-client", version: "1.0.0"},
         capabilities,
     });
-    return {connection, updates};
+    return {connection, updates, emit(notification: ServerNotification) {
+        const handler = mocks.notificationHandlers.get(notification.method);
+        if (handler) handler(notification.params);
+        else mocks.getUnhandledNotificationHandler()!(notification);
+    }};
 }
 
 describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions client)', () => {
@@ -209,14 +216,15 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
             replayFrom: {type: "start"},
         });
 
-        const subagentUpdates = updates.map(({update}) => update).filter((update) => update.sessionUpdate === "_subagent_update");
-        expect(subagentUpdates).toEqual([
-            {sessionUpdate: "_subagent_update", subagentSessionId: childId, name: "Researcher", task: "Delegated task for Researcher", capabilities: {}},
-            {sessionUpdate: "_subagent_update", subagentSessionId: childId, state: "completed"},
-        ]);
-
-        // Async tasks aren't gated on in this capability set, so nothing async-task-shaped renders.
-        expect(updates.some(({update}) => update.sessionUpdate.startsWith("_async_task_"))).toBe(false);
+        const declaration = updates.find(({update}) => update.sessionUpdate === "subagent_update"
+            && update.sessionId === childSessionId);
+        expect(declaration).toMatchObject({sessionId: rootId, update: {
+            sessionUpdate: "subagent_update", sessionId: childSessionId, title: "Researcher", capabilities: {},
+        }});
+        expect(updates).toContainEqual({sessionId: rootId,
+            update: {sessionUpdate: "subagent_update", sessionId: childSessionId, state: {state: "idle", stopReason: "end_turn"}}});
+        expect(updates.some(({update}) => update.sessionUpdate.startsWith("_subagent")
+            || update.sessionUpdate.startsWith("_async_task"))).toBe(false);
     });
 
     it('also emits the child subagent history (agent reply) alongside the lifecycle updates', async () => {
@@ -239,11 +247,7 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
         expect(agentMessages).toContain("Investigating the flaky test.");
     });
 
-    it.each([
-        {activityModel: "gpt-5", expected: [{sessionId: childId, value: "gpt-5", name: "5"}]},
-        // The spawn request names a model, but a role config can override it, so replay sends no model.
-        {activityModel: null, expected: []},
-    ])('replays the model of a child only when its activity names it ($activityModel)', async ({activityModel, expected}) => {
+    it('does not replay historical child configuration on the AIR contract either', async () => {
         const root: Thread["turns"] = [{
             ...rootTurns[0]!,
             items: [
@@ -259,7 +263,7 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
                     reasoningEffort: null,
                     agentsStates: {},
                 },
-                {...rootTurns[0]!.items[0]!, model: activityModel} as Thread["turns"][number]["items"][number],
+                {...rootTurns[0]!.items[0]!, model: "gpt-5"} as Thread["turns"][number]["items"][number],
                 ...rootTurns[0]!.items.slice(1),
             ],
         }];
@@ -274,17 +278,10 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
             replayFrom: {type: "start"},
         });
 
-        const childModels = updates
-            .filter(({sessionId, update}) => sessionId === childId && update.sessionUpdate === "config_option_update")
-            .map(({sessionId, update}) => {
-                const option = (update as {configOptions: Array<{currentValue: string; options: Array<{name: string}>}>})
-                    .configOptions[0]!;
-                return {sessionId, value: option.currentValue, name: option.options[0]!.name};
-            });
-        expect(childModels).toEqual(expected);
+        expect(updates.some(({sessionId, update}) => sessionId === childId && update.sessionUpdate === "config_option_update")).toBe(false);
     });
 
-    it('replays a follow-up turn of a finished child as a new generation', async () => {
+    it('preserves one child identity across replayed follow-up turns', async () => {
         const turn = (id: string, items: Thread["turns"][number]["items"]): Thread["turns"][number] => ({
             id,
             rootTurnId: null,
@@ -336,26 +333,23 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
             replayFrom: {type: "start"},
         });
 
-        const followupSessionId = `${childId}:generation:2`;
-        expect(updates.map(({update}) => update).filter((update) => update.sessionUpdate === "_subagent_update")).toEqual([
-            {sessionUpdate: "_subagent_update", subagentSessionId: childId, name: "Researcher", task: "Delegated task for Researcher", capabilities: {}},
-            {sessionUpdate: "_subagent_update", subagentSessionId: childId, state: "completed"},
-            {sessionUpdate: "_subagent_update", subagentSessionId: followupSessionId, name: "Researcher", task: "Delegated task for Researcher", capabilities: {}},
-            {sessionUpdate: "_subagent_update", subagentSessionId: followupSessionId, state: "completed"},
-        ]);
-        const followupReplies = updates
-            .filter(({sessionId, update}) => sessionId === followupSessionId && update.sessionUpdate === "agent_message_chunk")
-            .map(({update}) => (update as {content: {type: string; text?: string}}).content.text);
-        expect(followupReplies).toEqual(["Follow-up answer."]);
+        const declarations = updates.filter(({update}) => update.sessionUpdate === "subagent_update"
+            && update.capabilities != null && Object.keys(update.capabilities).length === 0);
+        expect(declarations).toHaveLength(1);
+        expect(declarations[0]).toMatchObject({sessionId: rootId, update: {sessionId: childSessionId}});
+        const replies = updates
+            .filter(({sessionId, update}) => sessionId === childSessionId && update.sessionUpdate === "agent_message_chunk")
+            .map(({update}) => (update as {content: {text: string}}).content.text);
+        expect(replies).toEqual(["First answer.", "Follow-up answer."]);
     });
 
-    it('also emits the child subagent async task when the client also supports asyncTasks (report: not silently lost)', async () => {
-        const {connection, updates} = await connectV2Client({
+    it('publishes the child background terminal and late output through the standard route for an Air client', async () => {
+        const {connection, updates, emit} = await connectV2Client({
             _meta: {jetbrains: {air: {
                 version: 1,
                 capabilities: [AIR_NATIVE_SUBAGENT_SESSIONS_KEY, AIR_ASYNC_TASKS_KEY],
             }}},
-        });
+        }, {root: rootTurns, child: childTurns}, true);
         closeClient = () => connection.close();
 
         await connection.agent.request(acpV2.methods.agent.session.resume, {
@@ -364,17 +358,31 @@ describe('ACP v2 resume replay: native subagent history (nativeSubagentSessions 
             replayFrom: {type: "start"},
         });
 
-        const asyncTaskUpdates = updates.map(({update}) => update).filter((update) => update.sessionUpdate === "_async_task_spawned");
-        expect(asyncTaskUpdates).toEqual([
-            {
-                sessionUpdate: "_async_task_spawned",
-                asyncTaskId: "child-1:child-command-1",
-                name: "npm test",
-                taskType: "shell",
-                showInTranscript: false,
-                canStop: true,
-                toolCallId: "child-command-1",
-            },
-        ]);
+        const declaration = updates.findIndex(({sessionId, update}) => sessionId === childSessionId
+            && update.sessionUpdate === "terminal_update" && update.terminalId === "child-command-1"
+            && (update as acpV2.TerminalUpdate).capabilities?.cancel != null);
+        const listed = updates.findIndex(({sessionId, update}) => sessionId === childSessionId
+            && update.sessionUpdate === "state_update" && JSON.stringify((update["background"] as Array<{terminalId: string}> | undefined)?.map(item => item.terminalId))
+                === '["child-command-1"]');
+        expect(declaration).toBeGreaterThanOrEqual(0);
+        expect(listed).toBeGreaterThan(declaration);
+        expect(updates.some(({update}) => update.sessionUpdate.startsWith("_async_task"))).toBe(false);
+        const start = updates.length;
+        emit({method: "item/completed", params: {threadId: childId, turnId: "child-turn-1", completedAtMs: 1,
+            item: {...childTurns[0]!.items[0]!, type: "commandExecution", status: "completed", exitCode: 0,
+                aggregatedOutput: "Child detached output"} as Extract<Thread["turns"][number]["items"][number], {type: "commandExecution"}>,
+        }});
+        await vi.waitFor(() => {
+            const completion = updates.slice(start).filter(entry => entry.sessionId === childSessionId);
+            const output = completion.findIndex(({update}) => {
+                if (update.sessionUpdate !== "terminal_update") return false;
+                const terminal = update as acpV2.TerminalUpdate;
+                return terminal.output?.data === Buffer.from("Child detached output").toString("base64") && terminal.exitStatus?.exitCode === 0;
+            });
+            const removed = completion.findIndex(({update}) => update.sessionUpdate === "state_update"
+                && JSON.stringify(update.background) === "[]");
+            expect(output).toBeGreaterThanOrEqual(0);
+            expect(removed).toBeGreaterThan(output);
+        });
     });
 });

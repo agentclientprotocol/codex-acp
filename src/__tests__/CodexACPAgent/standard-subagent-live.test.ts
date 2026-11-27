@@ -52,7 +52,7 @@ function history(h: PromptSession, items: ThreadItem[] = [], parent: string | nu
 it("selects standard and AIR contracts independently", () => {
     const air = {_meta: withAirMeta(undefined, "capabilities", [AIR_NATIVE_SUBAGENT_SESSIONS_KEY])};
     expect([subagentProtocol(null, 1), subagentProtocol({subagents: {}}, 1), subagentProtocol(null, 2),
-        subagentProtocol(air, 1), subagentProtocol(air, 2)]).toEqual(["hidden", "standard", "standard", "air", "air"]);
+        subagentProtocol(air, 1), subagentProtocol(air, 2)]).toEqual(["hidden", "standard", "standard", "air", "standard"]);
 });
 
 describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
@@ -69,6 +69,12 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
     });
     const childUpdates = () => h.scopedUpdates.filter(entry =>
         entry.sessionId.includes(":subagent:") || entry.update.sessionUpdate === "subagent_update");
+    async function waitForChildDirectory() {
+        await vi.waitFor(() => expect(childUpdates()).toContainEqual({
+            sessionId, update: {sessionUpdate: "subagent_update", sessionId: childId, cwd},
+        }));
+        await flush(h);
+    }
     async function snapshot(name: string) {
         await flush(h);
         await expect(JSON.stringify(childUpdates(), null, 2) + "\n").toMatchFileSnapshot(`data/live-core-v${version}-${name}.json`);
@@ -100,7 +106,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
 
     it("reports delegated tasks as linked session messages and references the child from visible collaboration calls", async () => {
         await connect();
-        h.emit({method: "thread/started", params: {thread: {...createThread(), id: worker, parentThreadId: sessionId, agentRole: "explorer"}}});
+        h.emit({method: "thread/started", params: {thread: {...createThread(), id: worker, parentThreadId: sessionId, agentRole: "    explorer\n\nChecks **edge cases**."}}});
         h.emit(itemStarted(collab("spawnAgent", "spawn", "Find the bug", "inProgress")));
         h.emit(itemCompleted(collab("spawnAgent", "spawn", "Find the bug")));
         h.emit(onWorker(turnStarted("child-turn")));
@@ -181,7 +187,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         expect(h.turnInterruptCalls()).toEqual([]);
     });
 
-    it("keeps permissions and accepted URL completions alive across parent replay", async () => {
+    it("keeps child permissions alive across parent replay without inventing URL completions", async () => {
         await connect({
             v1ClientCapabilities: {subagents: {}, elicitation: {url: {}}},
             clientCapabilities: {elicitation: {url: {}}},
@@ -201,7 +207,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         expect(await approval("after")).toEqual({decision: "accept"});
         h.emit({method: "serverRequest/resolved", params: {threadId: worker, requestId: "authorization-request"}});
         await flush(h);
-        expect(h.transcript).toContainEqual({elicitationComplete: {elicitationId: "authorization"}});
+        expect(h.transcript).not.toContainEqual({elicitationComplete: {elicitationId: "authorization"}});
         expect(h.transcript.filter(entry => "permissionRequest" in entry).map(entry =>
             "permissionRequest" in entry ? entry.permissionRequest.sessionId : null)).toEqual([childId, childId]);
     });
@@ -275,6 +281,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         await load();
         await flush(h);
         expect(resumes).toEqual(parent === sessionId ? [sessionId, worker] : [sessionId]);
+        if (parent === sessionId) await waitForChildDirectory();
         h.emit(onWorker(turnStarted("child-turn")));
         await flush(h);
         if (parent === sessionId) expect(await approval("restored")).toEqual({decision: "accept"});
@@ -290,7 +297,10 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         await flush(h);
         history(h);
         await load();
+        await waitForChildDirectory();
+        await flush(h);
         h.emit({method: "item/commandExecution/outputDelta", params: {threadId: worker, turnId: "child-turn", itemId: "terminal", delta: "Still streaming"}});
+        await flush(h);
         h.emit({method: "item/completed", params: {threadId: worker, turnId: "child-turn", completedAtMs: 0,
             item: {...commandExecutionItem("terminal", "completed"), exitCode: 0, aggregatedOutput: "Still streaming"}}});
         await snapshot("terminal");
@@ -344,7 +354,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         await flush(h);
     });
 
-    it("cascades parent cancellation without inventing a child ending", async () => {
+    it("applies parent cancellation to the protocol scope without inventing a child ending", async () => {
         await connect();
         h.emit(turnStarted());
         h.emit(itemStarted(activityItem()));
@@ -352,8 +362,9 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         await flush(h);
         const before = childUpdates().length;
         await h.cancel();
-        await vi.waitFor(() => expect(h.turnInterruptCalls()).toContainEqual({threadId: worker, turnId: "child-turn"}));
         await flush(h);
+        const childInterrupt = {threadId: worker, turnId: "child-turn"};
+        await vi.waitFor(() => expect(h.turnInterruptCalls()).toContainEqual(childInterrupt));
         expect(childUpdates().slice(before)).toEqual([]);
         h.emit(onWorker(turnCompleted("child-turn")));
         await snapshot("cancel");
@@ -457,7 +468,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         } finally { release(); }
     });
 
-    it.skipIf(version !== 2)("publishes snapshots after the setup response without waiting for unrelated requests", async () => {
+    it.skipIf(version !== 2)("publishes replay before the setup response and live controls after it without waiting for unrelated requests", async () => {
         await connect();
         h.emit(turnStarted());
         h.emit(itemStarted(activityItem()));
@@ -484,8 +495,13 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
         const response = frames.findIndex(frame => "result" in frame);
         const state = frames.findIndex(frame => "method" in frame && frame.method === "session/update"
             && (frame.params as {sessionId: string; update: {sessionUpdate: string}}).sessionId === childId
-            && (frame.params as {update: {sessionUpdate: string}}).update.sessionUpdate === "state_update");
+            && (frame.params as {update: {sessionUpdate: string}}).update.sessionUpdate === "replay_complete");
         expect(response).toBeGreaterThanOrEqual(0);
-        expect(state).toBeGreaterThan(response);
+        expect(state).toBeGreaterThanOrEqual(0);
+        expect(response).toBeGreaterThan(state);
+        const control = frames.findIndex((frame, index) => index > response && "method" in frame
+            && frame.method === "session/update"
+            && (frame.params as {update: {capabilities?: {cancel?: unknown}}}).update.capabilities?.cancel != null);
+        expect(control).toBeGreaterThan(response);
     });
 });

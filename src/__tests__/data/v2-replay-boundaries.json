@@ -52,13 +52,6 @@
     }
   },
   {
-    "sessionId": "child",
-    "update": {
-      "sessionUpdate": "state_update",
-      "state": "unknown"
-    }
-  },
-  {
     "sessionId": "root",
     "update": {
       "sessionUpdate": "subagent_update",
@@ -66,6 +59,13 @@
       "state": {
         "state": "unknown"
       }
+    }
+  },
+  {
+    "sessionId": "child",
+    "update": {
+      "sessionUpdate": "state_update",
+      "state": "unknown"
     }
   },
   {

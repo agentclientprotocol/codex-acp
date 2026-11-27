@@ -148,7 +148,7 @@ async function runInWorkspace(
     const initializeResponse = await agent.initialize({protocolVersion: 1, clientCapabilities: typeof profile === "string" ? PROFILES[profile] : profile});
     recorded.push({direction: "response", method: "initialize", params: initializeResponse});
     // The adapter pushes the first auth status after the initialize response, from a later event loop phase.
-    await recordWhenSent(fixture, recorded, "_auth/status_update");
+    await recordWhenSent(fixture, recorded, "auth/status_update");
 
     const mcpServers: acp.McpServer[] = [
         ...(scenario.mcpStartup?.failed ?? []).map(failure => failure.server),
@@ -198,6 +198,13 @@ async function runInWorkspace(
     await vi.waitFor(() => {
         if (turnCount === 0) throw new Error("The turn did not start");
     });
+    fixture.sendServerNotification({
+        method: "item/completed",
+        params: {threadId: SESSION_ID, turnId: TURN_ID, completedAtMs: 0, item: {
+            type: "userMessage", id: "user-1", clientId: null, content: [{type: "text", text: "Go", text_elements: []}],
+        }},
+    });
+    await client.waitForSessionNotifications(SESSION_ID);
 
     for (const step of scenario.steps ?? []) {
         if ("waitMs" in step) {

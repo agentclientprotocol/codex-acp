@@ -2,7 +2,7 @@
   {
     "severity": "warning",
     "title": "Answer not sent",
-    "description": "Codex finished before your answer arrived. Send it as a new message if it still matters.",
+    "description": "The answer could not be sent. Send it as a new message to continue.",
     "sessionUpdate": "notice"
   }
 ]

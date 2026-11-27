@@ -1,35 +1,5 @@
 [
   {
-    "codexRequest": "turn/start",
-    "params": {
-      "threadId": "thread-1",
-      "input": [
-        {
-          "type": "text",
-          "text": "Hello",
-          "text_elements": []
-        }
-      ],
-      "approvalPolicy": "on-request",
-      "approvalsReviewer": "auto_review",
-      "sandboxPolicy": {
-        "type": "workspaceWrite",
-        "writableRoots": [],
-        "networkAccess": false,
-        "excludeTmpdirEnvVar": false,
-        "excludeSlashTmp": false
-      },
-      "summary": "auto",
-      "effort": "medium",
-      "model": "gpt-5",
-      "serviceTier": null,
-      "clientUserMessageId": "<messageId>"
-    }
-  },
-  {
-    "codexResponse": "turn/start"
-  },
-  {
     "sessionUpdate": {
       "background": [],
       "state": "running",
@@ -37,16 +7,10 @@
     }
   },
   {
-    "codexNotification": "turn/started"
-  },
-  {
-    "codexNotification": "item/completed"
-  },
-  {
     "sessionUpdate": {
       "messageId": "<messageId>",
       "content": {
-        "text": "Hello",
+        "text": "Implement the approved plan.",
         "type": "text"
       },
       "sessionUpdate": "user_message_chunk"
@@ -56,12 +20,6 @@
     "promptResponse": {
       "messageId": "<messageId>"
     }
-  },
-  {
-    "codexNotification": "item/completed"
-  },
-  {
-    "codexNotification": "turn/completed"
   },
   {
     "sessionUpdate": {
@@ -157,61 +115,6 @@
         }
       ],
       "sessionUpdate": "config_option_update"
-    }
-  },
-  {
-    "codexRequest": "turn/start",
-    "params": {
-      "threadId": "thread-1",
-      "input": [
-        {
-          "type": "text",
-          "text": "Implement the approved plan.",
-          "text_elements": []
-        }
-      ],
-      "approvalPolicy": "on-request",
-      "approvalsReviewer": "auto_review",
-      "sandboxPolicy": {
-        "type": "workspaceWrite",
-        "writableRoots": [],
-        "networkAccess": false,
-        "excludeTmpdirEnvVar": false,
-        "excludeSlashTmp": false
-      },
-      "summary": "auto",
-      "effort": "medium",
-      "model": "gpt-5",
-      "serviceTier": null,
-      "clientUserMessageId": "<implementationId>"
-    }
-  },
-  {
-    "codexResponse": "turn/start"
-  },
-  {
-    "codexNotification": "turn/started"
-  },
-  {
-    "codexNotification": "item/completed"
-  },
-  {
-    "sessionUpdate": {
-      "messageId": "<implementationId>",
-      "content": {
-        "text": "Implement the approved plan.",
-        "type": "text"
-      },
-      "sessionUpdate": "user_message_chunk"
-    }
-  },
-  {
-    "codexNotification": "turn/completed"
-  },
-  {
-    "sessionUpdate": {
-      "title": "Hello",
-      "sessionUpdate": "session_info_update"
     }
   },
   {

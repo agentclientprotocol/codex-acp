@@ -1,0 +1,14 @@
+[
+  {
+    "cursorId": "before:turn-2",
+    "capabilities": {
+      "fork": {}
+    },
+    "anchor": {
+      "messageId": "<messageId 1>",
+      "position": "before",
+      "type": "user_message"
+    },
+    "sessionUpdate": "cursor_update"
+  }
+]

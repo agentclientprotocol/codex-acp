@@ -13,6 +13,7 @@ import {clientSupportsFormElicitation, clientSupportsUrlElicitation} from '../..
 import {ClientCapabilities} from '../../tool-calls/ClientCapabilities';
 import {clientSupportsCompaction} from '../../CodexSessionCompactions';
 import {clientSupportsNotices} from '../../SessionNotice';
+import {clientSupportsCursors} from '../../SessionCursors';
 import {createMockConnections} from './test-utils';
 
 const v2ClientCapabilities: acpV2.ClientCapabilities = {
@@ -84,7 +85,9 @@ describe('CodexACPAgent - initialize over ACP v2', () => {
     it('routes a v2 initialize to the v2 chain and returns the v2 capability shape', async () => {
         const {clientStream} = connectRouter();
         const authStatusUpdates: unknown[] = [];
+        const standardUpdates: acpV2.AuthStatusUpdateNotification[] = [];
         const connection = acpV2.client({name: "test-client"})
+            .onNotification(acpV2.methods.client.auth.statusUpdate, ({params}) => { standardUpdates.push(params); })
             .onNotification("_auth/status_update", z.object({}).passthrough(), (ctx) => {
                 authStatusUpdates.push(ctx.params);
             })
@@ -100,8 +103,9 @@ describe('CodexACPAgent - initialize over ACP v2', () => {
         await expect(dump(withStableVersion(response, "info"))).toMatchFileSnapshot(
             'data/initialize-v2-response.json'
         );
-        // Extension notifications still reach a v2 client before any v2 send path exists.
-        await vi.waitFor(() => expect(authStatusUpdates).toHaveLength(1));
+        await vi.waitFor(() => expect(standardUpdates).toEqual([{state: "unauthenticated"}]));
+        expect(authStatusUpdates).toHaveLength(1);
+        await expect(connection.agent.request(acpV2.methods.agent.auth.status, {})).resolves.toEqual(standardUpdates[0]);
     });
 
     it('advertises only the auth methods the v2 client capabilities allow', async () => {
@@ -159,7 +163,10 @@ describe('CodexACPAgent - initialize over ACP v2', () => {
 
     it('still routes a v1 initialize to the v1 chain', async () => {
         const {clientStream} = connectRouter();
-        const connection = acp.client({name: "test-client"}).connect(clientStream);
+        const standardUpdates: acp.AuthStatusUpdateNotification[] = [];
+        const connection = acp.client({name: "test-client"})
+            .onNotification(acp.methods.client.auth.statusUpdate, ({params}) => { standardUpdates.push(params); })
+            .connect(clientStream);
         closeClient = () => connection.close();
 
         const response = await connection.agent.request(acp.methods.agent.initialize, {
@@ -170,6 +177,8 @@ describe('CodexACPAgent - initialize over ACP v2', () => {
         await expect(dump(withStableVersion(response, "agentInfo"))).toMatchFileSnapshot(
             'data/initialize-v1-routed-response.json'
         );
+        await vi.waitFor(() => expect(standardUpdates).toEqual([{state: "unauthenticated"}]));
+        await expect(connection.agent.request(acp.methods.agent.auth.status, {})).resolves.toEqual(standardUpdates[0]);
     });
 });
 
@@ -190,6 +199,7 @@ describe('ACP v2 client capability normalization', () => {
         expect(ClientCapabilities.from(view).planUpdates).toBe(true);
         expect(clientSupportsCompaction(view)).toBe(true);
         expect(clientSupportsNotices(view)).toBe(true);
+        expect(clientSupportsCursors(view)).toBe(true);
         expect(clientSupportsFormElicitation(view)).toBe(false);
         expect(clientSupportsUrlElicitation(view)).toBe(false);
         expect(clientSupportsAirCapability(view, AIR_NATIVE_SUBAGENT_SESSIONS_KEY)).toBe(false);

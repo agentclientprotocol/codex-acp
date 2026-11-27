@@ -55,7 +55,7 @@ describe("Post-close session delivery", () => {
         });
         const announce = () => h.emit(itemStarted({type: "subAgentActivity", id: "activity", model: null, reasoningEffort: null,
             agentThreadId: "child", agentPath: "/root/child", kind: "started"}));
-        const childId = air ? "child" : `${sessionId}:subagent:child`;
+        const childId = version === 1 && air ? "child" : `${sessionId}:subagent:child`;
         // @ts-expect-error - exercise stale producers through the real shared and native-v2 send paths
         const outbound = h.agent.connection as acp.AgentContext;
         const v2 = AcpV2Connection.of(outbound);
@@ -80,8 +80,8 @@ describe("Post-close session delivery", () => {
                     await v2.client.notify("session/update", {sessionId: id,
                         update: {sessionUpdate: "session_info_update", _meta: {late: true}}});
                     await v2.replaySessionUpdate(id, {sessionUpdate: "agent_message_chunk", messageId: "late-replay",
-                        content: {type: "text", text: "Late replay"}}, new Set());
-                    await v2.client.notify("session/update", {sessionId: id, update: {sessionUpdate: "state_update", state: "idle"}});
+                        content: {type: "text", text: "Late replay"}}, new Map());
+                    await v2.client.notify("session/update", {sessionId: id, update: {sessionUpdate: "state_update", state: "idle", background: []}});
                     await expect(v2.createElicitation({sessionId: id, mode: "url",
                         message: "Late", url: "https://example.com/late", elicitationId: `late-${id}`})).rejects.toMatchObject({code: -32800});
                 }

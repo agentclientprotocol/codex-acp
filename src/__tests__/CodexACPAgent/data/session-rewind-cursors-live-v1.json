@@ -1,0 +1,41 @@
+[
+  {
+    "sessionUpdate": "cursor_update",
+    "cursorId": "before:turn-2",
+    "capabilities": {
+      "fork": {},
+      "rewind": {}
+    },
+    "anchor": {
+      "type": "agent_message",
+      "messageId": "agent-1",
+      "position": "after"
+    }
+  },
+  {
+    "sessionUpdate": "cursor_update",
+    "cursorId": "before:turn-3",
+    "capabilities": {
+      "fork": {},
+      "rewind": {}
+    },
+    "anchor": {
+      "type": "agent_message",
+      "messageId": "agent-2",
+      "position": "after"
+    }
+  },
+  {
+    "sessionUpdate": "cursor_update",
+    "cursorId": "before:turn-3b",
+    "capabilities": {
+      "fork": {},
+      "rewind": {}
+    },
+    "anchor": {
+      "type": "agent_message",
+      "messageId": "agent-2",
+      "position": "after"
+    }
+  }
+]

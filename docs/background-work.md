@@ -52,4 +52,5 @@ terminal:
   stop operation for arbitrary model tool calls.
 
 ACP v1 does not have these updates or this method. The [AIR async task
-extension](air-extensions.md#async-tasks) remains available independently.
+extension](air-extensions.md#async-tasks) remains available on ACP v1.
+On ACP v2, its Stop method remains an alias for standard terminal cancellation.

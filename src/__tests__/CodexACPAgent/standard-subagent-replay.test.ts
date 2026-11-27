@@ -292,6 +292,9 @@ describe.each([1, 2] as const)("ACP v%s recorded child replay", version => {
             entry.update.sessionUpdate === "subagent_update" && entry.update.sessionId === childId
             && entry.update.state && typeof entry.update.state === "object"
             && (entry.update.state as {state: string}).state === "running")).toBe(true));
+        await flush(h);
+        if (version === 2) await vi.waitFor(() => expect(h.scopedUpdates.slice(before)).toContainEqual({sessionId: childId,
+            update: {sessionUpdate: "terminal_output_chunk", terminalId: "command", data: Buffer.from("After").toString("base64")}}));
         h.emit({method: "item/completed", params: {threadId: worker, turnId: "child-turn", completedAtMs: 0,
             item: {...command("completed"), aggregatedOutput: "BeforeAfter"}}});
         await flush(h);

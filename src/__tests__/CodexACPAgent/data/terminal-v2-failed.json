@@ -24,9 +24,9 @@
   },
   {
     "terminalId": "item-shell",
-    "data": "bnBtIEVSUiEgVGVzdCBmYWlsZWQuCg==",
+    "data": "bnBtIEVSUiEgVGVzdCBmYWlsZWQuDQo=",
     "sessionUpdate": "terminal_output_chunk",
-    "decoded": "npm ERR! Test failed.\n"
+    "decoded": "npm ERR! Test failed.\r\n"
   },
   {
     "terminalId": "item-shell",

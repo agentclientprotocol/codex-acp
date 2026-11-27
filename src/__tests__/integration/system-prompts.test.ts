@@ -66,8 +66,7 @@ describeIntegration("integration: client system prompts", () => {
         async function run(sessionId: string, text: string) {
             const before = mock.requests.length;
             const updateStart = updates.length;
-            // Title generation may make a second request after the first prompt of a session.
-            mock.enqueue(textResponse("Done"), textResponse("System prompt test"));
+            mock.enqueue(textResponse("Done"));
             const response = await request("session/prompt", {sessionId, prompt: [{type: "text", text}]});
             if (version === 2) {
                 // Resume also sends an idle snapshot, which may arrive after its response.

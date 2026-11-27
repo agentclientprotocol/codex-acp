@@ -76,6 +76,22 @@ describe("app-server recovery", () => {
         expect(observe.mock.calls[0]![0].appServerClient).not.toBe(undefined);
     });
 
+    it("previews a stored session after a crash without resuming it", async () => {
+        const fixture = createRecoveryFixture();
+        const sessionId = await openSession(fixture);
+        await fixture.kill();
+        fixture.answers.set("thread/read", () => ({thread: {...resumed(sessionId).thread, model: "gpt-test"}}));
+        const before = fixture.updates().length;
+
+        const preview = await fixture.agent.sessionOptions({cwd: "/work", sessionId});
+
+        expect(preview.configOptions).toContainEqual(expect.objectContaining({id: "model", currentValue: "gpt-test"}));
+        expect(requestsOf(fixture.current(), "thread/read")).toEqual([{threadId: sessionId}]);
+        expect(requestsOf(fixture.current(), "thread/start")).toEqual([]);
+        expect(requestsOf(fixture.current(), "thread/resume")).toEqual([]);
+        expect(fixture.updates()).toHaveLength(before);
+    });
+
     it("keeps a session list subscription across a crash and reads each change of the new app-server once", async () => {
         const fixture = createRecoveryFixture();
         await initialize(fixture, true, {_meta: {jetbrains: {air: {version: 1, capabilities: ["sessionFailure", "sessionIndex"]}}}});
@@ -1047,7 +1063,7 @@ describe("app-server recovery", () => {
         await expect(prompt).resolves.toMatchObject({stopReason: "cancelled"});
     });
 
-    it("completes an accepted URL elicitation that the dead app-server can no longer resolve", async () => {
+    it("does not report an external URL interaction as complete just because Codex exited", async () => {
         const fixture = createRecoveryFixture();
         await initialize(fixture, false, {elicitation: {url: {}}});
         const {sessionId} = await fixture.agent.newSession({cwd: "/work", mcpServers: []});
@@ -1064,7 +1080,7 @@ describe("app-server recovery", () => {
         await fixture.kill();
 
         await expect(prompt).rejects.toMatchObject({code: 1001});
-        expect(fixture.acp.notify).toHaveBeenCalledWith(acp.methods.client.elicitation.complete, {elicitationId: "elicit-123"});
+        expect(fixture.acp.notify).not.toHaveBeenCalledWith(acp.methods.client.elicitation.complete, {elicitationId: "elicit-123"});
     });
 
     it("reports a crash during the history read of session/load as the exit of the app-server", async () => {
@@ -1080,6 +1096,29 @@ describe("app-server recovery", () => {
             code: 1001,
             message: expect.stringContaining("SIGKILL"),
         });
+    });
+
+    it.each(["new", "load"] as const)("cleans up session/%s when the app-server dies applying initial config", async method => {
+        const fixture = createRecoveryFixture();
+        await initialize(fixture);
+        const client = (fixture.agent as unknown as {codexAcpClient: CodexAcpClient}).codexAcpClient;
+        const discard = vi.spyOn(client, "discardSessionSubscription");
+        const sessionId = method === "new" ? "thread-new" : "stored";
+        const params = {cwd: "/work", mcpServers: [], configOptions: [{configId: "collaboration_mode", value: "plan"}]};
+        fixture.answers.set("thread/settings/update", () => undefined);
+        const setup = method === "new" ? fixture.agent.newSession(params) : fixture.agent.loadSession({...params, sessionId});
+        const failed = expect(setup).rejects.toMatchObject({code: 1001, message: expect.stringContaining("SIGKILL")});
+        await vi.waitFor(() => expect(fixture.current().rpc.hasPending("thread/settings/update")).toBe(true));
+
+        // The history tracker queues this event until setup settles.
+        fixture.current().rpc.notify({method: "thread/status/changed", params: {threadId: sessionId, status: {type: "idle"}}});
+        await fixture.kill();
+        await failed;
+        await client.waitForSessionNotifications(sessionId);
+
+        expect(discard).toHaveBeenCalledWith(sessionId);
+        expect(() => fixture.agent.getSessionState(sessionId)).toThrow(`Session ${sessionId} not found`);
+        expect(fixture.servers).toHaveLength(1);
     });
 
     it("fails the background tasks of every session at the crash, before any of them publishes", async () => {

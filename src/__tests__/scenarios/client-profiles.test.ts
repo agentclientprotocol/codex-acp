@@ -149,9 +149,10 @@ describe("session start messages", () => {
         it(`${profile}: records the auth status after initialize and the available commands of every scenario`, () => {
             for (const each of SCENARIOS) {
                 const messages = recording(profile, each.name);
-                expect(messages.slice(0, 2).map(message => `${message.direction} ${message.method}`), each.name)
-                    .toEqual(["response initialize", "notify _auth/status_update"]);
+                expect(messages.slice(0, 3).map(message => `${message.direction} ${message.method}`), each.name)
+                    .toEqual(["response initialize", "notify _auth/status_update", "notify auth/status_update"]);
                 expect(messages[1]!.params, each.name).toEqual({authStatus: {kind: "none", label: "Not logged in"}});
+                expect(messages[2]!.params, each.name).toEqual({state: "not_required"});
                 expect(updates(profile, each.name).filter(update => update["sessionUpdate"] === "available_commands_update"),
                     each.name).toHaveLength(1);
             }

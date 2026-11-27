@@ -126,7 +126,7 @@ export function createLineWriter(writable: Writable): (line: string | Uint8Array
  * these characters, so it split a message and lost it. The splitter decodes UTF-8 across chunks and searches only
  * the new text for a line break, so a long line costs linear time.
  */
-class LineSplitter {
+export class LineSplitter {
     private readonly decoder = new StringDecoder("utf8");
     /** The parts of the line whose end has not arrived yet. */
     private parts: string[] = [];

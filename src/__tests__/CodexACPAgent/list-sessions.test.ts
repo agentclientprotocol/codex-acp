@@ -90,6 +90,7 @@ describe("CodexACPAgent - list sessions", () => {
         const response = await codexAcpAgent.listSessions(params);
 
         expect(codexAppServerClient.threadList).toHaveBeenCalledWith(expect.objectContaining({
+            sortKey: "recency_at",
             sourceKinds: [
                 "cli",
                 "vscode",

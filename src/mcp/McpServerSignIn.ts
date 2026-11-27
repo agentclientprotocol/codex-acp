@@ -57,15 +57,18 @@ async function signInWithUrlElicitation(
     });
     void stopped.catch(() => {});
     const elicitationId = `mcp-oauth-${randomUUID()}`;
-    /** True while the client shows the dialog that the sign-in must close. */
-    let dialogOpen = false;
     try {
-        const completed = codexAcpClient.awaitMcpServerOauthLoginCompleted(serverName, sessionId, stop.signal);
+        const starting = Promise.resolve().then(() => {
+            stop.signal.throwIfAborted();
+            return codexAcpClient.mcpServerOauthLogin({name: serverName, threadId: sessionId});
+        });
+        const attempt = starting.then(({loginId}) => {
+            if (!loginId) throw new Error("Codex did not identify the MCP sign-in attempt");
+            return loginId;
+        });
+        const completed = codexAcpClient.awaitMcpServerOauthLoginCompleted(serverName, sessionId, attempt, stop.signal);
         void completed.catch(() => {});
-        const login = await Promise.race([
-            codexAcpClient.mcpServerOauthLogin({name: serverName, threadId: sessionId}),
-            stopped,
-        ]);
+        const [login] = await Promise.race([Promise.all([starting, attempt]), stopped]);
         const elicitation = Promise.resolve(connection.request(
             acp.methods.client.elicitation.create,
             {
@@ -75,25 +78,23 @@ async function signInWithUrlElicitation(
                 url: login.authorizationUrl,
                 elicitationId,
             },
+            {cancellationSignal: stop.signal, stopWaitingOnCancel: true},
         ));
         void elicitation.catch(() => {});
-        dialogOpen = true;
         const first = await Promise.race([
             completed.then(result => ({type: "completed" as const, result})),
             elicitation.then(response => ({type: "elicitation" as const, response})),
             stopped,
         ]);
         if (first.type === "elicitation" && !acp.CreateElicitationResponse.isAccept(first.response)) {
-            dialogOpen = false;
             return false;
         }
         const result = first.type === "completed" ? first.result : await Promise.race([completed, stopped]);
+        stop.signal.throwIfAborted();
+        await connection.notify(acp.methods.client.elicitation.complete, {elicitationId});
         return result.success;
     } finally {
         stop.abort();
         signal?.removeEventListener("abort", onAbort);
-        if (dialogOpen) {
-            await connection.notify(acp.methods.client.elicitation.complete, {elicitationId});
-        }
     }
 }

@@ -62,11 +62,5 @@
       "state": "idle",
       "sessionUpdate": "state_update"
     }
-  },
-  {
-    "sessionUpdate": {
-      "title": "start fresh",
-      "sessionUpdate": "session_info_update"
-    }
   }
 ]

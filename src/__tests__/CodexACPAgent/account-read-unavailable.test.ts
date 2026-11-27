@@ -352,7 +352,7 @@ describe("CodexACPAgent - an unavailable account read", () => {
             const agent = fixture.getCodexAcpAgent();
 
             await loadAfterGrace(fixture);
-            agent.handleAccountUpdated({authMode: "apikey", planType: null});
+            agent.handleAccountUpdated({authMode: "apikey", planType: null, reason: null});
             await drainScheduledWork();
             read.resolve(SIGNED_IN);
             await drainScheduledWork();
@@ -424,7 +424,7 @@ describe("CodexACPAgent - an unavailable account read", () => {
         await initialize(fixture);
         const agent = fixture.getCodexAcpAgent();
 
-        agent.handleAccountUpdated({authMode: null, planType: null});
+        agent.handleAccountUpdated({authMode: null, planType: null, reason: null});
         await drainScheduledWork();
         await agent.newSession({cwd: "/test/project", mcpServers: []});
 

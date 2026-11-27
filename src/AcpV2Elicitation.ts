@@ -1,5 +1,6 @@
 import * as acp from "@agentclientprotocol/sdk/unstable";
-import type * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
+import * as acpV2 from "@agentclientprotocol/sdk/experimental/v2/unstable";
+import {AIR_CUSTOM_ANSWER_FIELDS_KEY, isAirCustomAnswer, withAirMeta} from "./AirExtension";
 import {isRecord} from "./permissions/json";
 
 /**
@@ -8,13 +9,24 @@ import {isRecord} from "./permissions/json";
  */
 export function toV2CreateElicitationRequest(request: acp.CreateElicitationRequest): acpV2.CreateElicitationRequest {
     const v2 = request as unknown as acpV2.CreateElicitationRequest;
-    if (request.mode !== "form" || !isRecord(request.requestedSchema) || !isRecord(request.requestedSchema["properties"])) return v2;
+    if (request.mode === "url" && acpV2.CreateElicitationRequest.isUrl(v2)) return v2;
+    if (request.mode !== "form" || !isRecord(request.requestedSchema) || !isRecord(request.requestedSchema["properties"])) {
+        throw acp.RequestError.invalidParams(undefined, "Invalid elicitation request");
+    }
+    const fields = Object.entries(request.requestedSchema["properties"])
+        .filter(([, property]) => isRecord(property) && isAirCustomAnswer(property["_meta"]))
+        .map(([id]) => id);
     const properties = Object.fromEntries(Object.entries(request.requestedSchema["properties"]).map(([key, property]) => {
         if (!isRecord(property) || property["type"] !== "string" || !("pattern" in property)) return [key, property];
         const {pattern: _pattern, ...rest} = property;
         return [key, rest];
     }));
-    return {...request, requestedSchema: {...request.requestedSchema, properties}} as unknown as acpV2.CreateElicitationRequest;
+    const converted = {...request, requestedSchema: {...request.requestedSchema, properties}};
+    const form = (fields.length === 0 ? converted : {
+        ...converted, _meta: withAirMeta(request._meta, AIR_CUSTOM_ANSWER_FIELDS_KEY, fields),
+    }) as unknown as acpV2.CreateElicitationRequest;
+    if (!acpV2.CreateElicitationRequest.isForm(form)) throw acp.RequestError.invalidParams(undefined, "Invalid elicitation form");
+    return form;
 }
 
 /** V2 responses keep arbitrary JSON values through the v1-typed view. */
