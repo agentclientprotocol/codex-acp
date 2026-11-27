@@ -601,6 +601,79 @@ describe("CodexEventHandler - collab agent tool call events", () => {
         expect(permissionRequest).toBeUndefined();
     });
 
+    it("announces a v1 spawn completed without an agent activity path", async () => {
+        await initializeNativeSubagents();
+        const spawn = (
+            method: "item/started" | "item/completed",
+            receiverThreadIds: string[],
+        ): ServerNotification => ({
+            method,
+            params: {
+                threadId: sessionId,
+                turnId: "turn-1",
+                ...(method === "item/started" ? {startedAtMs: 0} : {completedAtMs: 0}),
+                item: {
+                    type: "collabAgentToolCall",
+                    id: "call-spawn-v1",
+                    tool: "spawnAgent",
+                    status: method === "item/started" ? "inProgress" : "completed",
+                    senderThreadId: sessionId,
+                    receiverThreadIds,
+                    prompt: "Review the project.",
+                    model: null,
+                    reasoningEffort: null,
+                    agentsStates: receiverThreadIds.length === 0 ? {} : {
+                        "thread-v1": {status: "pendingInit", message: null},
+                    },
+                },
+            },
+        } as ServerNotification);
+        const notifications: ServerNotification[] = [
+            spawn("item/started", []),
+            spawn("item/completed", ["thread-v1"]),
+            {
+                method: "item/agentMessage/delta",
+                params: {
+                    threadId: "thread-v1",
+                    turnId: "turn-child",
+                    itemId: "child-message",
+                    delta: "Review complete",
+                },
+            },
+        ];
+
+        await setupPromptAndSendNotifications(mockFixture, sessionId, sessionState, notifications);
+
+        const updates = mockFixture.getAcpConnectionEvents([])
+            .filter(event => event.method === "sessionUpdate")
+            .map(event => event.args[0]);
+        expect(updates).toContainEqual({
+            sessionId,
+            update: {
+                sessionUpdate: "subagent_spawned",
+                subagentSessionId: "thread-v1",
+                name: "Agent hread-v1",
+                task: "Review the project.",
+                capabilities: {},
+            },
+        });
+        expect(updates).toContainEqual({
+            sessionId: "thread-v1",
+            update: {
+                sessionUpdate: "agent_message_chunk",
+                content: {type: "text", text: "Review complete"},
+                messageId: "child-message",
+            },
+        });
+        expect(updates).not.toContainEqual({
+            sessionId,
+            update: expect.objectContaining({
+                sessionUpdate: "tool_call",
+                toolCallId: "call-spawn-v1",
+            }),
+        });
+    });
+
     it("routes nested agents through their immediate parent sessions", async () => {
         await initializeNativeSubagents();
         const collabItem = (
