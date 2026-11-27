@@ -6,6 +6,7 @@ import {
     clientSupportsAirCapability,
     isAirClient,
 } from "../AirExtension";
+import {clientSupportsMcpApps} from "../McpApps";
 
 /** The `_meta` key of a command output chunk. */
 type TerminalOutputKey = "terminal_output" | "terminal_output_delta";
@@ -35,6 +36,7 @@ type ClientCapabilityValues = {
     readonly air: AirCapabilities;
     readonly diffPatchFormat: DiffPatchFormat;
     readonly permissionPromptFields: boolean;
+    readonly mcpApps: boolean;
 };
 
 /**
@@ -54,6 +56,7 @@ export class ClientCapabilities {
         air: {rawInputRendering: false, planContentDelta: false, diffPatch: false},
         diffPatchFormat: "none",
         permissionPromptFields: false,
+        mcpApps: false,
     });
 
     /** The client declares `_meta.jetbrains.air`. */
@@ -70,6 +73,8 @@ export class ClientCapabilities {
     readonly diffPatchFormat: DiffPatchFormat;
     /** A permission request has its own `title` and `description` (ACP v2). */
     readonly permissionPromptFields: boolean;
+    /** The client declares `_meta.mcpApps` and gets `_meta.mcpApp` on app tool calls, see `docs/mcp-apps.md`. */
+    readonly mcpApps: boolean;
 
     private constructor(values: ClientCapabilityValues) {
         this.airClient = values.airClient;
@@ -80,6 +85,7 @@ export class ClientCapabilities {
         this.air = values.air;
         this.diffPatchFormat = values.diffPatchFormat;
         this.permissionPromptFields = values.permissionPromptFields;
+        this.mcpApps = values.mcpApps;
     }
 
     static from(capabilities: acp.ClientCapabilities | null | undefined): ClientCapabilities {
@@ -98,6 +104,7 @@ export class ClientCapabilities {
             },
             diffPatchFormat: diffPatch ? "air" : "none",
             permissionPromptFields: false,
+            mcpApps: clientSupportsMcpApps(capabilities),
         });
     }
 
@@ -119,6 +126,7 @@ export class ClientCapabilities {
             air: {rawInputRendering: false, planContentDelta: false, diffPatch: false},
             diffPatchFormat: "acpV2",
             permissionPromptFields: true,
+            mcpApps: clientSupportsMcpApps(capabilities),
         });
     }
 

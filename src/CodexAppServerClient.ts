@@ -27,6 +27,10 @@ import type {
     HooksListResponse,
     ListMcpServerStatusParams,
     ListMcpServerStatusResponse,
+    McpResourceReadParams,
+    McpResourceReadResponse,
+    McpServerToolCallParams,
+    McpServerToolCallResponse,
     LoginAccountParams,
     LoginAccountResponse,
     LogoutAccountResponse,
@@ -884,6 +888,16 @@ export class CodexAppServerClient {
 
     async listMcpServerStatus(params: ListMcpServerStatusParams): Promise<ListMcpServerStatusResponse> {
         return await this.sendRequest({ method: "mcpServerStatus/list", params });
+    }
+
+    /** Reads a resource of an MCP server of a thread, such as the `ui://` resource of an MCP App. */
+    async mcpResourceRead(params: McpResourceReadParams): Promise<McpResourceReadResponse> {
+        return await this.sendRequest({ method: "mcpServer/resource/read", params });
+    }
+
+    /** Calls a tool of an MCP server of a thread, outside a turn: the model does not see the result. */
+    async mcpServerToolCall(params: McpServerToolCallParams): Promise<McpServerToolCallResponse> {
+        return await this.sendRequest({ method: "mcpServer/tool/call", params });
     }
 
     /** Whether this binary implements a feature, regardless of its default enablement. */

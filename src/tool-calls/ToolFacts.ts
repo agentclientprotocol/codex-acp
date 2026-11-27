@@ -1,5 +1,6 @@
 import type * as acp from "@agentclientprotocol/sdk/unstable";
 import type {ContextCompactionMetadata} from "../ContextCompactionMeta";
+import type {McpAppToolCallMeta} from "../McpApps";
 
 /**
  * What a `ToolReporter` knows about one report of a tool call, before the client shape is chosen.
@@ -41,6 +42,8 @@ export type ToolFacts = {
     /** The command ended. */
     terminalExit?: {exitCode: number | null};
     mcp?: boolean;
+    /** The finished call of an MCP tool with a `ui://` resource. Only a client that declares `_meta.mcpApps` gets it. */
+    mcpApp?: McpAppToolCallMeta;
     subagent?: boolean;
     contextCompaction?: ContextCompactionMetadata;
     /** The fields of a client that is not AIR, where they differ from the fields above. */
