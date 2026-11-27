@@ -75,6 +75,7 @@ import {forkSession as runForkSession, type SessionForkDependencies} from "./Ses
 import type {SessionMetadata, SessionMetadataWithThread, SessionOptionMetadata} from "./SessionMetadata";
 import {StoredSessionSettings} from "./StoredSessionSettings";
 import {isArchivedRolloutPath} from "./SessionIndexMutations";
+import {canonicalCwds} from "./SessionIndexWorktrees";
 import {runAccountLogin} from "./CodexAccountLogin";
 import {throwIfRequestCancelled, withRequestCancellation} from "./RequestCancellation";
 import {isKeyedPromptId} from "./AcpV2Prompt";
@@ -1687,10 +1688,11 @@ export class CodexAcpClient {
             "unknown",
         ];
         const requestedCwd = request.cwd?.trim() ?? null;
+        const absoluteCwds = requestedCwd && isAbsolutePathLike(requestedCwd) ? canonicalCwds(requestedCwd) : null;
         const filterByCwd = (thread: Thread): boolean => {
             if (!requestedCwd) return true;
-            if (isAbsolutePathLike(requestedCwd)) {
-                return arePathsEqual(thread.cwd, requestedCwd);
+            if (absoluteCwds) {
+                return absoluteCwds.some(cwd => arePathsEqual(thread.cwd, cwd));
             }
             return arePathBasenamesEqual(thread.cwd, requestedCwd);
         };
@@ -1719,7 +1721,7 @@ export class CodexAcpClient {
             const filtered = listResponse.data
                 .filter(filterByCwd)
                 .map(mapThreadToSession);
-            if (filtered.length > 0 || isAbsolutePathLike(requestedCwd)) {
+            if (filtered.length > 0 || absoluteCwds) {
                 sessions = filtered;
             } else {
                 logger.log("Ignoring non-absolute cwd filter for session/list", {cwd: requestedCwd});
