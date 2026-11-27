@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.12.2](https://github.com/agentclientprotocol/codex-acp/compare/v2.12.1...v2.12.2) (2026-11-27)
+
+
+### Bug Fixes
+
+* publish session titles during the first turn ([#811](https://github.com/agentclientprotocol/codex-acp/issues/811)) ([08746f8](https://github.com/agentclientprotocol/codex-acp/commit/08746f8ace76bb43b1f8cd15beeb253f1b33b924))
+* send async question dismissals to Codex (IJAI-7116) ([#806](https://github.com/agentclientprotocol/codex-acp/issues/806)) ([68096e5](https://github.com/agentclientprotocol/codex-acp/commit/68096e5a80fb5705a86332edd0039d0afd68168c))
+
 ## [2.12.1](https://github.com/agentclientprotocol/codex-acp/compare/v2.12.0...v2.12.1) (2026-11-26)
 
 
