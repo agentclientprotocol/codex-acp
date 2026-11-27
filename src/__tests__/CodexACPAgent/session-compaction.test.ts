@@ -601,6 +601,7 @@ function createThread(items: ThreadItem[]): Thread {
     return {
         id: sessionId,
         sessionId,
+        environments: null,
         parentThreadId: null,
         threadSource: null,
         originator: null,

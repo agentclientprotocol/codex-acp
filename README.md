@@ -12,6 +12,7 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 - Preview and select model, reasoning effort, fast mode, approval, sandbox mode, and configured [Codex permission profiles](docs/permission-profiles.md) through [session options](docs/session-options.md).
 - Concrete recommended model and reasoning-effort values through the opt-in [AIR recommended config values](docs/air-extensions.md#recommended-config-values) capability.
 - Text prompts, embedded context, images, resource links, and additional workspace directories.
+- [Codex execution environment selection](docs/session-environments.md) through `session/new` metadata.
 - Shell command, file change, [permission request](docs/air-extensions.md#permission-presentation), MCP tool call, terminal output, reasoning, [plan](docs/plans.md), web search, image generation, image view, token usage, and review events.
 - Compact file changes through the negotiated [AIR diff patch extension](docs/air-extensions.md#diff-patch).
 - For AIR, one tool call shape with each fact in one field, as the [tool call contract](docs/air-extensions.md#tool-call-contract) defines. Other clients keep the earlier fields.

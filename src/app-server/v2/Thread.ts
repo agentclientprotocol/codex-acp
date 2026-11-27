@@ -5,6 +5,7 @@ import type { AbsolutePathBuf } from "../AbsolutePathBuf";
 import type { ReasoningEffort } from "../ReasoningEffort";
 import type { GitInfo } from "./GitInfo";
 import type { SessionSource } from "./SessionSource";
+import type { ThreadEnvironment } from "./ThreadEnvironment";
 import type { ThreadHistoryMode } from "./ThreadHistoryMode";
 import type { ThreadSection } from "./ThreadSection";
 import type { ThreadSource } from "./ThreadSource";
@@ -15,6 +16,12 @@ export type Thread = {/**
  * Identifier for this thread. Codex-generated thread IDs are UUIDv7.
  */
 id: string, /**
+ * Current environments for a loaded thread, in priority order, primary first.
+ * `null` means the thread is not loaded or the server does not expose its selection.
+ * An empty list means no environments are selected. This does not report connection status.
+ */
+environments: Array<ThreadEnvironment> | null,
+/**
  * Session id shared by threads that belong to the same session tree.
  */
 sessionId: string, /**
