@@ -1,0 +1,49 @@
+[
+  {
+    "sessionId": "thread-1",
+    "title": "Respond to MCP server?",
+    "subject": {
+      "toolCall": {
+        "toolCallId": "elicitation:thread-1:docs:1",
+        "title": "Question from MCP server",
+        "kind": "other",
+        "status": "pending",
+        "content": [
+          {
+            "content": {
+              "text": "Continue?",
+              "type": "text"
+            },
+            "type": "content"
+          }
+        ],
+        "rawInput": {
+          "serverName": "docs",
+          "description": "Continue?",
+          "schema": {
+            "type": "object",
+            "properties": {}
+          }
+        }
+      },
+      "type": "tool_call"
+    },
+    "options": [
+      {
+        "optionId": "accept",
+        "name": "Allow",
+        "kind": "allow_once"
+      },
+      {
+        "optionId": "decline",
+        "name": "Deny",
+        "kind": "reject_once"
+      },
+      {
+        "optionId": "cancel",
+        "name": "Cancel",
+        "kind": "reject_once"
+      }
+    ]
+  }
+]

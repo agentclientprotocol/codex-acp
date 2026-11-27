@@ -11,6 +11,7 @@ import {
     turnId,
     connectSession,
     userMessageItem,
+    itemStarted,
     itemCompleted,
     turnStarted,
     turnCompleted,
@@ -173,6 +174,43 @@ describe('elicitation/create over ACP v2', () => {
         await finishTurn();
     });
 
+    it('asks for approval of a started MCP tool call using its existing ID', async () => {
+        const client = await connectSession(2, {
+            onRequestPermission: async () => ({outcome: {outcome: "selected", optionId: "allow_once"}}),
+        });
+        closeClient = () => client.connection.close();
+        const {finishTurn} = await startRunningPrompt(client);
+
+        client.emit(itemStarted({
+            type: "mcpToolCall",
+            id: "mcp-write-1",
+            server: "docs",
+            environmentId: null,
+            tool: "write",
+            status: "inProgress",
+            arguments: {text: "Draft"},
+            appContext: null,
+            mcpAppUi: null,
+            pluginId: null,
+            readOnlyHint: null,
+            result: null,
+            error: null,
+            durationMs: null,
+        }));
+        const response = await client.triggerApproval('mcpServer/elicitation/request', {
+            threadId: sessionId, turnId, serverName: "docs", environmentId: null, mode: "form",
+            _meta: {codex_approval_kind: "mcp_tool_call"},
+            message: "Allow the docs server to run write?",
+            requestedSchema: {type: "object", properties: {}},
+        });
+
+        expect(response).toEqual({action: "accept", content: null, _meta: null});
+        const requests = client.transcript.flatMap(entry => "permissionRequest" in entry ? [entry.permissionRequest] : []);
+        await expect(dump(requests)).toMatchFileSnapshot('data/elicitation-v2-mcp-tool-approval.json');
+
+        await finishTurn();
+    });
+
     it('cancels the MCP OAuth re-auth elicitation when the client dismisses it', async () => {
         const client = await connectSession(2, {
             clientCapabilities: {elicitation: {url: {}}},
@@ -187,7 +225,13 @@ describe('elicitation/create over ACP v2', () => {
         await finishTurn();
     });
 
-    it('falls back to session/request_permission when the client has no url elicitation capability', async () => {
+    it.each([
+        ["url", oauthReauthParams()],
+        ["form", {
+            threadId: sessionId, turnId, serverName: "docs", environmentId: null, mode: "form", _meta: null, message: "Continue?",
+            requestedSchema: {type: "object", properties: {}},
+        }],
+    ] satisfies Array<[string, McpServerElicitationRequestParams]>)('falls back to a permission request for a standalone %s elicitation', async (mode, params) => {
         const client = await connectSession(2, {
             onRequestPermission: async () => ({outcome: {outcome: "selected", optionId: "accept"}}),
         });
@@ -195,12 +239,13 @@ describe('elicitation/create over ACP v2', () => {
         const {finishTurn} = await startRunningPrompt(client);
         const start = client.transcript.length;
 
-        const response = await client.triggerApproval('mcpServer/elicitation/request', oauthReauthParams());
+        const response = await client.triggerApproval('mcpServer/elicitation/request', params);
 
         expect(response).toEqual({action: "accept", content: null, _meta: null});
         const transcript = client.transcript.slice(start);
         expect(transcript.some(entry => "elicitationRequest" in entry)).toBe(false);
-        expect(transcript.some(entry => "permissionRequest" in entry)).toBe(true);
+        const requests = transcript.flatMap(entry => "permissionRequest" in entry ? [entry.permissionRequest] : []);
+        await expect(dump(requests)).toMatchFileSnapshot(`data/elicitation-v2-${mode}-permission-fallback.json`);
 
         await finishTurn();
     });

@@ -6,6 +6,9 @@ export const CODEX_COMMAND_PERMISSION_TITLE = "Run command?";
 export const CODEX_NETWORK_PERMISSION_TITLE = "Allow network access?";
 export const CODEX_FILE_CHANGE_PERMISSION_TITLE = "Make edits?";
 export const CODEX_ADDITIONAL_PERMISSIONS_TITLE = "Grant permissions?";
+export const CODEX_MCP_TOOL_APPROVAL_TITLE = "Run MCP tool?";
+export const CODEX_MCP_FORM_PERMISSION_TITLE = "Respond to MCP server?";
+export const CODEX_MCP_URL_PERMISSION_TITLE = "Open MCP server URL?";
 
 type RequestPermissionMetadata = {
     version: 1;
