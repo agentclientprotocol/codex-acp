@@ -52,6 +52,7 @@ import {SessionWriteQueue} from "./SessionWriteQueue";
 import type {SerializeTitleWrite} from "./TitleGenerator";
 import {readSessionBatchMetadata} from "./SessionBatchGet";
 import {readTranscriptText, transcriptTextOptions} from "./SessionTranscriptText";
+import {throwIfRequestCancelled, withRequestCancellation} from "./RequestCancellation";
 
 /** What the session index needs from `CodexAcpServer`. */
 export interface SessionIndexHost {
@@ -168,20 +169,20 @@ export class SessionIndexService {
         return await this.readRows(cwd, options, params.cursor ?? null);
     }
 
-    /** Metadata only: no adapter list paging, session load/resume or history replay. */
+    /** Reads metadata and optional stored text without loading or resuming a session. */
     async batchGet({sessionIds, _meta}: SessionBatchGetRequest, signal?: AbortSignal): Promise<SessionBatchGetResponse> {
         this.require(SESSION_BATCH_GET_METHOD);
         const text = transcriptTextOptions(_meta, sessionIds);
         if (text && !this.transcriptTextEnabled) throw RequestError.invalidParams(undefined, "Declare sessionTranscriptText in initialize first");
-        signal?.throwIfAborted();
+        throwIfRequestCancelled(signal);
         if (sessionIds.length === 0) return {sessions: []};
-        await this.host.ensureAppServer();
+        await withRequestCancellation(this.host.ensureAppServer(), signal);
         const client = this.host.client();
         const entries = await this.host.runWithProcessCheck(() => readSessionBatchMetadata(
-            client.appServerClient, client.getHomePath(), sessionIds,
+            client.appServerClient, client.getHomePath(), sessionIds, signal,
         ));
         // `thread/read` gives the fork parent, so the rows need no background read for it.
-        const rows = await this.rows(entries.map(entry => ({...entry, read: true as const})), true);
+        const rows = await withRequestCancellation(this.rows(entries.map(entry => ({...entry, read: true as const})), true), signal);
         if (!text) return {sessions: rows};
         const requestedCwds = new Set(canonicalCwds(text.cwd));
         const row = rows.find(row => canonicalCwds(row.cwd).some(cwd => requestedCwds.has(cwd)));

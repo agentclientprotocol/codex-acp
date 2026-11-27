@@ -1,21 +1,30 @@
-import {mkdtemp, writeFile, rm, stat, utimes} from "node:fs/promises";
+import {mkdtemp, writeFile, rm, stat, utimes, truncate} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {afterEach, describe, expect, it, vi} from "vitest";
 import type {Thread, ThreadItem} from "../../app-server/v2";
+import {CodexAppServerClient} from "../../CodexAppServerClient";
 import {readTranscriptText} from "../../SessionTranscriptText";
-import {createCodexMockTestFixture} from "../acp-test-utils";
+import {deferred} from "../acp-test-utils";
+import {createMockConnections} from "./test-utils";
 
 const directories: string[] = [];
-afterEach(async () => { await Promise.all(directories.splice(0).map(dir => rm(dir, {recursive: true, force: true}))); });
+afterEach(async () => {
+    vi.useRealTimers();
+    await Promise.all(directories.splice(0).map(dir => rm(dir, {recursive: true, force: true})));
+});
 
 async function stored() {
     const directory = await mkdtemp(path.join(os.tmpdir(), "codex-transcript-"));
     directories.push(directory);
     const file = path.join(directory, "rollout.jsonl");
     await writeFile(file, "stored transcript");
-    const fixture = createCodexMockTestFixture();
-    return {client: fixture.getCodexAppServerClient(), thread: {id: "stored", path: file, historyMode: "paginated"} as Thread, file};
+    const {mockCodexConnection} = createMockConnections();
+    const client = new CodexAppServerClient(mockCodexConnection);
+    const thread = {id: "stored", path: file, historyMode: "paginated"} as Thread;
+    const backend = mockCodexConnection.sendRequest;
+    backend.mockResolvedValue({thread});
+    return {client, thread, file, backend};
 }
 
 describe("stored transcript text", () => {
@@ -67,6 +76,68 @@ describe("stored transcript text", () => {
         await expect(readTranscriptText(client, thread, "transcriptTextSnapshot")).rejects.toThrow("changed during the read");
         const controller = new AbortController();
         controller.abort();
-        await expect(readTranscriptText(client, thread, "transcriptTextSnapshot", controller.signal)).rejects.toMatchObject({name: "AbortError"});
+        await expect(readTranscriptText(client, thread, "transcriptTextSnapshot", controller.signal)).rejects.toMatchObject({code: -32800});
+    });
+
+    it.each(["paginated", "legacy"] as const)("cancels a pending %s history read without waiting for its response", async historyMode => {
+        const {client, thread, backend} = await stored();
+        thread.historyMode = historyMode;
+        const pending = deferred<any>();
+        const entered = deferred<void>();
+        const controller = new AbortController();
+        const wait = () => { entered.resolve(); return pending.promise; };
+        backend.mockImplementation((method: string, params: any) =>
+            method === "thread/items/list" || params.includeTurns ? wait() : Promise.resolve({thread}));
+        const snapshot = readTranscriptText(client, thread, "transcriptTextSnapshot", controller.signal);
+        const cancelled = expect(snapshot).rejects.toMatchObject({code: -32800});
+        await entered.promise;
+        controller.abort();
+        await cancelled;
+        pending.reject(new Error("Late history failure"));
+    });
+
+    it.each(["paginated", "legacy"] as const)("returns a partial snapshot when a pending %s read reaches the time budget", async historyMode => {
+        const {client, thread, backend} = await stored();
+        thread.historyMode = historyMode;
+        vi.useFakeTimers();
+        const pending = deferred<any>();
+        const entered = deferred<void>();
+        backend.mockImplementation(async (method: string, params: any) => {
+            if (method === "thread/read" && !params.includeTurns) return {thread};
+            if (method === "thread/items/list" && params.sortDirection === "desc") {
+                return {data: [{item: {id: "last"}}], nextCursor: null};
+            }
+            entered.resolve();
+            return pending.promise;
+        });
+        const snapshot = readTranscriptText(client, thread, "transcriptTextSnapshot");
+        await entered.promise;
+        await vi.advanceTimersByTimeAsync(5_000);
+        const result = await snapshot;
+        expect(result).toMatchObject({messages: [], truncated: true});
+        expect(result?.revision).toEqual(expect.any(String));
+        pending.reject(new Error("Late history failure"));
+    });
+
+    it("does not hydrate legacy history beyond the uncompressed size budget", async () => {
+        const {client, thread, file, backend} = await stored();
+        thread.historyMode = "legacy";
+        await truncate(file, 64 * 1024 * 1024 + 1);
+        expect(await readTranscriptText(client, thread, "transcriptTextSnapshot"))
+            .toMatchObject({messages: [], truncated: true});
+        expect(backend.mock.calls).toEqual([["thread/read", {threadId: thread.id, includeTurns: false}]]);
+    });
+
+    it("fails rather than returning text when final metadata verification times out", async () => {
+        const {client, thread, backend} = await stored();
+        vi.useFakeTimers();
+        const pending = deferred<any>();
+        const entered = deferred<void>();
+        backend.mockImplementation(() => { entered.resolve(); return pending.promise; });
+        const rejected = expect(readTranscriptText(client, thread, "transcriptRevision")).rejects.toThrow("scan budget");
+        await entered.promise;
+        await vi.advanceTimersByTimeAsync(5_000);
+        await rejected;
+        pending.reject(new Error("Late metadata failure"));
     });
 });

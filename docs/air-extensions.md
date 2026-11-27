@@ -1330,7 +1330,8 @@ The revision mode returns `{revision}` without hydrating messages.
 The snapshot mode returns `{revision, messages, truncated}`.
 Each message has `{role, text}`. The roles are `user`, `assistant`, and `compact_summary` when available.
 The revision identifies transcript contents independently of the title or list timestamp.
-An edit during a read fails the request. The client can retry.
+An edit or a change of the selected rollout, directory, or history mode during a read returns `-32603`.
+Before returning, the adapter rechecks the selected rollout and its revision. The client can retry.
 Ordinary list and batch requests contain no transcript text.
 
 The adapter reads paginated items through the app-server. Legacy history uses a bounded full-history read.
@@ -1339,6 +1340,16 @@ The projection excludes tools, reasoning, and non-text input.
 The current app-server exposes compaction markers without summary text.
 Such a marker preserves available matches and sets `truncated: true`; it creates no synthetic summary.
 A response beyond the projection budget also preserves complete messages and sets `truncated: true`.
+The projection budget is 4 MiB of returned messages. A paginated scan reads at most 100 forward pages of
+100 items, plus one request for the newest-item boundary, and has a 5-second time budget.
+All items count toward the page budget, including tools and reasoning that the projection omits.
+Legacy reads accept at most 64 MiB of uncompressed rollout data and share the 5-second scan budget.
+Reaching a scan budget returns complete messages collected so far with `truncated: true`, including an
+empty message list if none were collected. The final metadata verification has its own 5-second deadline;
+if it cannot establish a consistent snapshot, the request returns `-32603` instead of unverified text.
+Cancellation returns `-32800` promptly while waiting for metadata or history and stops further paging.
+The app-server has no history-read cancellation RPC, so an already submitted read can finish in the
+background; its late result or error is handled without producing another response or continuing the scan.
 
 ### Session list subscription
 

@@ -1,0 +1,13 @@
+{
+  "snapshot": {
+    "revision": "<revision>",
+    "messages": [
+      {
+        "role": "assistant",
+        "text": "Saved answer"
+      }
+    ],
+    "truncated": true
+  },
+  "forwardPages": 100
+}
