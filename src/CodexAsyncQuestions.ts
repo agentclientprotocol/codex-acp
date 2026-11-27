@@ -8,7 +8,8 @@
  *     </send_user_message_question_reply>
  *
  * The adapter keeps the form open until the user answers or the session closes.
- * The answer steers the current turn or starts a new turn.
+ * An accepted answer steers the current turn or starts a new turn.
+ * A dismissal only steers a running turn.
  * V2 replay shows the questions and answers in a completed tool call.
  *
  * The envelope follows Codex's `codex-rs/context-fragments/src/answered_question.rs`, and its parsing follows
@@ -138,11 +139,12 @@ export class AsyncQuestionClient {
             : this.connection.request(acp.methods.client.elicitation.create, request, {cancellationSignal: signal});
     }
 
-    /** Sends the reply through the session's shared steering and turn-start queue. */
-    async sendReply(text: string): Promise<void> {
+    /** Sends a reply through the shared queue. Only an accepted answer can start a turn. */
+    async sendReply(text: string, startTurnWhenIdle: boolean): Promise<void> {
         const response = await this.steering.executeOrQueueSteeringRequest({
             sessionId: this.sessionId,
             prompt: [{type: "text", text}],
+            ...(startTurnWhenIdle ? {} : {_meta: {steering: {idleBehavior: "promptRequired"}}}),
         });
         if (response.outcome === "failed") throw new Error("Codex did not accept the answer");
     }
@@ -220,7 +222,6 @@ export class AsyncQuestionElicitations {
         questions: readonly ToolRequestUserInputQuestion[],
         response: acp.CreateElicitationResponse,
     ): Promise<void> {
-        if (!this.requests.has(message.id)) return;
         const answers = userInputAnswers(response, questions, this.clientCapabilities);
         const replies = questions.flatMap((question, index): AsyncQuestionReply[] => {
             const answer = asyncQuestionAnswerText(response.action, answers[question.id]?.answers ?? []);
@@ -231,8 +232,12 @@ export class AsyncQuestionElicitations {
             }];
         });
         if (replies.length === 0) return;
+        if (!this.requests.has(message.id)) {
+            if (response.action === "accept") await this.client.reportDroppedAnswer();
+            return;
+        }
         try {
-            await this.client.sendReply(formatAsyncQuestionReply(replies));
+            await this.client.sendReply(formatAsyncQuestionReply(replies), response.action === "accept");
         } catch (error) {
             logger.log("Async question answer was not delivered", {sessionId: this.sessionId, error});
             await this.client.reportDroppedAnswer();

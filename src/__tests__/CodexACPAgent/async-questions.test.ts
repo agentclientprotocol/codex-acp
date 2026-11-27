@@ -114,6 +114,21 @@ describe.each([1, 2] as const)('async Codex questions over ACP v%i', (protocolVe
             .toMatchFileSnapshot(`data/async-questions-v${protocolVersion}-${action}.json`);
     });
 
+    it.each([{action: "decline"}, {action: "cancel"}] as const)('does not start a turn for a late $action result', async response => {
+        let answer!: (response: acpV2.CreateElicitationResponse) => void;
+        const {client, steers} = await connect(() => new Promise(resolve => { answer = resolve; }));
+        await askDuringTurn(client);
+        await vi.waitFor(() => expect(elicitationRequests(client)).toHaveLength(1));
+        await finishTurn(client);
+        answer(response);
+        await settle();
+
+        expect(client.turnStartParams).toHaveLength(1);
+        expect(steers).toEqual([]);
+        expect(client.turnInterruptCalls()).toEqual([]);
+        expect(notices(client)).toEqual([]);
+    });
+
     it('keeps the form open after completion and starts one turn for its answer', async () => {
         let answer!: (response: acpV2.CreateElicitationResponse) => void;
         let signal!: AbortSignal;

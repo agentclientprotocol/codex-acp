@@ -1,5 +1,8 @@
-import {describe, expect, it} from "vitest";
+import {describe, expect, it, vi} from "vitest";
+import type {CreateElicitationResponse} from "@agentclientprotocol/sdk/unstable";
 import {
+    AsyncQuestionClient,
+    AsyncQuestionElicitations,
     asyncQuestionItemId,
     formatAsyncQuestionReply,
     parseAsyncQuestionReply,
@@ -50,6 +53,43 @@ describe("async question replies", () => {
             `<send_user_message_question_reply>${one}</send_user_message_question_reply> trailing text`,
         ]) {
             expect(renderAsyncQuestionReply(text), text).toBeNull();
+        }
+    });
+});
+
+describe("async question disposal", () => {
+    it.each([
+        {action: "accept", content: {question_0: "Staging"}},
+        {action: "decline"},
+        {action: "cancel"},
+    ] satisfies CreateElicitationResponse[])("reports only a late accepted answer after disposal ($action)", async response => {
+        let answer!: (response: CreateElicitationResponse) => void;
+        const pending = new Promise<CreateElicitationResponse>(resolve => { answer = resolve; });
+        const connection = {request: vi.fn(() => pending), notify: vi.fn().mockResolvedValue(undefined)};
+        const steering = {executeOrQueueSteeringRequest: vi.fn().mockResolvedValue({outcome: "injected"})};
+        const capabilities = {elicitation: {form: {}}, session: {notices: {}}};
+        const client = new AsyncQuestionClient("thread-1", connection, capabilities, steering);
+        const questions = new AsyncQuestionElicitations("thread-1", capabilities, client);
+        questions.handleNotification({method: "item/completed", params: {
+            threadId: "thread-1", turnId: "turn-1", completedAtMs: 0,
+            item: {type: "agentMessage", id: "question", text: "Which environment?", phase: "final_answer",
+                moderation: null, memoryCitation: null, delivery: "async",
+                questions: [{title: "Which environment?", options: ["Staging", "Production"]}]},
+        }});
+        questions.dispose();
+        answer(response);
+        await pending;
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        expect(steering.executeOrQueueSteeringRequest).not.toHaveBeenCalled();
+        if (response.action === "accept") {
+            expect(connection.notify).toHaveBeenCalledExactlyOnceWith("session/update", {
+                sessionId: "thread-1",
+                update: {sessionUpdate: "notice", severity: "warning", title: "Answer not sent",
+                    description: "The answer could not be sent. Send it as a new message to continue."},
+            });
+        } else {
+            expect(connection.notify).not.toHaveBeenCalled();
         }
     });
 });
