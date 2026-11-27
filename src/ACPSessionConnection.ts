@@ -466,6 +466,11 @@ export class ACPSessionConnection {
 
     forSession(sessionId: string): ACPSessionConnection { return new ACPSessionConnection(this.connection, sessionId); }
 
+    /** Sends an extension notification about this session, with its `sessionId`; the same on v1 and v2. */
+    notifyExtension(method: `_${string}`, params: Record<string, unknown>): Promise<void> {
+        return this.connection.notify(method, {sessionId: this.sessionId, ...params});
+    }
+
     /** Domain writers can rebuild an owned metadata value without changing v2's shallow patch semantics. */
     patchSessionMetadata(change: SessionMetadataPatch, fields: SessionInfoFields = {}): Promise<void> {
         return this.v2Connection?.patchSessionMetadata(this.sessionId, change, fields) ?? Promise.resolve();

@@ -70,6 +70,7 @@ import type {SubagentEventRouter} from "./subagents/SubagentEventRouter";
 import {StandardSubagentEventRouter} from "./subagents/StandardSubagentEventRouter";
 import type {SubagentState} from "./subagents/AcpSubagents";
 import {mergeRateLimitSnapshot} from "./RateLimitsMap";
+import {nextQuotaUpdatedAt, QUOTA_UPDATE_METHOD, toQuotaPools} from "./QuotaSnapshot";
 import {AGENT_FILE_CHANGE_REPORT_MAX_DIFF_BYTES} from "./AgentFileChangeReport";
 import {createSessionNotice} from "./SessionNotice";
 import {isStaleAutomaticTitleEcho} from "./SessionIndexTitles";
@@ -743,6 +744,7 @@ export class CodexEventHandler {
                 ));
             case "account/rateLimits/updated":
                 this.handleRateLimitsUpdated(notification.params);
+                await this.publishQuota();
                 return null;
             case "account/updated":
                 // The connection observes this even when it has no sessions.
@@ -1478,6 +1480,16 @@ export class CodexEventHandler {
             limitName: snapshot.limitName ?? existingEntry?.limitName ?? limitId,
             snapshot,
         });
+    }
+
+    /** Pushes the session's rate limits as a `_quota/update` snapshot, when they changed since the last push. */
+    private async publishQuota(): Promise<void> {
+        if (!this.sessionState.rateLimits) return;
+        const pools = toQuotaPools(this.sessionState.rateLimits);
+        const published = JSON.stringify(pools);
+        if (published === this.sessionState.publishedQuota) return;
+        this.sessionState.publishedQuota = published;
+        await this.session.notifyExtension(QUOTA_UPDATE_METHOD, {updatedAt: nextQuotaUpdatedAt(), pools});
     }
 
 }

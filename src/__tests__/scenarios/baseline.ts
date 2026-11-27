@@ -144,6 +144,7 @@ const MCP_COMMAND = {
  * Session config options put permissions and collaboration modes after the model options.
  * Initialize also advertises text-only append system prompts, client-set titles, and session options.
  * It no longer advertises `sessionCapabilities.subagents`, which the subagent RFD does not define for an Agent.
+ * It advertises the `quota` extension in its `_meta`.
  * Only a command that equals the baseline `/mcp` command changes.
  */
 export function withFeatureChanges(messages: RecordedMessage[]): RecordedMessage[] {
@@ -155,7 +156,7 @@ export function withFeatureChanges(messages: RecordedMessage[]): RecordedMessage
             const session = capabilities?.["sessionCapabilities"] as Json | undefined;
             if (session) {
                 const {subagents: _subagents, ...kept} = session;
-                return {...message, params: {...params, agentCapabilities: {
+                return {...message, params: {...params, _meta: {...params["_meta"] as Json, quota: {}}, agentCapabilities: {
                     ...capabilities, auth: {...capabilities?.["auth"] as Json, status: {}},
                     sessionCapabilities: {...kept, systemPrompt: {}, title: {}, options: {}},
                 }}};
