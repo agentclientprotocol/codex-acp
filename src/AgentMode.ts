@@ -102,6 +102,17 @@ export class AgentMode {
         "danger-full-access",
     );
 
+    static readonly ExternalSandbox = new AgentMode(
+        "external-sandbox",
+        "Host sandbox",
+        "The host isolates commands; untrusted commands and changes require approval.",
+        "standard",
+        "untrusted",
+        "user",
+        {type: "externalSandbox", networkAccess: "enabled"},
+        null,
+    );
+
     static DEFAULT_AGENT_MODE = AgentMode.Agent;
 
     /** Only AIR gets the mode kind, in `_meta.jetbrains.air.kind`. */
@@ -181,6 +192,7 @@ export class AgentMode {
             AgentMode.WorkspaceWrite,
             AgentMode.Agent,
             AgentMode.AgentFullAccess,
+            ...(process.env["CODEX_ACP_EXTERNAL_SANDBOX"] === "true" ? [AgentMode.ExternalSandbox] : []),
             ...profileModes,
         ];
     }
