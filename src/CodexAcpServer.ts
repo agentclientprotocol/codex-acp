@@ -94,6 +94,7 @@ import type {
     UserInput
 } from "./app-server/v2";
 import type {RateLimitsMap} from "./RateLimitsMap";
+import {QUOTA_META_KEY, quotaCapability} from "./QuotaSnapshot";
 import {ModelId} from "./ModelId";
 import {normalizeSessionTitle} from "./SessionTitle";
 import {AgentMode, MODE_CONFIG_ID} from "./AgentMode";
@@ -321,6 +322,8 @@ export interface SessionState extends SessionIndexTitleState, SessionOptionState
     rewinding: boolean;
     modelContextWindow: number | null;
     rateLimits: RateLimitsMap | null;
+    /** The quota pools last pushed as `_quota/update`, as JSON, so an unchanged snapshot is not sent again. */
+    publishedQuota: string | null;
     account: Account | null;
     authConfigured: boolean;
     authProvider: string | null;
@@ -1020,6 +1023,8 @@ export class CodexAcpServer {
             steering: {
                 supported: true,
             },
+            // Presence means "this agent pushes `_quota/update`" (see `QuotaSnapshot.ts`).
+            [QUOTA_META_KEY]: quotaCapability(),
             ...(this.capabilities.airClient ? {
                 [JETBRAINS_META_KEY]: {
                     [AIR_META_KEY]: {
@@ -1475,6 +1480,7 @@ export class CodexAcpServer {
             ...(sessionMetadata.instructions ? {instructions: sessionMetadata.instructions} : {}),
             modelContextWindow: null,
             rateLimits: null,
+            publishedQuota: null,
             account: authState.account,
             authConfigured: authState.authConfigured,
             authProvider: authProvider,
@@ -4087,6 +4093,7 @@ export class CodexAcpServer {
             ...(sessionMetadata.instructions ? {instructions: sessionMetadata.instructions} : {}),
             modelContextWindow: null,
             rateLimits: null,
+            publishedQuota: null,
             account: authState.account,
             authConfigured: authState.authConfigured,
             authProvider: authProvider,

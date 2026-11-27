@@ -442,6 +442,7 @@ export function createTestSessionState(overrides?: Partial<SessionState>): Sessi
         rewinding: false,
         modelContextWindow: null,
         rateLimits: null,
+        publishedQuota: null,
         account: null,
         authConfigured: overrides?.account !== undefined ? overrides.account !== null : false,
         authProvider: null,

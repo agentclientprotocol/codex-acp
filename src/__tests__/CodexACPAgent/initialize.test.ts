@@ -73,6 +73,7 @@ describe('CodexACPAgent - initialize', () => {
                 steering: {
                     supported: true,
                 },
+                quota: {},
             },
         });
     });
@@ -94,6 +95,7 @@ describe('CodexACPAgent - initialize', () => {
             steering: {
                 supported: true,
             },
+            quota: {},
             jetbrains: {
                 air: {
                     version: 1,

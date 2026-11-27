@@ -9,9 +9,11 @@ import {
     createTestFixture,
     createTestModel,
     createTestSessionState,
+    type MethodCallEvent,
     type TestFixture,
     deferred,
 } from "../acp-test-utils";
+import {QUOTA_UPDATE_METHOD, type QuotaUpdateNotification} from "../../QuotaSnapshot";
 import type {ServerNotification} from "../../app-server";
 import type {SessionState} from "../../CodexAcpServer";
 import {AgentMode} from "../../AgentMode";
@@ -4765,6 +4767,49 @@ describe('ACP server test', { timeout: 40_000 }, () => {
                 normalModelSlug: null,
             }
         });
+    });
+
+    it ('should push changed rate limits to the client as a _quota/update snapshot', async () => {
+        const sessionId = "test-session-id";
+        const { mockFixture } = setupPromptFixture({ sessionId });
+
+        await mockFixture.getCodexAcpAgent().prompt({
+            sessionId,
+            prompt: [{ type: "text", text: "test" }],
+        });
+        const update = (usedPercent: number) => mockFixture.sendServerNotification({
+            method: "account/rateLimits/updated",
+            params: {
+                rateLimits: {
+                    limitId: "codex",
+                    limitName: null,
+                    primary: { usedPercent, resetsAt: 1_791_288_000, windowDurationMins: 300 },
+                    secondary: null,
+                    credits: null,
+                    individualLimit: null,
+                    spendControlReached: null,
+                    planType: null,
+                    rateLimitReachedType: null,
+                    normalModelSlug: null,
+                }
+            }
+        });
+        update(30);
+        update(30);
+        update(31);
+        await mockFixture.getCodexAcpClient().waitForSessionNotifications(sessionId);
+
+        const pushed = mockFixture.getAcpConnectionEvents([])
+            .filter((event: MethodCallEvent) => event.method === "notify" && event.args[0] === QUOTA_UPDATE_METHOD)
+            .map((event: MethodCallEvent) => event.args[1] as QuotaUpdateNotification);
+        expect(pushed.map(({updatedAt: _, ...rest}) => rest)).toEqual([30, 31].map(usedPercent => ({
+            sessionId,
+            pools: [{
+                id: "codex",
+                meters: [{ id: "primary", usedPercent, window: "PT5H", resetsAt: "2026-10-06T12:00:00.000Z" }],
+            }],
+        })));
+        expect(Date.parse(pushed[1]!.updatedAt)).toBeGreaterThan(Date.parse(pushed[0]!.updatedAt));
     });
 
     it ('should apply a missing-id rate-limit update to the codex bucket', async () => {

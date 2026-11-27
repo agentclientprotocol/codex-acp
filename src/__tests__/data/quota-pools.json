@@ -1,0 +1,61 @@
+[
+  {
+    "id": "codex",
+    "meters": [
+      {
+        "id": "primary",
+        "usedPercent": 42,
+        "window": "PT5H",
+        "resetsAt": "2026-10-06T12:00:00.000Z"
+      },
+      {
+        "id": "secondary",
+        "usedPercent": 17,
+        "window": "P7D",
+        "resetsAt": "2026-10-11T09:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "id": "codex_fast",
+    "label": "Fast",
+    "state": "exhausted",
+    "meters": [
+      {
+        "id": "primary",
+        "usedPercent": 100,
+        "window": "PT45M",
+        "status": "exceeded"
+      }
+    ]
+  },
+  {
+    "id": "credits",
+    "label": "Credits",
+    "state": "available",
+    "meters": [
+      {
+        "id": "balance",
+        "remaining": {
+          "value": "118.5",
+          "unit": "credits"
+        }
+      },
+      {
+        "id": "spend_cap",
+        "label": "Monthly spend limit",
+        "usedPercent": 25,
+        "used": {
+          "value": "50",
+          "unit": "credits"
+        },
+        "limit": {
+          "value": "200",
+          "unit": "credits"
+        },
+        "window": "P1M",
+        "resetsAt": "2026-11-01T00:00:00.000Z"
+      }
+    ]
+  }
+]

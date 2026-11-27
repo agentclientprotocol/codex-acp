@@ -13,6 +13,7 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 - Concrete recommended model and reasoning-effort values through the opt-in [AIR recommended config values](docs/air-extensions.md#recommended-config-values) capability.
 - Text prompts, embedded context, images, resource links, and additional workspace directories.
 - Shell command, file change, [permission request](docs/air-extensions.md#permission-presentation), MCP tool call, terminal output, reasoning, [plan](docs/plans.md), web search, image generation, image view, token usage, and review events.
+- The account's rate limits as numbers through the interim [quota extension](docs/quota.md), shaped as the quotas & limits RFD.
 - Compact file changes through the negotiated [AIR diff patch extension](docs/air-extensions.md#diff-patch).
 - For AIR, one tool call shape with each fact in one field, as the [tool call contract](docs/air-extensions.md#tool-call-contract) defines. Other clients keep the earlier fields.
 - [Native ACP subagent sessions](docs/subagent-sessions.md) with separate child histories and permissions. ACP v2 selects the standard route without capability negotiation.
