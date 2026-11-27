@@ -1001,7 +1001,14 @@ export class CodexAcpClient {
 
         const codexModels = await this.fetchAvailableModels();
         if (codexModels.length === 0 && !this.isNarrowedByGateway()) {
-            throw new Error("Codex did not return any models");
+            // A custom provider can start a thread even when Codex has no model metadata.
+            if (!response.model?.trim()) {
+                throw new Error("Codex did not return any models");
+            }
+            logger.log("Codex returned no models; keeping the thread model", {
+                model: response.model,
+                modelProvider: response.modelProvider,
+            });
         }
         const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
         return {
