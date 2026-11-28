@@ -840,6 +840,45 @@ export class CodexAcpClient {
     }
 
     /**
+     * Reads durable session history through the read-only Codex app-server API without
+     * resuming the thread or acquiring its active-writer lock.
+     */
+    async readSessionHistory(sessionId: string): Promise<{
+        thread: Thread;
+        history: AsyncIterable<ThreadItemEntry[]>;
+    }> {
+        const {thread: metadata} = await this.codexClient.threadRead({threadId: sessionId});
+        if (metadata.id !== sessionId) throw sessionNotFoundRequestError(sessionId);
+        if (metadata.historyMode === "paginated") {
+            const client = this.codexClient;
+            const history: AsyncIterable<ThreadItemEntry[]> = {
+                async *[Symbol.asyncIterator]() {
+                    try {
+                        yield* client.threadItemEntryPages(metadata.id);
+                    } catch (error) {
+                        if (!isThreadNotMaterializedError(error)) throw error;
+                    }
+                },
+            };
+            return {thread: {...metadata, turns: []}, history};
+        }
+        try {
+            const legacy = (await this.codexClient.threadReadWithHistory(metadata.id)).thread;
+            const thread: Thread = {...legacy, turns: []};
+            const history = oneItemPage(legacy.turns.flatMap(turn => turn.items.map(item => ({
+                turnId: turn.id,
+                item,
+                startedAtMs: null,
+                completedAtMs: null,
+            }))));
+            return {thread, history};
+        } catch (error) {
+            if (!isThreadNotMaterializedError(error)) throw error;
+            return {thread: {...metadata, turns: []}, history: noItems()};
+        }
+    }
+
+    /**
      * The items of the turn at `index` of a session, oldest first, in pages.
      * Returns null when the session has fewer turns.
      */

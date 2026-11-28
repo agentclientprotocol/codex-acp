@@ -8,7 +8,7 @@ import {
 import {expectConformingV2SessionUpdates} from "./v2-session-update-guard";
 import {subagentProtocol} from "../../subagents/AcpSubagents";
 import {AIR_NATIVE_SUBAGENT_SESSIONS_KEY, withAirMeta} from "../../AirExtension";
-import {GOAL_CONTROL_METHOD, SESSION_STEERING_METHOD, LEGACY_SET_SESSION_MODEL_METHOD} from "../../AcpExtensions";
+import {GOAL_CONTROL_METHOD, SESSION_READ_METHOD, SESSION_STEERING_METHOD, LEGACY_SET_SESSION_MODEL_METHOD} from "../../AcpExtensions";
 import {SESSION_RENAME_METHOD, SESSION_ARCHIVE_METHOD, SESSION_UNARCHIVE_METHOD} from "../../SessionIndex";
 import {ASYNC_TASK_STOP_METHOD} from "../../async-tasks/AsyncTaskExtension";
 
@@ -176,6 +176,7 @@ describe.each([1, 2] as const)("ACP v%s live standard subagents", version => {
             ["session/resume", {cwd, mcpServers: []}],
             [SESSION_RENAME_METHOD, {title: "No"}], [SESSION_ARCHIVE_METHOD, {}], [SESSION_UNARCHIVE_METHOD, {}],
             [SESSION_STEERING_METHOD, {prompt: [{type: "text", text: "No"}]}],
+            [SESSION_READ_METHOD, {cwd}],
             [GOAL_CONTROL_METHOD, {action: "clear"}], [ASYNC_TASK_STOP_METHOD, {asyncTaskId: "task"}],
         ];
         if (version === 1) methods.push(["session/load", {cwd, mcpServers: []}], ["session/set_mode", {modeId: "agent"}],

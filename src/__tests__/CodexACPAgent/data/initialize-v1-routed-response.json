@@ -67,6 +67,9 @@
   "_meta": {
     "steering": {
       "supported": true
+    },
+    "sessionRead": {
+      "supported": true
     }
   }
 }

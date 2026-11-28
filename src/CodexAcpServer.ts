@@ -188,6 +188,15 @@ import {
     type SessionRewindRequest,
     type SessionRewindResponse,
 } from "./SessionRewind";
+import {
+    parseSessionReadParams,
+    SESSION_READ_META_KEY,
+    SESSION_READ_METHOD,
+    sessionAlreadyOpenRequestError,
+    sessionReadCapability,
+    type SessionReadRequest,
+    type SessionReadResponse,
+} from "./SessionRead";
 import {asyncQuestionReplyHistory, AsyncQuestionClient, AsyncQuestionElicitations, isAsyncQuestionReplyPrompt, renderAsyncQuestionReply} from "./CodexAsyncQuestions";
 import {
     createAgentTextMessageChunk,
@@ -287,6 +296,22 @@ interface SessionOptionState {
     currentModelSupportsFast: boolean;
     clientCapabilities: ClientCapabilities;
 }
+
+type HistoryReplayState = {
+    sessionId: string;
+    cwd: string;
+    clientCapabilities: ClientCapabilities;
+    rewindable: boolean;
+    hasTurn: boolean;
+    sessionTitle: string | null;
+    sessionTitleSource: SessionState["sessionTitleSource"];
+    titleGen?: TitleGenerator;
+    subagents: SubagentEventRouter;
+    asyncTasks?: CodexBackgroundTasks;
+    availableModels?: Array<Model>;
+    currentModelId?: string;
+    nativeChildren?: Set<string>;
+};
 
 export interface SessionState extends SessionIndexTitleState, SessionOptionState {
     sessionId: string,
@@ -582,6 +607,7 @@ export class CodexAcpServer {
     /** A cancelled Codex-initiated turn has no prompt reservation to keep later prompts behind its idle. */
     private readonly stoppingRuntimeTurns = new Map<string, {turnId: string; release(): void}>();
     private readonly instructionUpdates = new Set<string>();
+    private readonly readingSessions = new Set<string>();
     /**
      * Per-session callbacks that abort a v2 `session/prompt` still waiting in the turn-start FIFO
      * (queued behind a running turn, not yet inserted). `session/cancel`/`session/close` drop the
@@ -1020,6 +1046,7 @@ export class CodexAcpServer {
             steering: {
                 supported: true,
             },
+            [SESSION_READ_META_KEY]: sessionReadCapability(),
             ...(this.capabilities.airClient ? {
                 [JETBRAINS_META_KEY]: {
                     [AIR_META_KEY]: {
@@ -1066,6 +1093,8 @@ export class CodexAcpServer {
                 return await this.unstable_setSessionModel(this.parseLegacySetSessionModelParams(methodRequest.params));
             case SESSION_STEERING_METHOD:
                 return await this.executeOrQueueSteeringRequest(this.parseSessionSteerParams(methodRequest.params));
+            case SESSION_READ_METHOD:
+                return await this.readSession(parseSessionReadParams(methodRequest.params));
             case SESSION_REWIND_METHOD:
                 return await this.rewindSession(methodRequest.params);
             case ASYNC_TASK_STOP_METHOD: {
@@ -2001,6 +2030,108 @@ export class CodexAcpServer {
             modes: modeState,
             ...this.createSessionConfigOptionsResponse(this.getSessionState(sessionId)),
         };
+    }
+
+    /**
+     * Streams a stored session's history as ordinary `session/update` notifications through the
+     * read-only Codex app-server API, without calling `thread/resume`, acquiring the writer lock,
+     * starting MCP servers, or installing an open `SessionState`.
+     */
+    async readSession(params: SessionReadRequest, signal?: AbortSignal): Promise<SessionReadResponse> {
+        const parsed = parseSessionReadParams(params as Record<string, unknown>);
+        const {sessionId} = parsed;
+        this.assertSessionMutationAllowed(sessionId);
+        if (this.providerUpdate !== null) {
+            await this.waitForProviderUpdate();
+        }
+        const appServer = this.ensureAppServer();
+        if (appServer) await appServer;
+        if (this.hasLocalSession(sessionId) || this.readingSessions.has(sessionId)) {
+            throw sessionAlreadyOpenRequestError(sessionId);
+        }
+        this.readingSessions.add(sessionId);
+        const generation = this.getSessionGeneration(sessionId);
+        const associations = new SubagentAssociations();
+        const nativeChildren = new Set<string>();
+        try {
+            await this.checkAuthorization();
+            let readResult: {thread: Thread; history: AsyncIterable<ThreadItemEntry[]>};
+            try {
+                readResult = await this.runWithProcessCheck(() => this.codexAcpClient.readSessionHistory(sessionId));
+            } catch (error) {
+                throw storedSessionError(sessionId, error, this.sessionIndex.enabled);
+            }
+            if (signal?.aborted) {
+                throw new RequestError(-32800, "Session read was cancelled");
+            }
+            if (this.hasLocalSession(sessionId) || this.getSessionGeneration(sessionId) !== generation) {
+                throw sessionAlreadyOpenRequestError(sessionId);
+            }
+            const cwd = parsed.cwd ?? readResult.thread.cwd;
+            const session = new ACPSessionConnection(this.connection, sessionId);
+            const release = (id: string) => this.clientDelivery.reports.releaseOpen(id);
+            const subagents = this.usesStandardSubagents()
+                ? new StandardSubagentEventRouter(
+                    sessionId,
+                    session,
+                    associations,
+                    release,
+                    this.capabilities,
+                    true,
+                    Promise.resolve(),
+                    () => undefined,
+                    () => null,
+                    undefined,
+                    item => this.userMessageContent(item),
+                )
+                : new CodexSubagentEventRouter(sessionId, this.supportsNativeSubagents(), session, release, () => null);
+            const replayState: HistoryReplayState = {
+                sessionId,
+                cwd,
+                clientCapabilities: this.capabilities,
+                rewindable: false,
+                hasTurn: false,
+                sessionTitle: null,
+                sessionTitleSource: "unset",
+                subagents,
+                nativeChildren,
+            };
+            const isOpen = () => !signal?.aborted
+                && !this.hasLocalSession(sessionId)
+                && this.getSessionGeneration(sessionId) === generation;
+            const readHistory = () => this.streamThreadHistory(
+                sessionId,
+                readResult.thread,
+                readResult.history,
+                replayState,
+                isOpen,
+            );
+            try {
+                const v2 = AcpV2Connection.of(this.connection);
+                if (v2) {
+                    await v2.replay.run(sessionId, () => v2.replay.withHistory(sessionId, readHistory), signal);
+                } else {
+                    await readHistory();
+                }
+            } catch (err) {
+                if (err instanceof SessionClosedDuringLoadError) {
+                    if (signal?.aborted) {
+                        throw new RequestError(-32800, "Session read was cancelled");
+                    }
+                    throw sessionAlreadyOpenRequestError(sessionId);
+                }
+                throw this.recovery?.mapError(err) ?? err;
+            }
+            return {};
+        } finally {
+            this.readingSessions.delete(sessionId);
+            if (!this.hasLocalSession(sessionId)) {
+                this.finishSessionDelivery(sessionId, [
+                    ...associations.forRoot(sessionId).map(child => child.sessionId),
+                    ...nativeChildren,
+                ]);
+            }
+        }
     }
 
     /**
@@ -4149,15 +4280,21 @@ export class CodexAcpServer {
      * Sends the history of a loaded session one page of items at a time. The
      * adapter keeps only the current page, not the whole history.
      */
+    private replaySubagentModels(state: HistoryReplayState): SubagentModels | null {
+        if (!state.availableModels || state.currentModelId === undefined) return null;
+        return this.subagentModels(state as SessionState);
+    }
+
     private async streamThreadHistory(
         sessionId: string,
         thread: Thread,
         history: AsyncIterable<ThreadItemEntry[]>,
+        sessionState: HistoryReplayState = this.getSessionState(sessionId),
+        isOpen?: () => boolean,
     ): Promise<void> {
         const session = new ACPSessionConnection(this.connection, sessionId);
-        const sessionState = this.getSessionState(sessionId);
         const generation = this.getSessionGeneration(sessionId);
-        const isOpen = () => this.getSessionGeneration(sessionId) === generation;
+        const checkOpen = isOpen ?? (() => this.getSessionGeneration(sessionId) === generation);
         const pages = history[Symbol.asyncIterator]();
         const first = await pages.next();
         const firstPage = first.done ? [] : first.value;
@@ -4172,10 +4309,10 @@ export class CodexAcpServer {
         // showing it, as it always has.
         const itemPages = untilSessionClose(
             this.protocolVersion === 2 ? withoutReviewerPrompts(entryPages, cursors) : itemsOfEntries(entryPages, cursors),
-            isOpen,
+            checkOpen,
         );
         if (this.usesStandardSubagents()) {
-            await this.streamStandardHistory(sessionId, standardHistoryItems(itemPages), sessionState, isOpen, cursors);
+            await this.streamStandardHistory(sessionId, standardHistoryItems(itemPages), sessionState, checkOpen, cursors);
             return;
         }
         if (this.supportsNativeSubagents()) {
@@ -4185,7 +4322,7 @@ export class CodexAcpServer {
                 sessionState,
                 new Set([sessionId]),
                 new Set(),
-                isOpen,
+                checkOpen,
                 cursors,
             );
             return;
@@ -4193,7 +4330,7 @@ export class CodexAcpServer {
         const replayedEntities: ReplayedEntities = new Map();
         for await (const items of itemPages) {
             for (const item of items) {
-                if (!isOpen()) throw new SessionClosedDuringLoadError();
+                if (!checkOpen()) throw new SessionClosedDuringLoadError();
                 await this.replayHistoryItem(item, sessionState, session, replayedEntities, cursors);
             }
         }
@@ -4202,7 +4339,7 @@ export class CodexAcpServer {
     private async streamNativeThreadHistory(
         sessionId: string,
         itemPages: AsyncIterable<ThreadItem[]>,
-        sessionState: SessionState,
+        sessionState: HistoryReplayState,
         ancestry: Set<string>,
         unreadableChildren: Set<string>,
         isOpen: () => boolean,
@@ -4212,7 +4349,9 @@ export class CodexAcpServer {
         const announced = new Map<string, {generation: number; sessionId: string; terminal: boolean; model?: string}>();
         // v1 load includes recorded model changes. v2 replay contains conversation history, not past settings.
         const reportModel = async (childSessionId: string, model: string | undefined) => {
-            if (session.protocolVersion === 1) await reportSubagentModel(session, childSessionId, this.subagentModels(sessionState), model);
+            if (session.protocolVersion === 1) {
+                await reportSubagentModel(session, childSessionId, this.replaySubagentModels(sessionState), model);
+            }
         };
         const replayedEntities: ReplayedEntities = new Map();
         for await (const items of itemPages) {
@@ -4245,6 +4384,7 @@ export class CodexAcpServer {
                         if (activityKind === "interacted" && !childItems) continue;
                         const name = nameFromAgentPath(item.agentPath, `Agent ${item.agentThreadId.slice(-8)}`);
                         const model = item.model || previous?.model;
+                        sessionState.nativeChildren?.add(childSessionId);
                         await session.update({
                             sessionUpdate: "subagent_spawned",
                             subagentSessionId: childSessionId,
@@ -4278,14 +4418,16 @@ export class CodexAcpServer {
                                 unreadableChildren.add(item.agentThreadId);
                                 logger.error(`Failed to read subagent history ${item.agentThreadId}`, error);
                             }
-                            try {
-                                await sessionState.asyncTasks.recover(
-                                    item.agentThreadId,
-                                    childSessionId,
-                                    commandIds,
-                                );
-                            } catch (error) {
-                                logger.error(`Failed to restore background terminals for ${item.agentThreadId}`, error);
+                            if (sessionState.asyncTasks) {
+                                try {
+                                    await sessionState.asyncTasks.recover(
+                                        item.agentThreadId,
+                                        childSessionId,
+                                        commandIds,
+                                    );
+                                } catch (error) {
+                                    logger.error(`Failed to restore background terminals for ${item.agentThreadId}`, error);
+                                }
                             }
                         }
                     }
@@ -4294,6 +4436,7 @@ export class CodexAcpServer {
                         if (!child) {
                             const name = nameFromAgentPath(item.agentPath, `Agent ${item.agentThreadId.slice(-8)}`);
                             const model = item.model || undefined;
+                            sessionState.nativeChildren?.add(item.agentThreadId);
                             await session.update({
                                 sessionUpdate: "subagent_spawned",
                                 subagentSessionId: item.agentThreadId,
@@ -4337,7 +4480,7 @@ export class CodexAcpServer {
 
     /** Recorded conversation data is independent of verified runtime ownership and current work. */
     private async streamStandardHistory(
-        sessionId: string, pages: AsyncIterable<RecordedSubagentEntry[]>, state: SessionState, isOpen: () => boolean,
+        sessionId: string, pages: AsyncIterable<RecordedSubagentEntry[]>, state: HistoryReplayState, isOpen: () => boolean,
         cursors: ReplayCursors, threadId = sessionId, ancestry = new Set([threadId]), replayed = new Set<string>(), gaps = new Set<string>(),
     ): Promise<void> {
         const router = state.subagents;
@@ -4354,7 +4497,7 @@ export class CodexAcpServer {
                 if (!isOpen()) throw new SessionClosedDuringLoadError();
                 await router.observeRole(childThreadId, history.thread.agentRole);
                 const parent = router.parentThreadId(childThreadId);
-                if (parent !== undefined) {
+                if (state.asyncTasks && parent !== undefined) {
                     try {
                         const runtime = await this.codexAcpClient.restoreSubagentSubscription(state.sessionId, parent, history.thread);
                         if (runtime) await router.restoreRuntime(runtime, this.codexAcpClient.appServerClient.runningTurnId(childThreadId));
@@ -4362,7 +4505,9 @@ export class CodexAcpServer {
                 }
                 await this.streamStandardHistory(childId, history.items, state, isOpen, cursors, childThreadId,
                     new Set([...ancestry, childThreadId]), replayed, gaps);
-                await state.asyncTasks.reconcile(childThreadId, childId);
+                if (state.asyncTasks) {
+                    await state.asyncTasks.reconcile(childThreadId, childId);
+                }
             } catch (error) {
                 if (error instanceof SessionClosedDuringLoadError) throw error;
                 gaps.add(childThreadId);
@@ -4373,7 +4518,7 @@ export class CodexAcpServer {
             const childId = await router.announceHistory(item.agentThreadId, item.agentPath);
             if (childId === null) return false;
             if (session.protocolVersion === 1) {
-                const configOptions = subagentConfigurationOptions(this.subagentModels(state), {model: item.model, effort: item.reasoningEffort});
+                const configOptions = subagentConfigurationOptions(this.replaySubagentModels(state), {model: item.model, effort: item.reasoningEffort});
                 if (configOptions.length > 0) {
                     try { await session.update({sessionUpdate: "config_option_update", configOptions}, childId); }
                     catch (error) { logger.error(`Failed to replay child configuration ${item.agentThreadId}`, error); }
@@ -4447,7 +4592,7 @@ export class CodexAcpServer {
 
     private async publishThreadHistoryTitle(
         session: ACPSessionConnection,
-        sessionState: SessionState,
+        sessionState: HistoryReplayState,
         thread: Thread,
         firstItems: ThreadItem[],
     ): Promise<void> {
@@ -4517,7 +4662,7 @@ export class CodexAcpServer {
     }
 
     private async publishFallbackSessionTitle(
-        sessionState: SessionState,
+        sessionState: Pick<HistoryReplayState, "sessionId" | "sessionTitle" | "sessionTitleSource">,
         title: string | null,
     ): Promise<void> {
         if (sessionState.sessionTitleSource !== "unset" || !title) return;
@@ -4583,7 +4728,7 @@ export class CodexAcpServer {
     }
 
     /** The cursor as the client gets it: with `rewind` where `_session/rewind` can act. */
-    private cursorForClient(cursor: CursorUpdate, sessionState: SessionState): CursorUpdate {
+    private cursorForClient(cursor: CursorUpdate, sessionState: Pick<HistoryReplayState, "rewindable">): CursorUpdate {
         return sessionState.rewindable && this.supportsSessionRewind() ? withRewindCapability(cursor) : cursor;
     }
 
@@ -4600,7 +4745,7 @@ export class CodexAcpServer {
     /** Replays `item`, then the cursor before its turn if `item` is the first user message of the turn. */
     private async replayHistoryItem(
         item: ThreadItem,
-        sessionState: SessionState,
+        sessionState: HistoryReplayState,
         session: ACPSessionConnection,
         replayedEntities: ReplayedEntities,
         cursors: ReplayCursors,
@@ -4617,7 +4762,7 @@ export class CodexAcpServer {
         }
     }
 
-    private async createHistoryUpdates(item: ThreadItem, sessionState: SessionState): Promise<UpdateSessionEvent[]> {
+    private async createHistoryUpdates(item: ThreadItem, sessionState: HistoryReplayState): Promise<UpdateSessionEvent[]> {
         const renderer = new AcpToolCallRenderer(sessionState.clientCapabilities);
         switch (item.type) {
             case "userMessage":

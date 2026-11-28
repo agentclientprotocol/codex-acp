@@ -17,6 +17,15 @@ import {
 } from "./async-tasks/AsyncTaskExtension";
 
 import {SESSION_REWIND_METHOD, type SessionRewindRequest} from "./SessionRewind";
+import {
+    SESSION_READ_METHOD,
+    SESSION_READ_META_KEY,
+    SESSION_ALREADY_OPEN_REASON,
+    sessionReadCapability,
+    type SessionReadCapability,
+    type SessionReadRequest,
+    type SessionReadResponse,
+} from "./SessionRead";
 
 export {
     AUTH_STATUS_META_KEY,
@@ -40,6 +49,16 @@ export {
     type GoalSnapshot,
     type GoalStatus,
 } from "./GoalExtension";
+
+export {
+    SESSION_ALREADY_OPEN_REASON,
+    SESSION_READ_META_KEY,
+    SESSION_READ_METHOD,
+    sessionReadCapability,
+    type SessionReadCapability,
+    type SessionReadRequest,
+    type SessionReadResponse,
+};
 
 export const LEGACY_SET_SESSION_MODEL_METHOD = "session/set_model";
 export const SESSION_STEERING_METHOD = "_session/steering";
@@ -79,6 +98,7 @@ export type ExtMethodRequest =
     | AuthenticationLogoutRequest
     | LegacySetSessionModelExtRequest
     | SessionSteeringExtRequest
+    | SessionReadExtRequest
     | GoalControlExtRequest
     | AsyncTaskStopExtRequest
     | SessionRewindExtRequest
@@ -90,6 +110,7 @@ export function isExtMethodRequest(request: { method: string, params: Record<str
         || request.method === GOAL_CONTROL_METHOD
         || request.method === LEGACY_GOAL_CONTROL_METHOD
         || request.method === SESSION_STEERING_METHOD
+        || request.method === SESSION_READ_METHOD
         || request.method === ASYNC_TASK_STOP_METHOD
         || request.method === SESSION_REWIND_METHOD;
 }
@@ -153,4 +174,16 @@ export async function steerSessionWithFallback(
     params: SessionSteerRequest,
 ): Promise<SessionSteeringResponse> {
     return await connection.request<SessionSteeringResponse, SessionSteerRequest>(SESSION_STEERING_METHOD, params);
+}
+
+export type SessionReadExtRequest = {
+    method: typeof SESSION_READ_METHOD;
+    params: SessionReadRequest;
+}
+
+export async function readSessionWithFallback(
+    connection: Pick<ClientContext, "request">,
+    params: SessionReadRequest,
+): Promise<SessionReadResponse> {
+    return await connection.request<SessionReadResponse, SessionReadRequest>(SESSION_READ_METHOD, params);
 }

@@ -72,6 +72,9 @@
     "steering": {
       "supported": true
     },
+    "sessionRead": {
+      "supported": true
+    },
     "jetbrains": {
       "air": {
         "version": 1,
