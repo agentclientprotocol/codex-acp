@@ -19,6 +19,7 @@ Use [OpenAI Codex](https://github.com/openai/codex) from [Agent Client Protocol]
 - [Session cursors](docs/session-cursors.md): `cursor_update` positions and `session/fork` at a cursor.
 - Editing a user message in place with [`_session/rewind`](docs/air-extensions.md#session-rewind) for AIR.
 - Mid-turn input through the [_session/steering extension](docs/steering.md), with an opt-in host-owned fallback when no turn can accept it.
+- Read-only session history replay through [`_session/read`](docs/session-read.md), without acquiring the Codex writer lock or opening the session.
 - [Async Codex questions](docs/async-questions.md) as non-blocking form elicitations, with answers steered into the turn that asked them.
 - [Background terminal tasks](docs/background-work.md) with standard ACP v2 state and terminal Stop. ACP v1 retains the Air extension.
 - Session-scoped long-running goals in AIR through the [goal extension](docs/air-extensions.md#goal).

@@ -73,6 +73,9 @@ describe('CodexACPAgent - initialize', () => {
                 steering: {
                     supported: true,
                 },
+                sessionRead: {
+                    supported: true,
+                },
             },
         });
     });
@@ -92,6 +95,9 @@ describe('CodexACPAgent - initialize', () => {
         });
         expect(result._meta).toEqual({
             steering: {
+                supported: true,
+            },
+            sessionRead: {
                 supported: true,
             },
             jetbrains: {

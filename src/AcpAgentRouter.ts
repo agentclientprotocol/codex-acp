@@ -17,6 +17,7 @@ import {
 } from "./AcpExtensions";
 import {ASYNC_TASK_STOP_METHOD} from "./async-tasks/AsyncTaskExtension";
 import {SESSION_REWIND_METHOD} from "./SessionRewind";
+import {SESSION_READ_METHOD, sessionReadParamsParser} from "./SessionRead";
 import {CODEX_HOOKS_LIST_METHOD, CODEX_HOOKS_TRUST_METHOD} from "./CodexHookTrust";
 import {
     SESSION_ARCHIVE_METHOD,
@@ -234,6 +235,7 @@ function createRouter(
         .onRequest("authentication/logout", emptyExtensionParamsParser, (ctx) => getAgent().extMethod("authentication/logout", ctx.params))
         .onRequest(LEGACY_SET_SESSION_MODEL_METHOD, legacySetSessionModelParamsParser, (ctx) => getAgent(ctx.params).extMethod(LEGACY_SET_SESSION_MODEL_METHOD, ctx.params))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent(ctx.params).extMethod(SESSION_STEERING_METHOD, ctx.params))
+        .onRequest(SESSION_READ_METHOD, sessionReadParamsParser, (ctx) => getAgentForPaths({sessionId: ctx.params.sessionId, cwd: ctx.params.cwd ?? null}).readSession(ctx.params, ctx.signal))
         .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent(ctx.params).extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
         .onRequest(SESSION_REWIND_METHOD, sessionRewindParamsParser, (ctx) => getAgent(ctx.params).extMethod(SESSION_REWIND_METHOD, ctx.params))
         .onRequest(CODEX_HOOKS_LIST_METHOD, hooksListParamsParser, (ctx) => getAgent().listHooks(ctx.params.cwd))
@@ -291,6 +293,7 @@ function createRouter(
         .onRequest(acpV2.methods.agent.providers.set, (ctx) => getAgent().setProvider(ctx.params))
         .onRequest(acpV2.methods.agent.providers.disable, (ctx) => getAgent().disableProvider(ctx.params))
         .onRequest(SESSION_STEERING_METHOD, sessionSteerParamsParser, (ctx) => getAgent(ctx.params).extMethod(SESSION_STEERING_METHOD, ctx.params))
+        .onRequest(SESSION_READ_METHOD, sessionReadParamsParser, (ctx) => getAgentForPaths({sessionId: ctx.params.sessionId, cwd: ctx.params.cwd ?? null}).readSession(ctx.params, ctx.signal))
         .onRequest(GOAL_CONTROL_METHOD, goalControlParamsParser, (ctx) => getAgent(ctx.params).extMethod(GOAL_CONTROL_METHOD, ctx.params))
         .onRequest(ASYNC_TASK_STOP_METHOD, asyncTaskStopParamsParser, (ctx) => getAgent(ctx.params).extMethod(ASYNC_TASK_STOP_METHOD, ctx.params))
         .onRequest(SESSION_RENAME_METHOD, sessionRenameParamsParser, (ctx) => getAgent(ctx.params).sessionIndex.rename(ctx.params))
