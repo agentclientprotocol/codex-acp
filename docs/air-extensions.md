@@ -1254,7 +1254,7 @@ A thread that is not loaded here has no `state`. A change of `state` is a row ch
 members outside the recent list page. Check for `sessionBatchGet` in
 `initialize.result._meta.jetbrains.air.capabilities` before calling it.
 
-The params object contains only `sessionIds`: an array of distinct, non-blank
+The params object contains `sessionIds` and optional `_meta`. `sessionIds` is an array of distinct, non-blank
 strings. IDs match exactly, without trimming or case normalization. Malformed
 params, duplicates or extra fields return `Invalid params` (`-32602`). The
 adapter sets no limit on the number of IDs; the client chooses the batch size
@@ -1315,6 +1315,48 @@ unindexed IDs and read legacy rollout metadata, so lookup latency can depend on
 total stored history. Native legacy `thread/read` can also return a
 creation-based `updatedAt` where `thread/list` reports the stored update time;
 exact timestamp equality is not guaranteed.
+
+#### Stored transcript text
+
+A client can declare `sessionTranscriptText` with `sessionIndex` in its versioned AIR capabilities.
+The adapter advertises `sessionTranscriptText` only after that opt-in. This applies to ACP v1 and v2.
+
+Set `_meta.jetbrains.air.include` to `transcriptRevision` or `transcriptTextSnapshot`.
+Include exactly one session ID and its absolute directory in `_meta.jetbrains.air.cwd`.
+An invalid mode, ID count, directory, or missing opt-in returns `-32602`.
+A different directory or a transcript missing before its initial file revision is read returns no row.
+
+Both modes add `_meta.jetbrains.air.transcriptTextSnapshot` to the row.
+The revision mode returns `{revision}` without hydrating messages.
+The snapshot mode returns `{revision, messages, truncated}`.
+Each message has `{role, text}`. The roles are `user`, `assistant`, and `compact_summary` when available.
+The revision identifies transcript contents independently of the title or list timestamp.
+Once the initial revision is read, an edit, disappearance, or a detected change of the selected rollout,
+directory, or history mode returns `-32603` with `data.reason: "transcriptChanged"`. The client can retry immediately.
+The adapter checks the source metadata in a legacy full-history response and rechecks the selected rollout and
+file revision before returning. Item pages do not identify their rollout: these checks cannot detect a paginated
+source switching from A to B and back to A between checks. They do not provide an atomic snapshot across that race.
+Ordinary list and batch requests contain no transcript text.
+
+The adapter reads paginated items through the app-server. Legacy history uses a bounded full-history read.
+Archived and old sessions remain eligible, including compressed rollouts.
+The projection excludes tools, reasoning, and non-text input.
+The current app-server exposes compaction markers without summary text.
+Such a marker preserves available matches and sets `truncated: true`; it creates no synthetic summary.
+A response beyond the projection budget also preserves complete messages and sets `truncated: true`.
+The projection budget is 4 MiB of returned messages and 10,000 raw history items, including omitted tools and
+reasoning. The item boundary is independent of page size or response speed. Item pages request up to 100 items
+and can prefetch one page; the newest-item boundary uses one separate request. Legacy reads accept at most
+64 MiB of uncompressed rollout data. These fixed limits preserve complete messages with `truncated: true`,
+including an empty message list if no text fits.
+
+A shared 60-second deadline bounds history reading and final metadata verification.
+Reaching it returns `-32603` with `data.reason: "transcriptReadTimeout"` and no
+snapshot to cache. The client should retry later with backoff, rather than retrying immediately. Time spent
+waiting never changes a successful snapshot's revision, messages, or `truncated` flag.
+Cancellation returns `-32800` promptly while waiting for metadata or history and stops further paging.
+The app-server has no history-read cancellation RPC, so an already submitted read can finish in the
+background; its late result or error is handled without producing another response or continuing the scan.
 
 ### Session list subscription
 

@@ -9,7 +9,7 @@ import path from "node:path";
 import type * as acp from "@agentclientprotocol/sdk/unstable";
 import {RequestError} from "@agentclientprotocol/sdk/unstable";
 import {ACPSessionConnection, type AcpClientConnection} from "./ACPSessionConnection";
-import {clientSupportsAirCapability, publishAirSessionMetadata} from "./AirExtension";
+import {clientSupportsAirCapability, publishAirSessionMetadata, withAirMeta} from "./AirExtension";
 import type {ServerNotification} from "./app-server";
 import type {CodexAcpClient} from "./CodexAcpClient";
 import type {SessionState} from "./CodexAcpServer";
@@ -21,6 +21,7 @@ import {
     AIR_ARCHIVED_KEY,
     AIR_SESSION_ARCHIVE_KEY,
     AIR_SESSION_BATCH_GET_KEY,
+    AIR_SESSION_TRANSCRIPT_TEXT_KEY,
     AIR_SESSION_INDEX_KEY,
     AIR_SESSION_LIST_SUBSCRIBE_KEY,
     AIR_SESSION_RENAME_KEY,
@@ -50,6 +51,8 @@ import {SessionListSubscriptions, type SessionListSubscriptionTimings, type Thre
 import {SessionWriteQueue} from "./SessionWriteQueue";
 import type {SerializeTitleWrite} from "./TitleGenerator";
 import {readSessionBatchMetadata} from "./SessionBatchGet";
+import {readTranscriptText, transcriptTextOptions} from "./SessionTranscriptText";
+import {throwIfRequestCancelled, withRequestCancellation} from "./RequestCancellation";
 
 /** What the session index needs from `CodexAcpServer`. */
 export interface SessionIndexHost {
@@ -71,6 +74,7 @@ type SessionPage = {sessions: acp.SessionInfo[], nextCursor: string | null};
 export class SessionIndexService {
     /** The client declared the AIR `sessionIndex` capability. */
     enabled = false;
+    private transcriptTextEnabled = false;
     private readonly activity: SessionIndexActivity;
     private readonly writes = new SessionWriteQueue();
     private readonly titles: SessionIndexTitles;
@@ -109,6 +113,7 @@ export class SessionIndexService {
     /** Reads the client capabilities of `initialize`. */
     configure(clientCapabilities: acp.ClientCapabilities | undefined): void {
         this.enabled = clientSupportsAirCapability(clientCapabilities, AIR_SESSION_INDEX_KEY);
+        this.transcriptTextEnabled = this.enabled && clientSupportsAirCapability(clientCapabilities, AIR_SESSION_TRANSCRIPT_TEXT_KEY);
     }
 
     /**
@@ -118,7 +123,7 @@ export class SessionIndexService {
      */
     agentCapabilities(): string[] {
         return this.enabled
-            ? [AIR_SESSION_INDEX_KEY, AIR_SESSION_BATCH_GET_KEY, AIR_SESSION_ARCHIVE_KEY, AIR_SESSION_RENAME_KEY, AIR_SESSION_LIST_SUBSCRIBE_KEY, AIR_SESSION_WORKTREES_KEY]
+            ? [AIR_SESSION_INDEX_KEY, AIR_SESSION_BATCH_GET_KEY, AIR_SESSION_ARCHIVE_KEY, AIR_SESSION_RENAME_KEY, AIR_SESSION_LIST_SUBSCRIBE_KEY, AIR_SESSION_WORKTREES_KEY, ...(this.transcriptTextEnabled ? [AIR_SESSION_TRANSCRIPT_TEXT_KEY] : [])]
             : [];
     }
 
@@ -164,17 +169,27 @@ export class SessionIndexService {
         return await this.readRows(cwd, options, params.cursor ?? null);
     }
 
-    /** Metadata only: no adapter list paging, session load/resume or history replay. */
-    async batchGet({sessionIds}: SessionBatchGetRequest): Promise<SessionBatchGetResponse> {
+    /** Reads metadata and optional stored text without loading or resuming a session. */
+    async batchGet({sessionIds, _meta}: SessionBatchGetRequest, signal?: AbortSignal): Promise<SessionBatchGetResponse> {
         this.require(SESSION_BATCH_GET_METHOD);
+        const text = transcriptTextOptions(_meta, sessionIds);
+        if (text && !this.transcriptTextEnabled) throw RequestError.invalidParams(undefined, "Declare sessionTranscriptText in initialize first");
+        throwIfRequestCancelled(signal);
         if (sessionIds.length === 0) return {sessions: []};
-        await this.host.ensureAppServer();
+        await withRequestCancellation(this.host.ensureAppServer(), signal);
         const client = this.host.client();
         const entries = await this.host.runWithProcessCheck(() => readSessionBatchMetadata(
-            client.appServerClient, client.getHomePath(), sessionIds,
+            client.appServerClient, client.getHomePath(), sessionIds, signal,
         ));
         // `thread/read` gives the fork parent, so the rows need no background read for it.
-        return {sessions: await this.rows(entries.map(entry => ({...entry, read: true as const})), true)};
+        const rows = await withRequestCancellation(this.rows(entries.map(entry => ({...entry, read: true as const})), true), signal);
+        if (!text) return {sessions: rows};
+        const requestedCwds = new Set(canonicalCwds(text.cwd));
+        const row = rows.find(row => canonicalCwds(row.cwd).some(cwd => requestedCwds.has(cwd)));
+        const entry = entries.find(entry => entry.thread.id === row?.sessionId);
+        if (!row || !entry) return {sessions: []};
+        const snapshot = await readTranscriptText(client.appServerClient, entry.thread, text.mode, signal);
+        return {sessions: snapshot ? [{...row, _meta: withAirMeta(row._meta, "transcriptTextSnapshot", snapshot)}] : []};
     }
 
     /**

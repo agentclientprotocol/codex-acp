@@ -1,0 +1,30 @@
+[
+  {
+    "pageSize": 64,
+    "snapshot": {
+      "revision": "<revision>",
+      "messages": [
+        {
+          "role": "assistant",
+          "text": "Saved answer"
+        }
+      ],
+      "truncated": true
+    },
+    "forwardPages": 158
+  },
+  {
+    "pageSize": 100,
+    "snapshot": {
+      "revision": "<revision>",
+      "messages": [
+        {
+          "role": "assistant",
+          "text": "Saved answer"
+        }
+      ],
+      "truncated": true
+    },
+    "forwardPages": 102
+  }
+]

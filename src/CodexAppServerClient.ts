@@ -173,6 +173,20 @@ const HISTORY_PAGE_ITEMS = 100;
  */
 const HISTORY_PAGE_TIMEOUT_MS = 60_000;
 
+export interface HistoryReadOptions {
+    signal?: AbortSignal;
+    /** Unix time in milliseconds. */
+    deadline?: number;
+}
+
+export class HistoryReadTimeoutError extends Error {
+    constructor(message = "The thread history read timed out") {
+        super(message);
+    }
+}
+
+type ItemHistoryReadOptions = HistoryReadOptions & {lastItemCursor?: string | null; turnId?: string};
+
 /**
  * A type-safe client over the Codex App Server's JSON-RPC API.
  * Maps each request to its expected response and exposes clear, typed methods for supported JSON-RPC operations.
@@ -712,8 +726,9 @@ export class CodexAppServerClient {
         return await this.sendRequest({ method: "thread/loaded/list", params: params });
     }
 
-    async threadRead(params: ThreadReadParams): Promise<ThreadReadResponse> {
-        return await this.sendRequest({ method: "thread/read", params: params });
+    async threadRead(params: ThreadReadParams, options?: HistoryReadOptions): Promise<ThreadReadResponse> {
+        const read = () => this.sendRequest<ThreadReadResponse>({method: "thread/read", params});
+        return options ? await withHistoryTimeout(read, "thread/read", params.threadId, options) : await read();
     }
 
     /** Drops the turn `beforeTurnId` and every later one. Reloads the thread, which interrupts its running turn. */
@@ -745,7 +760,7 @@ export class CodexAppServerClient {
      */
     async *threadItemPages(
         threadId: string,
-        options: {lastItemCursor?: string | null; turnId?: string} = {},
+        options: ItemHistoryReadOptions = {},
     ): AsyncGenerator<ThreadItem[]> {
         for await (const page of this.threadItemEntryPages(threadId, options)) {
             yield page.map(entry => entry.item);
@@ -755,16 +770,16 @@ export class CodexAppServerClient {
     /** The pages of {@link threadItemPages}, with the turn of each item. */
     async *threadItemEntryPages(
         threadId: string,
-        options: {lastItemCursor?: string | null; turnId?: string} = {},
+        options: ItemHistoryReadOptions = {},
     ): AsyncGenerator<ThreadItemEntry[]> {
         const turnId = options.turnId ?? null;
-        const last = await withHistoryTimeout(this.threadItemsList({
+        const last = await withHistoryTimeout(() => this.threadItemsList({
             threadId,
             turnId,
             cursor: options.lastItemCursor ?? null,
             limit: 1,
             sortDirection: "desc",
-        }), "thread/items/list", threadId);
+        }), "thread/items/list", threadId, options);
         const lastItemId = last.data[0]?.item.id;
         if (lastItemId === undefined) return;
         const pages = historyPages(threadId, "thread/items/list", cursor => this.threadItemsList({
@@ -773,7 +788,7 @@ export class CodexAppServerClient {
             cursor,
             limit: HISTORY_PAGE_ITEMS,
             sortDirection: "asc",
-        }), page => page.some(entry => entry.item.id === lastItemId));
+        }), page => page.some(entry => entry.item.id === lastItemId), options);
         for await (const page of pages) {
             const lastIndex = page.findIndex(entry => entry.item.id === lastItemId);
             if (lastIndex >= 0) {
@@ -804,7 +819,7 @@ export class CodexAppServerClient {
      * during the read is not in the pages.
      */
     private async *threadHistoryPages(threadId: string): AsyncGenerator<Turn[]> {
-        const last = await withHistoryTimeout(this.threadTurnsList({
+        const last = await withHistoryTimeout(() => this.threadTurnsList({
             threadId,
             cursor: null,
             limit: 1,
@@ -1550,10 +1565,11 @@ async function* historyPages<T>(
     method: string,
     requestPage: (cursor: string | null) => Promise<{data: T[]; nextCursor: string | null}>,
     endsHistory?: (page: T[]) => boolean,
+    options: HistoryReadOptions = {},
 ): AsyncGenerator<T[]> {
     type Page = {data: T[]; nextCursor: string | null};
     const request = (cursor: string | null): Promise<Page> => {
-        const page = withHistoryTimeout(requestPage(cursor), method, threadId);
+        const page = withHistoryTimeout(() => requestPage(cursor), method, threadId, options);
         // A caller that stops early never reads the next page. Its failure is not an unhandled rejection.
         page.catch(() => {});
         return page;
@@ -1578,15 +1594,19 @@ async function* historyPages<T>(
 }
 
 /** The page, or an error when Codex does not answer within {@link HISTORY_PAGE_TIMEOUT_MS}. */
-async function withHistoryTimeout<T>(page: Promise<T>, method: string, threadId: string): Promise<T> {
+async function withHistoryTimeout<T>(read: () => Promise<T>, method: string, threadId: string, options: HistoryReadOptions = {}): Promise<T> {
+    throwIfRequestCancelled(options.signal);
+    const remaining = options.deadline === undefined ? Infinity : options.deadline - Date.now();
+    if (remaining <= 0) throw new HistoryReadTimeoutError();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(
-            `Codex did not answer ${method} for thread ${threadId} within ${HISTORY_PAGE_TIMEOUT_MS / 1000} s`,
-        )), HISTORY_PAGE_TIMEOUT_MS);
+        const message = remaining <= HISTORY_PAGE_TIMEOUT_MS ? undefined
+            : `Codex did not answer ${method} for thread ${threadId} within ${HISTORY_PAGE_TIMEOUT_MS / 1000} s`;
+        timer = setTimeout(() => reject(new HistoryReadTimeoutError(message)), Math.min(remaining, HISTORY_PAGE_TIMEOUT_MS));
     });
     try {
-        return await Promise.race([page, timeout]);
+        // App-server history reads have no cancel RPC. Stop waiting and handle their eventual response.
+        return await withRequestCancellation(Promise.race([read(), timeout]), options.signal);
     } finally {
         clearTimeout(timer);
     }
