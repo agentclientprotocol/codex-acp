@@ -14,7 +14,10 @@ import {deferred} from "../acp-test-utils";
 import type {Thread, ThreadItem} from "../../app-server/v2";
 
 const cleanup: (() => void)[] = [];
-afterEach(() => cleanup.splice(0).reverse().forEach(dispose => dispose()));
+afterEach(() => {
+    vi.useRealTimers();
+    cleanup.splice(0).reverse().forEach(dispose => dispose());
+});
 
 async function connect(version: 1 | 2, capabilities: string[]) {
     const mocks = createMockConnections();
@@ -90,32 +93,104 @@ describe.each([1, 2] as const)("_session/batch_get over ACP v%i", version => {
             }
             return respond(method, params);
         });
-        await expect(read()).rejects.toMatchObject({code: -32603, message: expect.stringContaining("The transcript changed during the read")});
+        await expect(read()).rejects.toMatchObject({code: -32603, data: {reason: "transcriptChanged"}});
     });
 
-    it("bounds pages containing only tools and returns a partial snapshot", async () => {
-        const {backend, read, thread, answer, entry} = await transcriptConnection(version);
-        let forwardPages = 0;
+    it("rejects legacy text from B even when the final selection is A again", async () => {
+        const {backend, read, thread, directory, answer} = await transcriptConnection(version, "legacy");
+        const respond = backend.getMockImplementation()!;
+        const other = path.join(directory, "other.jsonl");
+        fs.writeFileSync(other, "different transcript");
+        backend.mockImplementation(async (method: string, params: any) => params.includeTurns
+            ? {thread: {...thread, path: other, turns: [{items: [{...answer, text: "Text from B"}]}]}}
+            : respond(method, params));
+        await expect(read()).rejects.toMatchObject({code: -32603, data: {reason: "transcriptChanged"}});
+    });
+
+    it.each(["beforeRevision", "duringHistory", "duringVerification"] as const)("handles a rollout disappearing $0", async stage => {
+        const {backend, read, thread} = await transcriptConnection(version);
+        const respond = backend.getMockImplementation()!;
+        let metadataReads = 0;
+        backend.mockImplementation(async (method: string, params: any) => {
+            if (method === "thread/read") metadataReads++;
+            if (stage === "beforeRevision" && method === "thread/read" && metadataReads === 1
+                || stage === "duringHistory" && params.sortDirection === "asc"
+                || stage === "duringVerification" && method === "thread/read" && metadataReads === 2) fs.unlinkSync(thread.path!);
+            return respond(method, params);
+        });
+        if (stage === "beforeRevision") expect(await read()).toEqual({sessions: []});
+        else await expect(read()).rejects.toMatchObject({code: -32603, data: {reason: "transcriptChanged"}});
+    });
+
+    it.each(["paginated", "legacy"] as const)("reports a retry-later reason for a stalled %s read", async historyMode => {
+        const {backend, read} = await transcriptConnection(version, historyMode);
+        const respond = backend.getMockImplementation()!;
+        const entered = deferred<void>();
+        const pending = deferred<any>();
+        vi.useFakeTimers({toFake: ["Date", "setTimeout", "clearTimeout"]});
+        backend.mockImplementation(async (method: string, params: any) => {
+            if (params.includeTurns || params.sortDirection === "desc") {
+                entered.resolve();
+                return pending.promise;
+            }
+            return respond(method, params);
+        });
+        const timedOut = expect(read()).rejects.toMatchObject({code: -32603, data: {reason: "transcriptReadTimeout"}});
+        await entered.promise;
+        await vi.advanceTimersByTimeAsync(60_000);
+        await timedOut;
+        pending.reject(new Error("Late backend failure"));
+    });
+
+    it("returns the same snapshot at different page speeds for an unchanged revision", async () => {
+        const {backend, read, thread, entry} = await transcriptConnection(version);
+        vi.useFakeTimers({toFake: ["Date", "setTimeout", "clearTimeout"]});
+        let delayMs = 0;
         backend.mockImplementation(async (method: string, params: any) => {
             if (method === "thread/read") return {thread: {...thread, turns: []}};
-            if (params.sortDirection === "desc") return {data: [entry({...answer, id: "last"})], nextCursor: null};
-            forwardPages++;
-            const tool = {type: "commandExecution", id: `tool-${forwardPages}`, command: "hidden", aggregatedOutput: "hidden"} as ThreadItem;
-            return {data: [entry(forwardPages === 1 ? answer : tool)], nextCursor: `page-${forwardPages}`};
+            const index = params.sortDirection === "desc" ? 29 : Number(params.cursor ?? 0);
+            if (params.sortDirection === "asc") vi.setSystemTime(Date.now() + delayMs);
+            const item = {type: "agentMessage", id: `message-${index}`, text: `Answer ${index}`} as ThreadItem;
+            return {data: [entry(item)], nextCursor: index === 29 ? null : `${index + 1}`};
         });
-        const response = await read();
-        const snapshot = response.sessions[0]._meta.jetbrains.air.transcriptTextSnapshot;
-        await expect(JSON.stringify({snapshot: {...snapshot, revision: "<revision>"}, forwardPages}, null, 2))
+        const fast = (await read()).sessions[0]._meta.jetbrains.air.transcriptTextSnapshot;
+        delayMs = 400;
+        const slow = (await read()).sessions[0]._meta.jetbrains.air.transcriptTextSnapshot;
+        expect(slow).toEqual(fast);
+        expect(slow).toMatchObject({truncated: false, messages: Array.from({length: 30}, (_, index) => ({role: "assistant", text: `Answer ${index}`}))});
+    });
+
+    it("bounds raw items independently of page boundaries, including omitted tools", async () => {
+        const {backend, read, thread, answer, entry} = await transcriptConnection(version);
+        const results = [];
+        for (const pageSize of [64, 100]) {
+            let forwardPages = 0;
+            backend.mockImplementation(async (method: string, params: any) => {
+                if (method === "thread/read") return {thread: {...thread, turns: []}};
+                if (params.sortDirection === "desc") return {data: [entry({...answer, id: "last"})], nextCursor: null};
+                forwardPages++;
+                const start = Number(params.cursor ?? 0);
+                const data = Array.from({length: pageSize}, (_, index) => entry(start + index === 0 ? answer
+                    : {type: "commandExecution", id: `tool-${start + index}`, command: "hidden", aggregatedOutput: "hidden"} as ThreadItem));
+                return {data, nextCursor: `${start + pageSize}`};
+            });
+            const response = await read();
+            const snapshot = response.sessions[0]._meta.jetbrains.air.transcriptTextSnapshot;
+            results.push({pageSize, snapshot: {...snapshot, revision: "<revision>"}, forwardPages});
+        }
+        await expect(JSON.stringify(results, null, 2))
             .toMatchFileSnapshot("data/session-transcript-scan-budget.json");
     });
 
-    it.each(["metadata", "boundary", "page", "verification"] as const)("cancels a pending $0 read over the wire", async stage => {
-        const {backend, read} = await transcriptConnection(version);
+    it.each(["metadata", "boundary", "page", "verification"].flatMap(stage =>
+        ["success", "error"].map(late => ({stage, late}))))("cancels a pending $stage read before its late $late", async ({stage, late}) => {
+        const {backend, read, answer, entry} = await transcriptConnection(version);
         const respond = backend.getMockImplementation()!;
         const pending = deferred<any>();
         const entered = deferred<void>();
         let metadataReads = 0;
         let calls = 0;
+        let finish: (() => Promise<any>) | undefined;
         backend.mockImplementation(async (method: string, params: any) => {
             calls++;
             if (method === "thread/read") metadataReads++;
@@ -123,7 +198,11 @@ describe.each([1, 2] as const)("_session/batch_get over ACP v%i", version => {
                 || stage === "boundary" && params.sortDirection === "desc"
                 || stage === "page" && params.sortDirection === "asc"
                 || stage === "verification" && method === "thread/read" && metadataReads === 2;
-            if (waiting) { entered.resolve(); return pending.promise; }
+            if (waiting) {
+                finish = () => respond(method, params);
+                entered.resolve();
+                return pending.promise;
+            }
             return respond(method, params);
         });
         const controller = new AbortController();
@@ -132,7 +211,10 @@ describe.each([1, 2] as const)("_session/batch_get over ACP v%i", version => {
         controller.abort();
         await cancelled;
         const callsAtCancellation = calls;
-        pending.reject(new Error("Late backend failure"));
+        if (late === "error") pending.reject(new Error("Late backend failure"));
+        else pending.resolve(stage === "page"
+            ? {data: [entry({...answer, id: "intermediate"})], nextCursor: "more", backwardsCursor: null}
+            : await finish!());
         await new Promise(resolve => setImmediate(resolve));
         expect(calls).toBe(callsAtCancellation);
     });

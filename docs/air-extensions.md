@@ -1323,15 +1323,18 @@ The adapter advertises `sessionTranscriptText` only after that opt-in. This appl
 Set `_meta.jetbrains.air.include` to `transcriptRevision` or `transcriptTextSnapshot`.
 Include exactly one session ID and its absolute directory in `_meta.jetbrains.air.cwd`.
 An invalid mode, ID count, directory, or missing opt-in returns `-32602`.
-A different directory or unavailable transcript returns no row.
+A different directory or a transcript missing before its initial file revision is read returns no row.
 
 Both modes add `_meta.jetbrains.air.transcriptTextSnapshot` to the row.
 The revision mode returns `{revision}` without hydrating messages.
 The snapshot mode returns `{revision, messages, truncated}`.
 Each message has `{role, text}`. The roles are `user`, `assistant`, and `compact_summary` when available.
 The revision identifies transcript contents independently of the title or list timestamp.
-An edit or a change of the selected rollout, directory, or history mode during a read returns `-32603`.
-Before returning, the adapter rechecks the selected rollout and its revision. The client can retry.
+Once the initial revision is read, an edit, disappearance, or a detected change of the selected rollout,
+directory, or history mode returns `-32603` with `data.reason: "transcriptChanged"`. The client can retry immediately.
+The adapter checks the source metadata in a legacy full-history response and rechecks the selected rollout and
+file revision before returning. Item pages do not identify their rollout: these checks cannot detect a paginated
+source switching from A to B and back to A between checks. They do not provide an atomic snapshot across that race.
 Ordinary list and batch requests contain no transcript text.
 
 The adapter reads paginated items through the app-server. Legacy history uses a bounded full-history read.
@@ -1340,13 +1343,16 @@ The projection excludes tools, reasoning, and non-text input.
 The current app-server exposes compaction markers without summary text.
 Such a marker preserves available matches and sets `truncated: true`; it creates no synthetic summary.
 A response beyond the projection budget also preserves complete messages and sets `truncated: true`.
-The projection budget is 4 MiB of returned messages. A paginated scan reads at most 100 forward pages of
-100 items, plus one request for the newest-item boundary, and has a 5-second time budget.
-All items count toward the page budget, including tools and reasoning that the projection omits.
-Legacy reads accept at most 64 MiB of uncompressed rollout data and share the 5-second scan budget.
-Reaching a scan budget returns complete messages collected so far with `truncated: true`, including an
-empty message list if none were collected. The final metadata verification has its own 5-second deadline;
-if it cannot establish a consistent snapshot, the request returns `-32603` instead of unverified text.
+The projection budget is 4 MiB of returned messages and 10,000 raw history items, including omitted tools and
+reasoning. The item boundary is independent of page size or response speed. Item pages request up to 100 items
+and can prefetch one page; the newest-item boundary uses one separate request. Legacy reads accept at most
+64 MiB of uncompressed rollout data. These fixed limits preserve complete messages with `truncated: true`,
+including an empty message list if no text fits.
+
+A shared 60-second deadline bounds history reading and final metadata verification.
+Reaching it returns `-32603` with `data.reason: "transcriptReadTimeout"` and no
+snapshot to cache. The client should retry later with backoff, rather than retrying immediately. Time spent
+waiting never changes a successful snapshot's revision, messages, or `truncated` flag.
 Cancellation returns `-32800` promptly while waiting for metadata or history and stops further paging.
 The app-server has no history-read cancellation RPC, so an already submitted read can finish in the
 background; its late result or error is handled without producing another response or continuing the scan.

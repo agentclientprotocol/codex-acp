@@ -96,7 +96,7 @@ describe("stored transcript text", () => {
         pending.reject(new Error("Late history failure"));
     });
 
-    it.each(["paginated", "legacy"] as const)("returns a partial snapshot when a pending %s read reaches the time budget", async historyMode => {
+    it.each(["paginated", "legacy"] as const)("rejects a pending %s read at the deadline without returning a cacheable snapshot", async historyMode => {
         const {client, thread, backend} = await stored();
         thread.historyMode = historyMode;
         vi.useFakeTimers();
@@ -110,12 +110,11 @@ describe("stored transcript text", () => {
             entered.resolve();
             return pending.promise;
         });
-        const snapshot = readTranscriptText(client, thread, "transcriptTextSnapshot");
+        const timedOut = expect(readTranscriptText(client, thread, "transcriptTextSnapshot"))
+            .rejects.toMatchObject({code: -32603, data: {reason: "transcriptReadTimeout"}});
         await entered.promise;
-        await vi.advanceTimersByTimeAsync(5_000);
-        const result = await snapshot;
-        expect(result).toMatchObject({messages: [], truncated: true});
-        expect(result?.revision).toEqual(expect.any(String));
+        await vi.advanceTimersByTimeAsync(60_000);
+        await timedOut;
         pending.reject(new Error("Late history failure"));
     });
 
@@ -128,15 +127,31 @@ describe("stored transcript text", () => {
         expect(backend.mock.calls).toEqual([["thread/read", {threadId: thread.id, includeTurns: false}]]);
     });
 
+    it("bounds legacy projections by raw items, including omitted tools", async () => {
+        const {client, thread, backend} = await stored();
+        thread.historyMode = "legacy";
+        const items = [
+            {type: "agentMessage", id: "first", text: "Retained text"},
+            ...Array.from({length: 9_999}, (_, index) => ({type: "commandExecution", id: `tool-${index}`})),
+            {type: "agentMessage", id: "last", text: "Beyond the item budget"},
+        ];
+        backend.mockImplementation(async (_method: string, params: any) => ({
+            thread: {...thread, turns: params.includeTurns ? [{items}] : []},
+        }));
+        expect(await readTranscriptText(client, thread, "transcriptTextSnapshot"))
+            .toMatchObject({messages: [{role: "assistant", text: "Retained text"}], truncated: true});
+    });
+
     it("fails rather than returning text when final metadata verification times out", async () => {
         const {client, thread, backend} = await stored();
         vi.useFakeTimers();
         const pending = deferred<any>();
         const entered = deferred<void>();
         backend.mockImplementation(() => { entered.resolve(); return pending.promise; });
-        const rejected = expect(readTranscriptText(client, thread, "transcriptRevision")).rejects.toThrow("scan budget");
+        const rejected = expect(readTranscriptText(client, thread, "transcriptRevision"))
+            .rejects.toMatchObject({code: -32603, data: {reason: "transcriptReadTimeout"}});
         await entered.promise;
-        await vi.advanceTimersByTimeAsync(5_000);
+        await vi.advanceTimersByTimeAsync(60_000);
         await rejected;
         pending.reject(new Error("Late metadata failure"));
     });

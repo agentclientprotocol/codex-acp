@@ -175,15 +175,13 @@ const HISTORY_PAGE_TIMEOUT_MS = 60_000;
 
 export interface HistoryReadOptions {
     signal?: AbortSignal;
-    /** Forward pages, excluding the newest-item boundary request. */
-    maxPages?: number;
     /** Unix time in milliseconds. */
     deadline?: number;
 }
 
-export class HistoryReadLimitError extends Error {
-    constructor() {
-        super("The thread history read reached its scan budget");
+export class HistoryReadTimeoutError extends Error {
+    constructor(message = "The thread history read timed out") {
+        super(message);
     }
 }
 
@@ -1570,13 +1568,8 @@ async function* historyPages<T>(
     options: HistoryReadOptions = {},
 ): AsyncGenerator<T[]> {
     type Page = {data: T[]; nextCursor: string | null};
-    let pages = 0;
     const request = (cursor: string | null): Promise<Page> => {
-        const page = withHistoryTimeout(() => {
-            if (options.maxPages !== undefined && pages >= options.maxPages) throw new HistoryReadLimitError();
-            pages++;
-            return requestPage(cursor);
-        }, method, threadId, options);
+        const page = withHistoryTimeout(() => requestPage(cursor), method, threadId, options);
         // A caller that stops early never reads the next page. Its failure is not an unhandled rejection.
         page.catch(() => {});
         return page;
@@ -1604,12 +1597,12 @@ async function* historyPages<T>(
 async function withHistoryTimeout<T>(read: () => Promise<T>, method: string, threadId: string, options: HistoryReadOptions = {}): Promise<T> {
     throwIfRequestCancelled(options.signal);
     const remaining = options.deadline === undefined ? Infinity : options.deadline - Date.now();
-    if (remaining <= 0) throw new HistoryReadLimitError();
+    if (remaining <= 0) throw new HistoryReadTimeoutError();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(remaining <= HISTORY_PAGE_TIMEOUT_MS ? new HistoryReadLimitError() : new Error(
-            `Codex did not answer ${method} for thread ${threadId} within ${HISTORY_PAGE_TIMEOUT_MS / 1000} s`,
-        )), Math.min(remaining, HISTORY_PAGE_TIMEOUT_MS));
+        const message = remaining <= HISTORY_PAGE_TIMEOUT_MS ? undefined
+            : `Codex did not answer ${method} for thread ${threadId} within ${HISTORY_PAGE_TIMEOUT_MS / 1000} s`;
+        timer = setTimeout(() => reject(new HistoryReadTimeoutError(message)), Math.min(remaining, HISTORY_PAGE_TIMEOUT_MS));
     });
     try {
         // App-server history reads have no cancel RPC. Stop waiting and handle their eventual response.
